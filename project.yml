@@ -1,0 +1,221 @@
+name: Murmur
+options:
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  developmentLanguage: en
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    SWIFT_EMIT_LOC_STRINGS: YES
+    ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: YES
+packages:
+  MurmurKit:
+    path: Packages/MurmurKit
+  Supabase:
+    url: https://github.com/supabase/supabase-swift
+    from: 2.55.3
+
+targets:
+  Murmur:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes:
+          - "**/*.md"
+      - path: Shared
+    dependencies:
+      - package: MurmurKit
+        product: MurmurCore
+      - package: MurmurKit
+        product: MurmurUI
+      - package: Supabase
+        product: Supabase
+      - target: MurmurKeyboard
+      - target: MurmurWidgets
+    settings:
+      base:
+        PRODUCT_NAME: Murmur
+        PRODUCT_BUNDLE_IDENTIFIER: $(MURMUR_BUNDLE_PREFIX).murmur
+        CODE_SIGN_STYLE: $(MURMUR_SIGN_STYLE)
+        PROVISIONING_PROFILE_SPECIFIER: $(MURMUR_PROFILE_APP)
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: $(MURMUR_APP_NAME)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+          UIImageName: LaunchLogo
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIBackgroundModes:
+          - audio
+        NSMicrophoneUsageDescription: Murmur listens only while you dictate, to turn your speech into text on your iPhone.
+        NSSupportsLiveActivities: true
+        CFBundleURLTypes:
+          - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
+            CFBundleURLSchemes:
+              - $(MURMUR_URL_SCHEME)
+        LSApplicationQueriesSchemes:
+          - mobilenotes
+          - sms
+          - message
+          - whatsapp
+          - tg
+          - fb-messenger
+          - slack
+          - msteams
+          - discord
+          - notion
+          - obsidian
+          - bear
+          - evernote
+          - googlegmail
+          - ms-outlook
+          - linkedin
+          - chatgpt
+          - claude
+          - perplexity-app
+        UIAppFonts:
+          - EBGaramond-Regular.ttf
+          - EBGaramond-Medium.ttf
+          - EBGaramond-Italic.ttf
+          - Figtree-Regular.ttf
+          - Figtree-Medium.ttf
+          - Figtree-SemiBold.ttf
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        MurmurAppGroupID: $(MURMUR_APP_GROUP)
+        MurmurURLScheme: $(MURMUR_URL_SCHEME)
+        MurmurSupabaseHost: $(SUPABASE_HOST)
+        MurmurSupabaseAnonKey: $(SUPABASE_ANON_KEY)
+    entitlements:
+      path: App/Murmur.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(MURMUR_APP_GROUP)
+
+  MurmurKeyboard:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Keyboard
+    dependencies:
+      - package: MurmurKit
+        product: MurmurCore
+    settings:
+      base:
+        PRODUCT_NAME: MurmurKeyboard
+        PRODUCT_BUNDLE_IDENTIFIER: $(MURMUR_BUNDLE_PREFIX).murmur.keyboard
+        CODE_SIGN_STYLE: $(MURMUR_SIGN_STYLE)
+        PROVISIONING_PROFILE_SPECIFIER: $(MURMUR_PROFILE_KEYBOARD)
+        APPLICATION_EXTENSION_API_ONLY: YES
+    info:
+      path: Keyboard/Info.plist
+      properties:
+        CFBundleDisplayName: $(MURMUR_APP_NAME)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          NSExtensionAttributes:
+            IsASCIICapable: true
+            PrefersRightToLeft: false
+            PrimaryLanguage: en-US
+            RequestsOpenAccess: true
+        MurmurAppGroupID: $(MURMUR_APP_GROUP)
+        MurmurURLScheme: $(MURMUR_URL_SCHEME)
+    entitlements:
+      path: Keyboard/MurmurKeyboard.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(MURMUR_APP_GROUP)
+
+  MurmurWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widgets
+      - path: Shared
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    settings:
+      base:
+        PRODUCT_NAME: MurmurWidgets
+        PRODUCT_BUNDLE_IDENTIFIER: $(MURMUR_BUNDLE_PREFIX).murmur.widgets
+        CODE_SIGN_STYLE: $(MURMUR_SIGN_STYLE)
+        PROVISIONING_PROFILE_SPECIFIER: $(MURMUR_PROFILE_WIDGETS)
+        APPLICATION_EXTENSION_API_ONLY: YES
+    info:
+      path: Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: $(MURMUR_APP_NAME)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        MurmurAppGroupID: $(MURMUR_APP_GROUP)
+        MurmurURLScheme: $(MURMUR_URL_SCHEME)
+    entitlements:
+      path: Widgets/MurmurWidgets.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - $(MURMUR_APP_GROUP)
+
+  MurmurTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests/MurmurTests
+    dependencies:
+      - target: Murmur
+      - package: MurmurKit
+        product: MurmurCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MURMUR_BUNDLE_PREFIX).murmur.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  Murmur:
+    build:
+      targets:
+        Murmur: all
+        MurmurTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - MurmurTests
+        - package: MurmurKit/MurmurCoreTests
+    archive:
+      config: Release
+  MurmurKeyboard:
+    build:
+      targets:
+        MurmurKeyboard: all
+        Murmur: all
+    run:
+      config: Debug
+      askForAppToLaunch: true
+      launchAutomaticallySubstyle: "2"

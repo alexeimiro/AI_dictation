@@ -1,0 +1,6 @@
+// Copy to Config/Local.xcconfig (gitignored) and fill in.
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+
+// Supabase project host without scheme, e.g. abcdefghij.supabase.co
+SUPABASE_HOST =
+SUPABASE_ANON_KEY =

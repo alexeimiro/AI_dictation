@@ -1,0 +1,28 @@
+// Shared build settings for every Murmur target.
+// Per-machine values (team, backend keys) go in Local.xcconfig, which is gitignored.
+// Copy Local.xcconfig.example to Local.xcconfig to get started.
+
+// Branding — rename the app by changing these (plus Brand.swift).
+MURMUR_APP_NAME = Murmur
+MURMUR_BUNDLE_PREFIX = com.antonmironenko
+MURMUR_URL_SCHEME = murmur
+MURMUR_APP_GROUP = group.$(MURMUR_BUNDLE_PREFIX).murmur
+
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+IPHONEOS_DEPLOYMENT_TARGET = 26.0
+SWIFT_VERSION = 6.0
+DEVELOPMENT_TEAM =
+
+// Signing. Simulator/default builds use automatic signing. scripts/device_build.sh switches to
+// manual signing with the development profiles created by scripts/provision_dev.mjs.
+MURMUR_SIGN_STYLE = Automatic
+MURMUR_PROFILE_APP =
+MURMUR_PROFILE_KEYBOARD =
+MURMUR_PROFILE_WIDGETS =
+
+// Backend. xcconfig treats `//` as a comment, so store the host only (e.g. abcd.supabase.co).
+SUPABASE_HOST =
+SUPABASE_ANON_KEY =
+
+#include? "Local.xcconfig"
