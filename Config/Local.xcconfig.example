@@ -1,6 +1,11 @@
 // Copy to Config/Local.xcconfig (gitignored) and fill in.
 DEVELOPMENT_TEAM = YOUR_TEAM_ID
 
-// Supabase project host without scheme, e.g. abcdefghij.supabase.co
+// Supabase host without scheme. Hosted project: abcdefghij.supabase.co (https).
+// Local stack reached from an iPhone on the same Wi-Fi: host[:port] of this Mac, e.g.
+// 192.168.1.20:54321 or my-mac.local:54321 (LAN IP: `ipconfig getifaddr en0`; on a 172.16-31.x
+// network use `$(scutil --get LocalHostName).local:54321`). Hosts starting with 127., localhost,
+// 192.168., 10. or containing .local are reached over http. The anon key for the local stack
+// comes from `supabase status -o env` (ANON_KEY).
 SUPABASE_HOST =
 SUPABASE_ANON_KEY =

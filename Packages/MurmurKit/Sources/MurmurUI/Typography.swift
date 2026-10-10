@@ -42,3 +42,11 @@ extension Font {
         return .custom(name, size: size, relativeTo: style)
     }
 }
+
+extension Font {
+    /// User content (transcripts, language names): the system font, which covers every script the
+    /// recognizer can produce. Figtree has no Cyrillic glyphs.
+    public static func transcript(_ style: Font.TextStyle = .body) -> Font {
+        .system(style)
+    }
+}

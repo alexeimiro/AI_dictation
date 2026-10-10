@@ -4,7 +4,7 @@ import Supabase
 
 /// Calls the `cleanup` Edge Function (Claude) with the on-device transcript.
 @MainActor
-final class CleanupClient {
+final class CleanupClient: Cleaning {
     struct Response: Decodable, Sendable {
         let text: String
         /// "cleaned", or "raw" when the model output was unusable and the transcript came back.
@@ -43,8 +43,10 @@ final class CleanupClient {
     }
 
     private let backend: Backend?
-    /// Leaves ~2 s for the server's own 6 s model timeout plus network.
-    private let timeout: TimeInterval = 8
+    /// The server bounds the whole model call at 9 s (`CLEANUP_DEADLINE_MS`); this leaves ~2 s
+    /// for the edge function and the network. Russian costs more tokens per word, so long
+    /// dictations use most of it.
+    private let timeout: TimeInterval = 11
 
     init(backend: Backend?) {
         self.backend = backend

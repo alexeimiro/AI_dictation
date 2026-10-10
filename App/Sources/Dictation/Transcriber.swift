@@ -7,8 +7,16 @@ import MurmurCore
 protocol Transcriber: AnyObject, Sendable {
     var displayName: String { get }
 
-    /// Called once when the session starts, while the app is in the foreground.
-    func prepare(micFormat: AVAudioFormat, locale: Locale) async throws
+    /// The language the next dictation will be recognized in.
+    var currentLanguage: ResolvedLanguage? { get }
+
+    /// Called when the session starts, while the app is in the foreground, and again on
+    /// reconnect (the mic format can change with the audio route).
+    func prepare(micFormat: AVAudioFormat, language: ResolvedLanguage) async throws
+
+    /// Switches the language for the next dictation. Only valid between dictations; the new
+    /// model is prepared in the background and `finishUtterance` waits for it.
+    func setLanguage(_ language: ResolvedLanguage)
 
     /// Starts a dictation. Synchronous so no audio is lost: buffers delivered through `append`
     /// right after this call belong to the new dictation.
@@ -27,9 +35,12 @@ protocol Transcriber: AnyObject, Sendable {
 }
 
 enum TranscriberEngine: String, CaseIterable, Identifiable {
-    /// Apple SpeechAnalyzer + SpeechTranscriber (iOS 26 model). Default.
+    /// Per language: SpeechTranscriber when it supports the language and passes validation,
+    /// otherwise DictationTranscriber. Default.
+    case auto
+    /// Force Apple SpeechAnalyzer + SpeechTranscriber (iOS 26 model) for every language.
     case speechTranscriber
-    /// Apple SpeechAnalyzer + DictationTranscriber (supports contextual strings).
+    /// Force Apple SpeechAnalyzer + DictationTranscriber (supports contextual strings).
     case dictationTranscriber
     /// No recognition: returns a test sentence. For exercising the IPC path.
     case stub
@@ -38,6 +49,7 @@ enum TranscriberEngine: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .auto: "Automatic (recommended)"
         case .speechTranscriber: "SpeechTranscriber"
         case .dictationTranscriber: "DictationTranscriber"
         case .stub: "Stub (no ASR)"
@@ -45,15 +57,15 @@ enum TranscriberEngine: String, CaseIterable, Identifiable {
     }
 
     static var current: TranscriberEngine {
-        SharedSettings.shared.transcriberEngine.flatMap(TranscriberEngine.init(rawValue:))
-            ?? .speechTranscriber
+        SharedSettings.shared.transcriberEngine.flatMap(TranscriberEngine.init(rawValue:)) ?? .auto
     }
 
-    func make(contextualStrings: [String]) -> Transcriber {
+    /// Debug: the engine forced for every language, or nil for automatic selection.
+    var kindOverride: AppleSpeechTranscriber.Kind? {
         switch self {
-        case .speechTranscriber: AppleSpeechTranscriber(kind: .speech, contextualStrings: [])
-        case .dictationTranscriber: AppleSpeechTranscriber(kind: .dictation, contextualStrings: contextualStrings)
-        case .stub: StubTranscriber()
+        case .speechTranscriber: .speech
+        case .dictationTranscriber: .dictation
+        case .auto, .stub: nil
         }
     }
 }
@@ -66,9 +78,21 @@ final class StubTranscriber: Transcriber, @unchecked Sendable {
     private var frames: AVAudioFramePosition = 0
     private var sampleRate: Double = 48_000
     private var utteranceCount = 0
+    private var language: ResolvedLanguage?
 
-    func prepare(micFormat: AVAudioFormat, locale: Locale) async throws {
-        lock.withLock { sampleRate = micFormat.sampleRate }
+    var currentLanguage: ResolvedLanguage? {
+        lock.withLock { language }
+    }
+
+    func prepare(micFormat: AVAudioFormat, language: ResolvedLanguage) async throws {
+        lock.withLock {
+            sampleRate = micFormat.sampleRate
+            self.language = language
+        }
+    }
+
+    func setLanguage(_ language: ResolvedLanguage) {
+        lock.withLock { self.language = language }
     }
 
     func beginUtterance() {
@@ -83,8 +107,8 @@ final class StubTranscriber: Transcriber, @unchecked Sendable {
     }
 
     func finishUtterance() async throws -> String {
-        let (count, seconds) = lock.withLock { (utteranceCount, Double(frames) / sampleRate) }
-        return String(format: "Test dictation number %d, %.1f seconds of audio.", count, seconds)
+        let (count, seconds, tag) = lock.withLock { (utteranceCount, Double(frames) / sampleRate, language?.tag ?? "?") }
+        return String(format: "Test dictation number %d in %@, %.1f seconds of audio.", count, tag, seconds)
     }
 
     func cancelUtterance() async {}

@@ -64,9 +64,38 @@ struct KeyboardToolbar: View {
             case .starting:
                 caption("Starting…")
             case .idle, .listening, .processing:
-                stylePill
+                HStack(spacing: 6) {
+                    stylePill
+                    if model.secondaryLanguage != nil {
+                        languagePill
+                    }
+                }
             }
         }
+    }
+
+    /// Switches the next dictation between the primary and secondary language.
+    private var languagePill: some View {
+        Menu {
+            ForEach(model.languageChoices) { language in
+                Button {
+                    model.actions.setLanguage(language == model.primaryLanguage ? nil : language)
+                } label: {
+                    if language == model.effectiveLanguage {
+                        Label(language.localizedName, systemImage: "checkmark")
+                    } else {
+                        Text(language.localizedName)
+                    }
+                }
+            }
+        } label: {
+            Text(model.effectiveLanguage.shortCode)
+                .font(.system(size: 13, weight: .semibold))
+                .padding(.horizontal, 9)
+                .frame(height: 30)
+                .background(.thinMaterial, in: .capsule)
+        }
+        .accessibilityLabel("Language: \(model.effectiveLanguage.localizedName)")
     }
 
     private var stylePill: some View {

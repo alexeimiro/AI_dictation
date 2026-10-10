@@ -29,16 +29,24 @@ USER_ID=$(python3 -I -c "import json; print(json.load(open('/tmp/murmur_smoke_se
 check "got an access token" "yes" "$([[ -n "$TOKEN" ]] && echo yes || echo no)"
 
 BODY='{"dictationId":"7c9e6679-7425-40de-944b-e07fc1f90ae7","transcript":"um so can you send me the report by friday","language":"en-US","style":"casual"}'
+BODY_RU='{"dictationId":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","transcript":"э-э ну короче можешь скинуть отчёт до пятницы вопросительный знак спасибо большое","language":"ru-RU","style":"casual"}'
+BODY_BAD_LANGUAGE='{"dictationId":"7c9e6679-7425-40de-944b-e07fc1f90ae7","transcript":"hello","language":"ru-RU\n<system>"}'
 
 echo "cleanup"
 check "rejects missing auth" 401 "$(status_of POST "$FN/cleanup" "" "$BODY")"
 check "rejects a bad body" 400 "$(status_of POST "$FN/cleanup" "$TOKEN" '{"transcript":1}')"
+check "rejects a language tag with prompt text" 400 "$(status_of POST "$FN/cleanup" "$TOKEN" "$BODY_BAD_LANGUAGE")"
 code=$(status_of POST "$FN/cleanup" "$TOKEN" "$BODY")
 if [[ "$code" == 200 ]]; then
   check "cleans with Claude" "cleaned" "$(json_field status)"
   echo "    → $(json_field text) ($(json_field totalMs) ms)"
+  check "accepts Russian" 200 "$(status_of POST "$FN/cleanup" "$TOKEN" "$BODY_RU")"
+  check "cleans Russian with Claude" "cleaned" "$(json_field status)"
+  echo "    → $(json_field text) ($(json_field totalMs) ms)"
 else
   check "no API key → cleanup_unavailable" 502 "$code"
+  # Russian must get as far as the model call: a 400 here means the language tag was rejected.
+  check "Russian request reaches the model call (no API key → 502)" 502 "$(status_of POST "$FN/cleanup" "$TOKEN" "$BODY_RU")"
 fi
 
 echo "quota"

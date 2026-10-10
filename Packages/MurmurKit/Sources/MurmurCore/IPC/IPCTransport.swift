@@ -36,6 +36,7 @@ public final class IPCPayloadStore: @unchecked Sendable {
     private var keyboardStatusURL: URL { container.url("keyboard-status.json") }
     private var launchTokenURL: URL { container.url("launch-token.json") }
     private var pendingStartURL: URL { container.url("pending-start.json") }
+    private var sessionFailureURL: URL { container.url("session-failure.json") }
     private var resultsDirectory: URL { container.directory("results") }
     private var claimsDirectory: URL { container.directory("claimed") }
 
@@ -115,6 +116,20 @@ public final class IPCPayloadStore: @unchecked Sendable {
 
     public func clearPendingStart() {
         JSONFile.remove(pendingStartURL)
+    }
+
+    // MARK: Session failure (app → keyboard)
+
+    public func write(sessionFailure: SessionFailure) throws {
+        try JSONFile.write(sessionFailure, to: sessionFailureURL)
+    }
+
+    public func readSessionFailure() -> SessionFailure? {
+        JSONFile.read(SessionFailure.self, from: sessionFailureURL)
+    }
+
+    public func clearSessionFailure() {
+        JSONFile.remove(sessionFailureURL)
     }
 
     // MARK: Housekeeping

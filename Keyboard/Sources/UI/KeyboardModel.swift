@@ -12,6 +12,10 @@ final class KeyboardModel {
     var hasFullAccess = false
     var styleOverride: StylePreset?
     var defaultStyle: StylePreset = .casual
+    var primaryLanguage = DictationLanguage.englishUS
+    /// Set only when a verified secondary language exists; shows the language pill.
+    var secondaryLanguage: DictationLanguage?
+    var languageOverride: DictationLanguage?
     /// Recent mic levels for the waveform, oldest first.
     var levels: [Double] = Array(repeating: 0.06, count: 30)
     var debugMemory: String?
@@ -27,6 +31,7 @@ final class KeyboardModel {
         var dismissNotice: () -> Void = {}
         var openApp: () -> Void = {}
         var setStyle: (StylePreset?) -> Void = { _ in }
+        var setLanguage: (DictationLanguage?) -> Void = { _ in }
     }
 
     var isCapturing: Bool {
@@ -41,6 +46,12 @@ final class KeyboardModel {
     }
 
     var effectiveStyle: StylePreset { styleOverride ?? defaultStyle }
+
+    var effectiveLanguage: DictationLanguage { languageOverride ?? primaryLanguage }
+
+    var languageChoices: [DictationLanguage] {
+        [primaryLanguage] + (secondaryLanguage.map { [$0] } ?? [])
+    }
 
     func update(from client: KeyboardSessionClient) {
         phase = client.phase

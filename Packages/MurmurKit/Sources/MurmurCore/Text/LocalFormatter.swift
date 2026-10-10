@@ -30,16 +30,19 @@ public struct SnippetDefinition: Codable, Sendable, Equatable, Hashable, Identif
 public struct LocalFormatter: Sendable {
     public var dictionary: [DictionaryTerm]
     public var snippets: [SnippetDefinition]
+    /// BCP-47 tag of the dictation; nil applies the English rules only.
+    public var language: String?
 
-    public init(dictionary: [DictionaryTerm] = [], snippets: [SnippetDefinition] = []) {
+    public init(dictionary: [DictionaryTerm] = [], snippets: [SnippetDefinition] = [], language: String? = nil) {
         self.dictionary = dictionary
         self.snippets = snippets
+        self.language = language
     }
 
     public func format(_ raw: String) -> String {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return "" }
-        text = Self.removeFillers(text)
+        text = Self.removeFillers(text, language: language)
         text = applyDictionary(text)
         text = applySnippets(text)
         text = Self.collapseWhitespace(text)
@@ -48,10 +51,27 @@ public struct LocalFormatter: Sendable {
 
     // MARK: Steps
 
-    static func removeFillers(_ text: String) -> String {
-        // "um", "uh", "erm", "uhm", "hmm" as whole words. "so, uh, we" keeps one comma: "so, we".
-        guard let regex = try? NSRegularExpression(
-            pattern: #"(?i)(,)?\s*\b(?:u+m+|u+h+|e+r+m+|u+h+m+|h+m+)\b\s*(,)?"#) else { return text }
+    /// English hesitations are removed for every language (bilingual speakers say "um" too);
+    /// the Russian ones only when the dictation is Russian.
+    static func removeFillers(_ text: String, language: String? = nil) -> String {
+        var output = removeMatches(of: englishFillers, in: text)
+        if let language, DictationLanguage(tag: language).isRussian {
+            output = removeMatches(of: russianFillers, in: output)
+        }
+        return output
+    }
+
+    /// "um", "uh", "erm", "uhm", "hmm" as whole words. "so, uh, we" keeps one comma: "so, we".
+    private static let englishFillers = #"(?i)(,)?\s*\b(?:u+m+|u+h+|e+r+m+|u+h+m+|h+m+)\b\s*(,)?"#
+
+    /// Vocalized hesitations only: "э", "э-э", "эм", "мм", "хм", "гм". Words such as "ну", "вот",
+    /// "типа" or "короче" are left alone because they are often meaningful; the AI cleanup
+    /// decides about those.
+    private static let russianFillers =
+        #"(?i)(,)?\s*(?<![\p{L}\p{N}])(?:э+м*|э(?:-э)+м*|м{2,}|х+м+|гм+)(?![\p{L}\p{N}-])\s*(,)?"#
+
+    private static func removeMatches(of pattern: String, in text: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
         let nsText = text as NSString
         var output = ""
         var cursor = 0
@@ -86,7 +106,7 @@ public struct LocalFormatter: Sendable {
     // MARK: Helpers
 
     static func replaceWholePhrase(_ phrase: String, with replacement: String, in text: String) -> String {
-        let escaped = NSRegularExpression.escapedPattern(for: phrase)
+        let escaped = yoInsensitive(NSRegularExpression.escapedPattern(for: phrase))
         guard let regex = try? NSRegularExpression(
             pattern: #"(?<![\p{L}\p{N}])"# + escaped + #"(?![\p{L}\p{N}])"#, options: [.caseInsensitive]) else {
             return text
@@ -94,6 +114,20 @@ public struct LocalFormatter: Sendable {
         let range = NSRange(text.startIndex..., in: text)
         return regex.stringByReplacingMatches(
             in: text, range: range, withTemplate: NSRegularExpression.escapedTemplate(for: replacement))
+    }
+
+    /// Russian "ё" is routinely written and recognized as "е", so a term matches either spelling.
+    /// The replacement keeps the dictionary's own spelling.
+    private static func yoInsensitive(_ pattern: String) -> String {
+        var output = ""
+        for character in pattern {
+            switch character {
+            case "е", "ё": output += "[её]"
+            case "Е", "Ё": output += "[ЕЁ]"
+            default: output.append(character)
+            }
+        }
+        return output
     }
 
     static func collapseWhitespace(_ text: String) -> String {

@@ -1,3 +1,4 @@
+import MurmurUI
 import SwiftUI
 
 @main
@@ -9,6 +10,7 @@ struct MurmurApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
+                .modelContainer(model.history.container)
                 .onOpenURL { model.handle($0) }
                 .onChange(of: scenePhase) { _, newPhase in
                     model.scenePhaseChanged(newPhase)
@@ -22,16 +24,28 @@ struct RootView: View {
 
     var body: some View {
         @Bindable var model = model
-        DebugHomeView()
-            .fullScreenCover(isPresented: $model.showSwipeBack) {
-                SwipeBackView()
-            }
-            .confirmationDialog("Turn on Murmur?", isPresented: $model.confirmUntrustedStart,
-                                titleVisibility: .visible) {
-                Button("Turn On") { model.startSessionFromKeyboard() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("A link asked Murmur to start listening.")
-            }
+        @Bindable var router = model.router
+        NavigationStack(path: $router.path) {
+            HomeView()
+                .navigationDestination(for: Route.self) { route in
+                    switch route {
+                    case .settings: SettingsView()
+                    case .languages: LanguagesView()
+                    case .debug: DebugView()
+                    case .transcript(let id): TranscriptDetailView(id: id)
+                    }
+                }
+        }
+        .tint(Palette.ink)
+        .fullScreenCover(isPresented: $model.showSwipeBack) {
+            SwipeBackView()
+        }
+        .confirmationDialog("Turn on Murmur?", isPresented: $model.confirmUntrustedStart,
+                            titleVisibility: .visible) {
+            Button("Turn On") { model.startSessionFromKeyboard() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("A link asked Murmur to start listening.")
+        }
     }
 }

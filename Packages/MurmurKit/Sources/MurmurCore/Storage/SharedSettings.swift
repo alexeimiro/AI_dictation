@@ -38,6 +38,21 @@ public enum KeyboardLayoutPreference: String, Codable, Sendable, CaseIterable {
     case qwerty
 }
 
+/// Which on-device recognizer passed validation for a language on this device, so the check isn't
+/// repeated at every session start.
+public struct VerifiedEngineRecord: Codable, Sendable, Equatable {
+    /// "speech" (SpeechTranscriber) or "dictation" (DictationTranscriber).
+    public var engine: String
+    public var osVersion: String
+    public var verifiedAt: Date
+
+    public init(engine: String, osVersion: String, verifiedAt: Date) {
+        self.engine = engine
+        self.osVersion = osVersion
+        self.verifiedAt = verifiedAt
+    }
+}
+
 /// Settings shared between the app and the keyboard via App Group `UserDefaults`.
 /// These change rarely; fast-changing state goes through `HotState` instead.
 public final class SharedSettings: @unchecked Sendable {
@@ -51,7 +66,10 @@ public final class SharedSettings: @unchecked Sendable {
 
     private enum Key: String {
         case disableAfter, keyboardLayout, keyboardFeedback, interactionSounds, defaultStyle
-        case useBuiltInMic, aiCleanupEnabled, dictationLocale, transcriberEngine
+        case useBuiltInMic, aiCleanupEnabled, transcriberEngine, liveActivities, transcriptRetention
+        case primaryLanguage, secondaryLanguage, verifiedEngines
+        /// Phase 1 single-language setting, migrated into `primaryLanguage`.
+        case dictationLocale
     }
 
     public var disableAfter: DisableAfter {
@@ -92,16 +110,57 @@ public final class SharedSettings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Key.aiCleanupEnabled.rawValue) }
     }
 
-    /// BCP-47 identifier of the dictation language, or nil for the device language.
-    public var dictationLocale: String? {
-        get { defaults.string(forKey: Key.dictationLocale.rawValue) }
-        set { defaults.set(newValue, forKey: Key.dictationLocale.rawValue) }
+    /// Show the session in a Live Activity (Lock Screen / Dynamic Island). App-only.
+    public var liveActivities: Bool {
+        get { bool(.liveActivities, default: true) }
+        set { defaults.set(newValue, forKey: Key.liveActivities.rawValue) }
     }
 
-    /// Debug: which on-device recognizer to use (see the Phase 1b spike).
+    /// Auto-delete transcripts older than this. App-only; applied by the history store.
+    public var transcriptRetention: TranscriptRetention {
+        get { enumValue(.transcriptRetention) ?? .month }
+        set { defaults.set(newValue.rawValue, forKey: Key.transcriptRetention.rawValue) }
+    }
+
+    /// BCP-47 tag of the main dictation language. Nil until one is chosen or resolved from the
+    /// device's preferred languages; the app persists the resolved value so the keyboard sees it.
+    public var primaryLanguage: String? {
+        get {
+            if let tag = defaults.string(forKey: Key.primaryLanguage.rawValue) { return tag }
+            guard let legacy = defaults.string(forKey: Key.dictationLocale.rawValue) else { return nil }
+            let tag = DictationLanguage.normalize(legacy)
+            defaults.set(tag, forKey: Key.primaryLanguage.rawValue)
+            defaults.removeObject(forKey: Key.dictationLocale.rawValue)
+            return tag
+        }
+        set { setString(newValue.map(DictationLanguage.normalize), for: .primaryLanguage) }
+    }
+
+    /// Optional second language, switchable per dictation from the keyboard's language pill.
+    public var secondaryLanguage: String? {
+        get { defaults.string(forKey: Key.secondaryLanguage.rawValue) }
+        set { setString(newValue.map(DictationLanguage.normalize), for: .secondaryLanguage) }
+    }
+
+    /// Per-language record of the engine that passed validation on this device, keyed by tag.
+    public var verifiedEngines: [String: VerifiedEngineRecord] {
+        get {
+            guard let data = defaults.data(forKey: Key.verifiedEngines.rawValue) else { return [:] }
+            return (try? JSONDecoder().decode([String: VerifiedEngineRecord].self, from: data)) ?? [:]
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                defaults.set(data, forKey: Key.verifiedEngines.rawValue)
+            } else {
+                defaults.removeObject(forKey: Key.verifiedEngines.rawValue)
+            }
+        }
+    }
+
+    /// Debug: force an on-device recognizer; nil means automatic per language.
     public var transcriberEngine: String? {
         get { defaults.string(forKey: Key.transcriberEngine.rawValue) }
-        set { defaults.set(newValue, forKey: Key.transcriberEngine.rawValue) }
+        set { setString(newValue, for: .transcriberEngine) }
     }
 
     private func bool(_ key: Key, default value: Bool) -> Bool {
@@ -110,5 +169,13 @@ public final class SharedSettings: @unchecked Sendable {
 
     private func enumValue<T: RawRepresentable>(_ key: Key) -> T? where T.RawValue == String {
         defaults.string(forKey: key.rawValue).flatMap(T.init(rawValue:))
+    }
+
+    private func setString(_ value: String?, for key: Key) {
+        if let value {
+            defaults.set(value, forKey: key.rawValue)
+        } else {
+            defaults.removeObject(forKey: key.rawValue)
+        }
     }
 }

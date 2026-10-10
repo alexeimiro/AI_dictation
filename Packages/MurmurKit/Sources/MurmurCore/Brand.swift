@@ -23,6 +23,14 @@ public enum Brand {
         return components.url!
     }
 
+    /// Deep link the keyboard's Settings button opens (`murmur://settings`).
+    public static var settingsURL: URL {
+        var components = URLComponents()
+        components.scheme = urlScheme
+        components.host = "settings"
+        return components.url!
+    }
+
     private static func infoValue(_ key: String) -> String? {
         guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
               !value.isEmpty, !value.hasPrefix("$(") else { return nil }

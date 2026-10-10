@@ -138,7 +138,8 @@ targets:
           NSExtensionAttributes:
             IsASCIICapable: true
             PrefersRightToLeft: false
-            PrimaryLanguage: en-US
+            # "mul": a keyboard for several languages (Russian and English dictation).
+            PrimaryLanguage: mul
             RequestsOpenAccess: true
         MurmurAppGroupID: $(MURMUR_APP_GROUP)
         MurmurURLScheme: $(MURMUR_URL_SCHEME)

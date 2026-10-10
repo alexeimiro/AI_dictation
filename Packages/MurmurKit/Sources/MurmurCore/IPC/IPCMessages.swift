@@ -13,10 +13,12 @@ public struct KeyboardCommand: Codable, Sendable, Equatable {
     /// `textDocumentProxy.documentIdentifier` of the field being dictated into.
     public var documentIdentifier: UUID?
     public var styleOverride: StylePreset?
+    /// BCP-47 tag chosen in the keyboard's language pill; nil means the primary language.
+    public var languageOverride: String?
 
     public init(
         id: UUID = UUID(), requestId: UUID, kind: CommandKind, createdAt: Date,
-        documentIdentifier: UUID? = nil, styleOverride: StylePreset? = nil
+        documentIdentifier: UUID? = nil, styleOverride: StylePreset? = nil, languageOverride: String? = nil
     ) {
         self.id = id
         self.requestId = requestId
@@ -24,6 +26,7 @@ public struct KeyboardCommand: Codable, Sendable, Equatable {
         self.createdAt = createdAt
         self.documentIdentifier = documentIdentifier
         self.styleOverride = styleOverride
+        self.languageOverride = languageOverride
     }
 }
 
@@ -66,9 +69,13 @@ public struct DictationResult: Codable, Sendable, Equatable {
     public var message: String?
     public var createdAt: Date
     public var metrics: DictationMetrics?
+    /// BCP-47 tag of the language the dictation was recognized in, so the keyboard can apply the
+    /// matching joining rules without reading settings.
+    public var language: String?
 
     public init(requestId: UUID, documentIdentifier: UUID?, text: String, status: ResultStatus,
-                message: String? = nil, createdAt: Date, metrics: DictationMetrics? = nil) {
+                message: String? = nil, createdAt: Date, metrics: DictationMetrics? = nil,
+                language: String? = nil) {
         self.requestId = requestId
         self.documentIdentifier = documentIdentifier
         self.text = text
@@ -76,10 +83,25 @@ public struct DictationResult: Codable, Sendable, Equatable {
         self.message = message
         self.createdAt = createdAt
         self.metrics = metrics
+        self.language = language
     }
 
+    /// `limitReached` still carries the locally formatted text, so the dictation isn't lost; the
+    /// keyboard inserts it and then shows the message.
     public var isInsertable: Bool {
-        (status == .cleaned || status == .raw) && !text.isEmpty
+        (status == .cleaned || status == .raw || status == .limitReached) && !text.isEmpty
+    }
+}
+
+/// Why the app's session failed to start (e.g. a language model isn't downloaded). Written by the
+/// app next to publishing `SessionStatus.error`, so the keyboard can show the reason.
+public struct SessionFailure: Codable, Sendable, Equatable {
+    public var message: String
+    public var createdAt: Date
+
+    public init(message: String, createdAt: Date) {
+        self.message = message
+        self.createdAt = createdAt
     }
 }
 

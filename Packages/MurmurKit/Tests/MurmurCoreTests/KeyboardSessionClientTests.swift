@@ -35,6 +35,11 @@ private final class FakeApp {
         transport.post(.stateChanged)
     }
 
+    func fail(message: String, at date: Date = Date()) throws {
+        try transport.payloads.write(sessionFailure: SessionFailure(message: message, createdAt: date))
+        publish(.error)
+    }
+
     func finish(_ requestId: UUID, text: String, document: UUID?) throws {
         try transport.payloads.write(result: DictationResult(
             requestId: requestId, documentIdentifier: document, text: text, status: .cleaned, createdAt: Date()))
@@ -161,6 +166,58 @@ struct KeyboardSessionClientTests {
         #expect(host.inserted.map(\.text) == ["Elsewhere."])
         client.insertPendingResult()
         #expect(host.inserted.count == 1)
+    }
+
+    @Test func sessionFailureShowsTheAppsReasonWhileOpeningTheApp() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport)
+        client.host = host
+        client.activate()
+
+        client.micTapped()
+        guard case .openingApp = client.phase else {
+            Issue.record("expected .openingApp, got \(client.phase)")
+            return
+        }
+        try app.fail(message: "Russian needs a one-time download.")
+        #expect(await waitUntil { client.phase == .notice("Russian needs a one-time download.") })
+        #expect(transport.payloads.readPendingStart() == nil)
+
+        // Dismissing the notice doesn't bring the same failure back on the next refresh.
+        client.dismissNotice()
+        app.publish(.error)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(client.phase == .idle)
+    }
+
+    @Test func staleSessionFailureIsIgnoredWhenIdle() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport)
+        client.host = host
+        client.activate()
+
+        try app.fail(message: "Old news.", at: Date().addingTimeInterval(-120))
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(client.phase == .idle)
+    }
+
+    @Test func languageOverrideIsSentWithTheCommand() async {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport)
+        client.host = host
+        app.publish(.ready)
+        client.activate()
+
+        client.languageOverride = "ru-RU"
+        client.micTapped()
+        #expect(transport.payloads.readCommand()?.languageOverride == "ru-RU")
+        #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
     }
 
     @Test func withoutFullAccessAsksForIt() {

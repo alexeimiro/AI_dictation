@@ -56,6 +56,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         super.viewWillAppear(animated)
         model.hasFullAccess = hasFullAccess
         model.defaultStyle = settings.defaultStyle
+        loadLanguages()
         if hasFullAccess { haptics.prepare() }
         updateAutoShift()
         reloadKeys()
@@ -149,13 +150,34 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             dismissPending: { [weak self] in self?.client?.dismissPendingResult() },
             dismissNotice: { [weak self] in self?.client?.dismissNotice() },
             openApp: { [weak self] in
-                guard let self, let url = URL(string: "\(Brand.urlScheme)://") else { return }
-                HostAppOpener.open(url, from: self)
+                guard let self else { return }
+                HostAppOpener.open(Brand.settingsURL, from: self)
             },
             setStyle: { [weak self] style in
                 self?.model.styleOverride = style
                 self?.client?.styleOverride = style
+            },
+            setLanguage: { [weak self] language in
+                self?.model.languageOverride = language
+                self?.client?.languageOverride = language?.tag
             })
+    }
+
+    /// The language pill offers the secondary language only once the app has verified its
+    /// model, so a switch never lands on a language that can't be recognized.
+    private func loadLanguages() {
+        let primary = settings.primaryLanguage.map(DictationLanguage.init(tag:)) ?? .englishUS
+        let verified = settings.verifiedEngines
+        let secondary = settings.secondaryLanguage.flatMap { tag -> DictationLanguage? in
+            guard tag != primary.tag, verified[tag] != nil else { return nil }
+            return DictationLanguage(tag: tag)
+        }
+        model.primaryLanguage = primary
+        model.secondaryLanguage = secondary
+        if let override = model.languageOverride, override != secondary {
+            model.languageOverride = nil
+            client?.languageOverride = nil
+        }
     }
 
     // MARK: Keys
@@ -270,7 +292,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     func insertDictation(_ result: DictationResult) {
         let traits = InsertionTraits(
             contextBefore: textDocumentProxy.documentContextBeforeInput,
-            singleLine: isSingleLineField)
+            singleLine: isSingleLineField,
+            language: result.language)
         let text = TextJoiner.prepare(result.text, traits: traits)
         guard !text.isEmpty else { return }
         textDocumentProxy.insertText(text)

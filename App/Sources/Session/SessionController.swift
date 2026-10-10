@@ -4,6 +4,7 @@ import Foundation
 import MurmurCore
 import Observation
 import os
+import Speech
 import UIKit
 
 /// The dictation session: a hot mic in the app that the keyboard drives through IPC.
@@ -28,8 +29,6 @@ final class SessionController {
     private(set) var engineName = ""
     /// Extra detail while starting (e.g. the first-run speech model download).
     private(set) var startDetail: String?
-    /// Recent results, newest first (debug view; replaced by History in Phase 4).
-    private(set) var recentResults: [DictationResult] = []
 
     var isLive: Bool {
         switch phase {
@@ -41,6 +40,8 @@ final class SessionController {
     @ObservationIgnored private let transport: IPCTransport
     @ObservationIgnored private let publisher: HotStatePublisher
     @ObservationIgnored private let pipeline: DictationPipeline
+    @ObservationIgnored private let assets: SpeechAssetManager
+    @ObservationIgnored private let history: any TranscriptSink
     @ObservationIgnored private let settings = SharedSettings.shared
     @ObservationIgnored private let audio = AudioCapture()
     @ObservationIgnored private let liveActivity = LiveActivityController()
@@ -54,14 +55,24 @@ final class SessionController {
     @ObservationIgnored private var idleTask: Task<Void, Never>?
     @ObservationIgnored private var capTask: Task<Void, Never>?
     @ObservationIgnored private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    /// Languages whose models are loaded and ready, keyed by BCP-47 tag.
+    @ObservationIgnored private var languages: [String: ResolvedLanguage] = [:]
+    @ObservationIgnored private var primaryTag = DictationLanguage.englishUS.tag
+    @ObservationIgnored private var pendingLanguageReload = false
+    @ObservationIgnored private var secondaryTask: Task<Void, Never>?
+    @ObservationIgnored private var reconnectTask: Task<Void, Never>?
 
     /// Wispr Flow caps dictations at 5 minutes; we do the same.
     static let maxDictationSeconds: TimeInterval = 300
+    /// With "Disable after: Immediately", a session that isn't used still ends after this.
+    static let immediateIdleGrace: TimeInterval = 60
 
-    init(transport: IPCTransport, pipeline: DictationPipeline) {
+    init(transport: IPCTransport, pipeline: DictationPipeline, assets: SpeechAssetManager, history: any TranscriptSink) {
         self.transport = transport
         self.publisher = HotStatePublisher(transport: transport)
         self.pipeline = pipeline
+        self.assets = assets
+        self.history = history
         publisher.set(.off)
         commandObservation = transport.observe(.command) { [weak self] in
             MainActor.assumeIsolated { self?.handleCommand() }
@@ -87,29 +98,128 @@ final class SessionController {
             try audio.startEngine()
             guard let micFormat = audio.inputFormat else { throw AudioCapture.CaptureError.noInput }
 
-            let transcriber = TranscriberEngine.current.make(contextualStrings: pipeline.contextualStrings())
-            startDetail = "Preparing speech recognition… The first time, this downloads the language model."
             defer { startDetail = nil }
-            try await transcriber.prepare(micFormat: micFormat, locale: dictationLocale)
+            let primary = try await readyPrimaryLanguage()
+            let transcriber: Transcriber = TranscriberEngine.current == .stub
+                ? StubTranscriber() : AppleSpeechTranscriber()
+            try await transcriber.prepare(micFormat: micFormat, language: primary)
             self.transcriber = transcriber
             engineName = transcriber.displayName
             audio.setBufferHandler { [transcriber] buffer in transcriber.append(buffer) }
             audio.setLevelHandler { [publisher] level in publisher.setLevel(level) }
 
+            transport.payloads.clearSessionFailure()
             phase = .ready
             publisher.set(.ready)
             transport.post(.stateChanged)
             startHeartbeat()
             scheduleIdleTimeout()
-            liveActivity.start()
+            if settings.liveActivities { await liveActivity.start() }
             logger.info("Session started with \(transcriber.displayName, privacy: .public)")
         } catch {
             logger.error("Session start failed: \(String(describing: error), privacy: .public)")
             tearDownAudio()
-            phase = .failed(Self.userMessage(for: error))
-            publisher.set(.off)
+            let message = Self.userMessage(for: error)
+            phase = .failed(message)
+            // The keyboard shows the reason; `.error` also stops it from bouncing to the app again.
+            try? transport.payloads.write(sessionFailure: SessionFailure(message: message, createdAt: Date()))
+            publisher.set(.error)
             transport.post(.stateChanged)
         }
+    }
+
+    /// Resolves the primary language and makes its model ready, reporting the first-run
+    /// download in `startDetail`. The secondary language is readied in the background.
+    private func readyPrimaryLanguage() async throws -> ResolvedLanguage {
+        let tag = await LanguageResolver.primaryTag(settings: settings)
+        primaryTag = tag
+        let name = DictationLanguage(tag: tag).localizedName
+        startDetail = "Preparing \(name) speech recognition… The first time, this downloads the language model."
+        let primary: ResolvedLanguage
+        if TranscriberEngine.current == .stub {
+            primary = ResolvedLanguage(tag: tag, locale: Locale(identifier: tag), engine: .speech)
+        } else {
+            primary = try await assets.ensureReady(
+                tag: tag, contextualStrings: pipeline.contextualStrings(),
+                override: TranscriberEngine.current.kindOverride
+            ) { [weak self] event in
+                Task { @MainActor in
+                    if let detail = Self.detail(for: event, language: name) { self?.startDetail = detail }
+                }
+            }
+        }
+        languages = [tag: primary]
+        prepareSecondaryLanguage()
+        return primary
+    }
+
+    private static func detail(for event: SpeechAssetManager.InstallEvent, language name: String) -> String? {
+        switch event {
+        case .downloading(let fraction, _): "Downloading \(name)… \(Int((fraction * 100).rounded()))%"
+        case .validating: "Checking \(name) speech recognition…"
+        case .ready: nil
+        }
+    }
+
+    /// Loads the secondary language's model so the keyboard's language pill can switch to it
+    /// without a wait.
+    private func prepareSecondaryLanguage() {
+        guard let tag = settings.secondaryLanguage, tag != primaryTag, languages[tag] == nil else { return }
+        if TranscriberEngine.current == .stub {
+            languages[tag] = ResolvedLanguage(tag: tag, locale: Locale(identifier: tag), engine: .speech)
+            return
+        }
+        secondaryTask?.cancel()
+        secondaryTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let resolved = try await assets.ensureReady(
+                    tag: tag, contextualStrings: pipeline.contextualStrings(),
+                    override: TranscriberEngine.current.kindOverride)
+                guard !Task.isCancelled, settings.secondaryLanguage == tag else { return }
+                languages[tag] = resolved
+                logger.info("Secondary language ready: \(tag, privacy: .public)")
+            } catch {
+                logger.error("Secondary language \(tag, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Called by the Languages UI after the primary or secondary language changed. Applied at
+    /// once when idle, otherwise after the current dictation.
+    func languagesDidChange() {
+        guard isLive else { return }
+        guard phase == .ready else {
+            pendingLanguageReload = true
+            return
+        }
+        Task { await reloadLanguages() }
+    }
+
+    private func reloadLanguages() async {
+        pendingLanguageReload = false
+        let tag = await LanguageResolver.primaryTag(settings: settings)
+        primaryTag = tag
+        if languages[tag] == nil {
+            if TranscriberEngine.current == .stub {
+                languages[tag] = ResolvedLanguage(tag: tag, locale: Locale(identifier: tag), engine: .speech)
+            } else {
+                do {
+                    languages[tag] = try await assets.ensureReady(
+                        tag: tag, contextualStrings: pipeline.contextualStrings(),
+                        override: TranscriberEngine.current.kindOverride)
+                } catch {
+                    logger.error("Couldn't prepare \(tag, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        }
+        if phase == .ready, let primary = languages[tag], let transcriber, transcriber.currentLanguage != primary {
+            transcriber.setLanguage(primary)
+        }
+        let keep = [tag, settings.secondaryLanguage].compactMap { $0 }
+        languages = languages.filter { keep.contains($0.key) }
+        prepareSecondaryLanguage()
+        await assets.reconcileReservations(keep: keep)
     }
 
     /// Ends the session and releases the microphone.
@@ -119,10 +229,15 @@ final class SessionController {
         idleTask?.cancel()
         capTask?.cancel()
         tearDownAudio()
+        secondaryTask?.cancel()
+        reconnectTask?.cancel()
+        reconnectTask = nil
         if let transcriber {
             Task { await transcriber.shutdown() }
         }
         transcriber = nil
+        languages = [:]
+        transport.payloads.clearSessionFailure()
         phase = .off
         publisher.set(.off)
         transport.post(.stateChanged)
@@ -133,7 +248,7 @@ final class SessionController {
     /// Called when the app becomes active: recover from interruptions that left us stranded.
     func appDidBecomeActive() {
         if phase == .needsReconnect {
-            Task { await reconnect() }
+            requestReconnect()
         }
     }
 
@@ -142,21 +257,43 @@ final class SessionController {
     /// In-app dictation (e.g. Scratchpad) uses the same pipeline as the keyboard.
     func beginInAppDictation() -> UUID? {
         let id = UUID()
-        return beginDictation(requestId: id, documentIdentifier: nil, style: nil, source: .inApp) ? id : nil
+        return beginDictation(requestId: id, documentIdentifier: nil, style: nil, languageOverride: nil,
+                              source: .inApp) ? id : nil
     }
 
     @discardableResult
     private func beginDictation(requestId: UUID, documentIdentifier: UUID?, style: StylePreset?,
-                                source: ActiveDictation.Source) -> Bool {
+                                languageOverride: String?, source: ActiveDictation.Source) -> Bool {
         guard phase == .ready, let transcriber else {
             logger.notice("Start ignored in phase \(String(describing: self.phase), privacy: .public)")
             return false
+        }
+        let language: ResolvedLanguage
+        if let languageOverride, languageOverride != primaryTag {
+            guard let ready = languages[languageOverride] else {
+                let name = DictationLanguage(tag: languageOverride).localizedName
+                logger.notice("Dictation in \(languageOverride, privacy: .public) requested before its model is ready")
+                rejectDictation(requestId: requestId, documentIdentifier: documentIdentifier, language: languageOverride,
+                                message: "\(name) is still being set up in Murmur. Try again in a moment.")
+                prepareSecondaryLanguage()
+                return false
+            }
+            language = ready
+        } else {
+            guard let primary = languages[primaryTag] else {
+                logger.error("No primary language loaded")
+                return false
+            }
+            language = primary
+        }
+        if transcriber.currentLanguage != language {
+            transcriber.setLanguage(language)
         }
         idleTask?.cancel()
         transcriber.beginUtterance()
         audio.openGate()
         active = ActiveDictation(requestId: requestId, documentIdentifier: documentIdentifier,
-                                 style: style, source: source, startedAt: Date())
+                                 style: style, language: language.tag, source: source, startedAt: Date())
         phase = .recording(requestId)
         publisher.set(.recording, requestTag: requestId.tag16)
         transport.post(.stateChanged)
@@ -169,6 +306,22 @@ final class SessionController {
             self?.endDictation(commit: true)
         }
         return true
+    }
+
+    /// Acknowledges a start the keyboard asked for (so it doesn't bounce to the app), then ends
+    /// it with a reason instead of recording.
+    private func rejectDictation(requestId: UUID, documentIdentifier: UUID?, language: String, message: String) {
+        phase = .recording(requestId)
+        publisher.set(.recording, requestTag: requestId.tag16)
+        transport.post(.stateChanged)
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(700))
+            guard let self, case .recording(requestId) = self.phase, self.active == nil else { return }
+            self.deliver(DictationResult(
+                requestId: requestId, documentIdentifier: documentIdentifier, text: "", status: .failed,
+                message: message, createdAt: Date(), language: language))
+            self.becomeReady()
+        }
     }
 
     /// Ends the current dictation; `commit: false` discards it.
@@ -193,10 +346,11 @@ final class SessionController {
         let stoppedAt = ContinuousClock.now
         beginBackgroundWork()
         Task {
-            let result = await pipeline.complete(
-                dictation, transcriber: transcriber, language: dictationLocale.identifier(.bcp47),
-                audioSeconds: audioSeconds, stoppedAt: stoppedAt)
-            deliver(result)
+            let outcome = await pipeline.complete(
+                dictation, transcriber: transcriber, audioSeconds: audioSeconds, stoppedAt: stoppedAt)
+            // The keyboard first, then history, so the save never delays the insertion.
+            deliver(outcome.result)
+            history.record(outcome.transcript)
             becomeReady()
             if settings.disableAfter == .immediately {
                 stop()
@@ -212,17 +366,25 @@ final class SessionController {
             logger.error("Couldn't write result: \(error.localizedDescription, privacy: .public)")
         }
         transport.post(.resultReady)
-        recentResults.insert(result, at: 0)
-        if recentResults.count > 50 { recentResults.removeLast() }
     }
 
-    private func becomeReady() {
-        guard transcriber != nil, phase != .off else { return }
+    /// Back to `ready` after a dictation. Not from `needsReconnect`: a dictation that ended
+    /// because of an interruption must not report a working mic.
+    private func becomeReady(afterReconnect: Bool = false) {
+        guard transcriber != nil else { return }
+        switch phase {
+        case .off, .starting, .failed: return
+        case .needsReconnect where !afterReconnect: return
+        default: break
+        }
         phase = .ready
         publisher.set(.ready)
         transport.post(.stateChanged)
         liveActivity.update(.ready, since: nil)
         scheduleIdleTimeout()
+        if pendingLanguageReload {
+            Task { await reloadLanguages() }
+        }
     }
 
     // MARK: Keyboard commands
@@ -238,7 +400,8 @@ final class SessionController {
         switch command.kind {
         case .start:
             beginDictation(requestId: command.requestId, documentIdentifier: command.documentIdentifier,
-                           style: command.styleOverride, source: .keyboard)
+                           style: command.styleOverride, languageOverride: command.languageOverride,
+                           source: .keyboard)
         case .stop:
             if active?.requestId == command.requestId { endDictation(commit: true) }
         case .cancel:
@@ -280,9 +443,12 @@ final class SessionController {
 
     private func scheduleIdleTimeout() {
         idleTask?.cancel()
-        guard let timeout = settings.disableAfter.idleTimeout, timeout > 0 else { return }
+        guard let timeout = settings.disableAfter.idleTimeout else { return }
+        // "Immediately" stops right after a delivered result; a session that is never used, or
+        // whose dictation was cancelled, still gets a short grace period instead of staying on.
+        let delay = timeout > 0 ? timeout : Self.immediateIdleGrace
         idleTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(timeout))
+            try? await Task.sleep(for: .seconds(delay))
             guard let self, !Task.isCancelled, self.phase == .ready else { return }
             self.logger.info("Idle timeout reached")
             self.stop()
@@ -332,7 +498,13 @@ final class SessionController {
             publisher.set(.needsReconnect)
             transport.post(.stateChanged)
         case .ended:
-            Task { await reconnect() }
+            if options.contains(.shouldResume) {
+                requestReconnect()
+            } else {
+                // The system says not to resume (another app took the audio); the keyboard
+                // offers Reconnect, which reopens the app and reconnects from `appDidBecomeActive`.
+                logger.notice("Interruption ended without shouldResume")
+            }
         default:
             break
         }
@@ -353,7 +525,16 @@ final class SessionController {
         guard isLive else { return }
         logger.notice("Rebuilding audio path after \(reason, privacy: .public)")
         if active != nil { endDictation(commit: true) }
-        Task { await reconnect() }
+        requestReconnect()
+    }
+
+    /// Route changes and engine configuration changes often arrive together; run one reconnect.
+    private func requestReconnect() {
+        guard reconnectTask == nil else { return }
+        reconnectTask = Task { [weak self] in
+            await self?.reconnect()
+            self?.reconnectTask = nil
+        }
     }
 
     private func handleMediaServicesReset() {
@@ -376,10 +557,11 @@ final class SessionController {
         do {
             try await activateAudioSession()
             try audio.restartEngine()
-            if let format = audio.inputFormat {
-                try await transcriber.prepare(micFormat: format, locale: dictationLocale)
+            if let format = audio.inputFormat,
+               let language = transcriber.currentLanguage ?? languages[primaryTag] {
+                try await transcriber.prepare(micFormat: format, language: language)
             }
-            becomeReady()
+            becomeReady(afterReconnect: true)
             logger.info("Audio reconnected")
         } catch {
             // Typically '!int' when reactivating from the background after a call.
@@ -412,22 +594,29 @@ final class SessionController {
 
     private static func userMessage(for error: Error) -> String {
         if let sessionError = error as? SessionError { return sessionError.localizedDescription }
+        if let languageError = error as? SpeechAssetManager.LanguageError { return languageError.localizedDescription }
         if let transcriberError = error as? AppleSpeechTranscriber.TranscriberError {
             return transcriberError.localizedDescription
         }
-        let code = AVAudioSession.ErrorCode(rawValue: (error as NSError).code)
-        switch code {
-        case .insufficientPriority:
-            return "Another app is using the microphone. Finish there, then try again."
-        case .cannotStartRecording, .cannotInterruptOthers:
-            return "Couldn't start the microphone. Make sure Murmur is open, then try again."
-        default:
-            return "Couldn't start audio capture. Check that no other app is using the microphone."
+        if let captureError = error as? AudioCapture.CaptureError { return captureError.localizedDescription }
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            return "Murmur couldn't reach the internet to download the speech model. Check your connection and try again."
         }
-    }
-
-    private var dictationLocale: Locale {
-        settings.dictationLocale.map(Locale.init(identifier:)) ?? .current
+        if nsError.domain == SFSpeechError.errorDomain {
+            return "Speech recognition failed to start (\(nsError.localizedDescription)). Open Murmur › Languages and tap Verify."
+        }
+        if nsError.domain == NSOSStatusErrorDomain {
+            switch AVAudioSession.ErrorCode(rawValue: nsError.code) {
+            case .insufficientPriority:
+                return "Another app is using the microphone. Finish there, then try again."
+            case .cannotStartRecording, .cannotInterruptOthers:
+                return "Couldn't start the microphone. Make sure Murmur is open, then try again."
+            default:
+                return "Couldn't start audio capture. Check that no other app is using the microphone."
+            }
+        }
+        return "Couldn't start Murmur: \(error.localizedDescription)"
     }
 
     private func tearDownAudio() {

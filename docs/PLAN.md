@@ -37,7 +37,7 @@ Keyboard ext ── Darwin post + command file (one-time token) ──► Murmur
 1. **Tap the mic.** The keyboard writes `command.json` (`requestId`, kind, style override, `documentIdentifier`) and posts `cmd`. The app acknowledges by moving the `notify` state to `recording(requestId)` within 500 ms.
 2. **No acknowledgement.** The keyboard writes a one-time `launchToken` and opens `murmur://session/start?t=…`.
    - It walks the responder chain to the `UIApplication` and calls `open(_:options:completionHandler:)`, which compiles against the 26.5 SDK.
-   - The app starts the session only if the token is fresh (under 10 s). Otherwise it asks for confirmation, so a web page can't turn on the mic.
+   - The app starts the session only if the token is fresh (under 20 s). Otherwise it asks for confirmation, so a web page can't turn on the mic.
    - It then shows "Murmur is on — Swipe right across the bottom edge to continue".
    - When the keyboard reappears with a pending request, it starts recording.
 3. **Hot mic.**
@@ -296,22 +296,23 @@ supabase/   config.toml, migrations/, functions/{cleanup,auth-lookup,signup-stat
 - **Transcript history** stays on the device. Sync is backup and restore, last write wins.
 
 **`functions/cleanup/index.ts`** (Deno, `npm:@anthropic-ai/sdk`):
-1. **Authorize.** Verify the JWT, enforce a per-user rate limit, and check quota (402 if over).
-2. **Call `client.beta.messages.stream(...)`** with `{ maxRetries: 1, timeout: 6000 }`. Request fields:
+1. **Authorize.** `CLEANUP_DISABLED=1` answers 503 before anything else (kill switch). Verify the JWT, enforce a per-user rate limit (40/min; anonymous callers 10/min and transcripts ≤ 6 000 characters), and check quota (402 if over). The request's `language` tag is sanitized (`normalizeLanguageTag`: `Intl.Locale` canonical form, `language[-Script][-REGION]` only); a well-formed but unparseable tag becomes "auto" rather than a 400, since a 400 would silently degrade every dictation to local formatting.
+2. **Call `client.beta.messages.stream(...)`** with `{ maxRetries: 1, timeout: CLEANUP_TIMEOUT_MS (5000), signal: AbortSignal.timeout(CLEANUP_DEADLINE_MS (9000)) }`. The SDK `timeout` only bounds the response headers (and is retried once); the signal is the real deadline on the streamed body and surfaces as `APIUserAbortError` ("cleanup deadline" in the log → 502). Request fields:
    - `model: Deno.env CLEANUP_MODEL ?? "claude-opus-5-5"`, `max_tokens: 16000`
    - `output_config: { effort: "low" }`, with no `thinking` field
-   - `betas: ["server-side-fallback-2026-07-01"]`, `fallbacks: "default"`. This refusal fallback is on by default. Check the SDK typing for the scalar form against the SDK repo.
-   - `system`:
-     - first block: `CLEANUP_RULES`, ≥512 tokens with examples, `cache_control` set. It is shared across users.
-     - second block: user context (language, style, dictionary terms, snippet triggers with ids), with its own `cache_control`, cached per user.
+   - `betas: ["server-side-fallback-2026-07-01"]`, `fallbacks: "default"`. This refusal fallback is on by default.
+   - `system`, three blocks in stability order, each with `cache_control: ephemeral` (block 1 alone clears the 512-token minimum, which applies to the cumulative prefix):
+     - `CLEANUP_RULES`: shared by every user and language, with the English examples.
+     - the language pack (`LANGUAGE_RULES[en | ru]` → `buildLanguageBlock`): rules in English, examples in the language, style wording per language; byte-identical for every user of that language, so they share one cache entry.
+     - user context: `Language: <sanitized tag | auto>`, the style instruction, dictionary terms, snippet triggers with ids; cached per user.
    - `messages: [{ role: "user", content: "<transcript>…</transcript>" }]`
 3. **Read the response.** Time to first token is the first `text` delta, then `finalMessage()`.
    - Read text blocks by `type`.
    - On `stop_reason` `refusal` or `max_tokens`, return the raw transcript.
-   - A **length-ratio and answer guard** returns raw text if Claude answered a question instead of cleaning it.
-4. **Respond.** Return `{ text, words, model, ttftMs, totalMs }`.
+   - **Guards** return the raw transcript if Claude answered instead of cleaning (length ratio; English and Russian assistant openers, matched without the ASCII-only `\b`) or changed the script of the text (`script_changed`: Cyrillic share ≥ 0.7 in, < 0.3 out, or the reverse).
+4. **Respond.** Return `{ text, status, words, model, ttftMs, totalMs, remaining }`.
    - Words are counted with `Intl.Segmenter`, so Chinese and Japanese count correctly.
-   - `record_usage(dictation_id, words)` and the logs run in `EdgeRuntime.waitUntil` after the response.
+   - `record_usage(dictation_id, words)` and the logs run in `EdgeRuntime.waitUntil` after the response. The log line carries the language pack, anonymity, stop reason and token counts; `cacheReadTokens > 0` on a second call within five minutes proves the three blocks are reused.
    - The function region is pinned next to the database.
 
 **`CLEANUP_RULES`** say:
@@ -349,11 +350,13 @@ supabase/   config.toml, migrations/, functions/{cleanup,auth-lookup,signup-stat
    - (b) Which is faster: a long-lived analyzer with `finalize(through:)`, or a fresh prepared one each time?
    - (c) Accuracy of SpeechTranscriber vs DictationTranscriber with contextual strings, on 10 phrases with names.
    - **Done when:** the decision is recorded; background transcription works; stop-to-final median ≤ 1 s for dictations up to 30 s. If it's over, use the volatile tail.
+   - **Status (2026-10-10):** the engine is chosen per language at run time instead of by a one-off decision: `SpeechAssetManager` tries SpeechTranscriber, then DictationTranscriber, downloads the model, validates it with half a second of silence and remembers the result per OS version (`SharedSettings.verifiedEngines`). Primary + secondary languages (`primaryLanguage` / `secondaryLanguage`) with a keyboard switch; the default comes from `Locale.preferredLanguages`, never `Locale.current`. Still to record from the iPhone: (a) whether ru-RU appears under both engines on iOS 26.6.1 and which one validates, (b) stop-to-final latency per engine for 10 Russian dictations, (c) accuracy on 10 Russian phrases with names, with and without contextual strings.
 3. **Phase 1c: Live Activity, auto-off, interruptions, caps.**
    - **Done when:** Stop takes ≤ 1 s; a phone call pauses the session cleanly and the keyboard offers Reconnect; the 5-minute cap auto-stops; "Immediately" delivers before ending.
 4. **Phase 2: Supabase and Claude cleanup, with anonymous auth.**
    - Steps: migrations and RLS, the `cleanup` function with golden tests, CleanupClient, TextJoiner, snippet placeholders, quota, Debug › Metrics (median and p95).
    - **Done when:** cleaned text is inserted on device; airplane mode inserts raw text with Retry; over-limit returns 402 and shows the limit card; latency is reported. If the median is over 2.5 s, I come back to you with tuning options.
+   - **Status (2026-10-10):** the function and client are built and tested offline (English + Russian), but no cleanup has run from the iPhone yet: the local stack needs `supabase/functions/.env` with `ANTHROPIC_API_KEY` and `supabase functions serve`, and `Config/Local.xcconfig` points at the Mac's LAN address. A 402 now inserts the locally formatted text and shows the limit notice instead of discarding the dictation.
 5. **Phase 3: Onboarding and real auth** (all screens and flows above).
    - **Done when:** each screen is within ±4 pt of its reference on the iPhone 16 simulator; a fresh install on the device reaches Home through email signup and Sign in with Apple.
 6. **Phase 4: Home and tabs**, with SwiftData in the app's private container and SyncEngine.

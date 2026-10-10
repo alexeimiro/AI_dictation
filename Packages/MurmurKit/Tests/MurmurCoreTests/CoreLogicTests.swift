@@ -118,3 +118,138 @@ struct LocalFormatterTests {
         #expect(WordCounter.wordsPerMinute(words: 30, seconds: 12) == 150)
     }
 }
+
+struct DictationLanguageTests {
+    @Test func normalizesIdentifiers() {
+        #expect(DictationLanguage(normalizing: "ru_RU").tag == "ru-RU")
+        #expect(DictationLanguage(normalizing: "ru-RU").tag == "ru-RU")
+        #expect(DictationLanguage(normalizing: "en_US").tag == "en-US")
+        let russian = DictationLanguage(tag: "ru-RU")
+        #expect(russian.languageCode == "ru")
+        #expect(russian.shortCode == "RU")
+        #expect(russian.isRussian)
+        #expect(!DictationLanguage.englishUS.isRussian)
+    }
+}
+
+struct SharedSettingsTests {
+    @Test func migratesTheLegacyLanguageKeyAndNormalizesTags() throws {
+        let suite = "test.murmur.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("ru_RU", forKey: "dictationLocale")
+
+        let settings = SharedSettings(defaults: defaults)
+        #expect(settings.primaryLanguage == "ru-RU")
+        #expect(defaults.string(forKey: "dictationLocale") == nil)
+
+        settings.secondaryLanguage = "en_US"
+        #expect(settings.secondaryLanguage == "en-US")
+        settings.secondaryLanguage = nil
+        #expect(settings.secondaryLanguage == nil)
+
+        let record = VerifiedEngineRecord(engine: "speech", osVersion: "26.6.1", verifiedAt: Date())
+        settings.verifiedEngines = ["ru-RU": record]
+        #expect(settings.verifiedEngines["ru-RU"]?.engine == "speech")
+        #expect(settings.transcriberEngine == nil)
+    }
+}
+
+struct IPCMessageTests {
+    @Test func commandLanguageOverrideRoundTripsAndLegacyJSONStillDecodes() throws {
+        let command = KeyboardCommand(requestId: UUID(), kind: .start, createdAt: Date(), languageOverride: "ru-RU")
+        let data = try JSONEncoder().encode(command)
+        #expect(try JSONDecoder().decode(KeyboardCommand.self, from: data).languageOverride == "ru-RU")
+
+        let legacy = """
+        {"id":"\(UUID().uuidString)","requestId":"\(UUID().uuidString)","kind":"start","createdAt":0}
+        """
+        let decoded = try JSONDecoder().decode(KeyboardCommand.self, from: Data(legacy.utf8))
+        #expect(decoded.languageOverride == nil)
+        #expect(decoded.styleOverride == nil)
+    }
+
+    @Test func resultLanguageAndSessionFailureRoundTrip() throws {
+        let store = IPCPayloadStore(container: .temporary())
+        let result = DictationResult(requestId: UUID(), documentIdentifier: nil, text: "Привет",
+                                     status: .cleaned, createdAt: Date(), language: "ru-RU")
+        try store.write(result: result)
+        #expect(store.readResult(result.requestId)?.language == "ru-RU")
+
+        let failure = SessionFailure(message: "Russian needs a one-time download.", createdAt: Date())
+        try store.write(sessionFailure: failure)
+        #expect(store.readSessionFailure()?.message == failure.message)
+        store.clearSessionFailure()
+        #expect(store.readSessionFailure() == nil)
+    }
+
+    @Test func errorStatusPacks() {
+        let state = HotState(status: .error, sequence: 7)
+        #expect(HotState(packed: state.packed) == state)
+    }
+}
+
+struct RussianTextJoinerTests {
+    private let russian = "ru-RU"
+
+    @Test func lowercasesCommonWordsMidSentenceIncludingYa() {
+        let traits = InsertionTraits(contextBefore: "Я пошёл домой", singleLine: false, language: russian)
+        #expect(TextJoiner.prepare("И потом я уснул.", traits: traits) == " и потом я уснул.")
+        let afterComma = InsertionTraits(contextBefore: "Я сказал,", singleLine: false, language: russian)
+        #expect(TextJoiner.prepare("Я приду.", traits: afterComma) == " я приду.")
+    }
+
+    @Test func keepsProperNounsAndAcronyms() {
+        let traits = InsertionTraits(contextBefore: "Я позвонил", singleLine: false, language: russian)
+        #expect(TextJoiner.prepare("Валерий сегодня.", traits: traits) == " Валерий сегодня.")
+        #expect(TextJoiner.prepare("МГУ сегодня.", traits: traits) == " МГУ сегодня.")
+    }
+
+    @Test func spacesAroundRussianQuotes() {
+        #expect(TextJoiner.prepare("«Привет»", traits: .init(contextBefore: "Он сказал:", singleLine: false, language: russian))
+                == " «Привет»")
+        #expect(TextJoiner.prepare("Привет»", traits: .init(contextBefore: "Он сказал: «", singleLine: false, language: russian))
+                == "Привет»")
+        #expect(TextJoiner.prepare("» — сказал он.", traits: .init(contextBefore: "«Привет", singleLine: false, language: russian))
+                == "» — сказал он.")
+    }
+
+    @Test func flattensDashLists() {
+        let traits = InsertionTraits(contextBefore: nil, singleLine: true, language: russian)
+        #expect(TextJoiner.prepare("Купить:\n— молоко\n— хлеб", traits: traits) == "Купить: молоко, хлеб")
+    }
+
+    @Test func englishRulesStillApplyWithoutALanguage() {
+        let traits = InsertionTraits(contextBefore: "I went home", singleLine: false)
+        #expect(TextJoiner.prepare("And then I slept.", traits: traits) == " and then I slept.")
+        // "Я" is not an English common word, so it keeps its capital under English rules.
+        #expect(TextJoiner.prepare("Я приду.", traits: traits) == " Я приду.")
+    }
+}
+
+struct RussianLocalFormatterTests {
+    @Test func removesVocalizedHesitationsOnly() {
+        let formatter = LocalFormatter(language: "ru-RU")
+        #expect(formatter.format("э-э, мы должны это сделать") == "Мы должны это сделать")
+        #expect(formatter.format("ну вот, мы идём, эм, домой") == "Ну вот, мы идём, домой")
+        #expect(formatter.format("um так, мм, ладно") == "Так, ладно")
+        #expect(formatter.format("Эмма купила граммов двести") == "Эмма купила граммов двести")
+    }
+
+    @Test func russianHesitationsStayInEnglishDictations() {
+        #expect(LocalFormatter().format("эм, okay") == "Эм, okay")
+    }
+
+    @Test func dictionaryMatchesRegardlessOfYo() {
+        let formatter = LocalFormatter(dictionary: [
+            DictionaryTerm(term: "Артём"),
+            DictionaryTerm(term: "Валерий", misspelling: "валера"),
+        ], language: "ru-RU")
+        #expect(formatter.format("позвони артем и валера") == "Позвони Артём и Валерий")
+        #expect(formatter.format("Артёму привет") == "Артёму привет")
+    }
+
+    @Test func countsCyrillicWords() {
+        #expect(WordCounter.count("Привет, как дела?") == 3)
+    }
+}

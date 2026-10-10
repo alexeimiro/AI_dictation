@@ -39,6 +39,8 @@ public final class KeyboardSessionClient {
     public private(set) var pendingResult: DictationResult?
     /// Style override chosen in the keyboard's style pill, sent with the next dictation.
     public var styleOverride: StylePreset?
+    /// BCP-47 tag chosen in the keyboard's language pill; nil means the primary language.
+    public var languageOverride: String?
 
     public weak var host: KeyboardSessionHost?
 
@@ -54,6 +56,8 @@ public final class KeyboardSessionClient {
     private var activeDocumentIdentifier: UUID?
     private var lastSequence: UInt32 = 0
     private var lastSequenceChange = Date.distantPast
+    /// The session failure already shown as a notice, so dismissing it doesn't bring it back.
+    private var shownFailureAt: Date?
 
     public init(
         transport: IPCTransport,
@@ -322,6 +326,10 @@ public final class KeyboardSessionClient {
         let state = transport.currentState()
         trackSequence(state)
         sessionStatus = state.status
+        if state.status == .error, showSessionFailure() {
+            notifyHost()
+            return
+        }
         switch phase {
         case .starting(let id):
             if !checkAck(id), state.status == .needsReconnect { openApp(for: id) }
@@ -352,6 +360,27 @@ public final class KeyboardSessionClient {
             break
         }
         notifyHost()
+    }
+
+    /// The app's session failed to start (for example, the language model isn't downloaded).
+    /// Shows the app's reason once; tapping the mic opens the app again. Returns true when the
+    /// phase changed.
+    private func showSessionFailure() -> Bool {
+        let failure = transport.payloads.readSessionFailure()
+        let freshFailure = failure.flatMap { clock().timeIntervalSince($0.createdAt) < 60 ? $0 : nil }
+        switch phase {
+        case .starting, .openingApp:
+            break
+        case .idle, .needsReconnect:
+            guard let freshFailure, freshFailure.createdAt != shownFailureAt else { return false }
+        case .listening, .processing, .needsFullAccess, .notice:
+            return false
+        }
+        cancelTasks()
+        transport.payloads.clearPendingStart()
+        shownFailureAt = freshFailure?.createdAt
+        setPhase(.notice(freshFailure?.message ?? "Murmur couldn't start. Open the app to see why."))
+        return true
     }
 
     private func checkForResult() {
@@ -389,6 +418,7 @@ public final class KeyboardSessionClient {
         let fresh = clock().timeIntervalSince(result.createdAt) < 60
         if sameField, fresh, transport.payloads.claim(result.requestId) {
             host?.insertDictation(result)
+            if let message = result.message { setPhase(.notice(message)) }
         } else if !transport.payloads.isClaimed(result.requestId) {
             pendingResult = result
         }
@@ -401,7 +431,8 @@ public final class KeyboardSessionClient {
     private func send(_ kind: CommandKind, requestId: UUID) -> Bool {
         let command = KeyboardCommand(
             requestId: requestId, kind: kind, createdAt: clock(),
-            documentIdentifier: activeDocumentIdentifier, styleOverride: styleOverride)
+            documentIdentifier: activeDocumentIdentifier, styleOverride: styleOverride,
+            languageOverride: languageOverride)
         do {
             try transport.payloads.write(command: command)
         } catch {

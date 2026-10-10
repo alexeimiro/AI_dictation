@@ -9,10 +9,12 @@ final class LiveActivityController {
     private var activityID: String?
     private let logger = Logger(subsystem: "Murmur", category: "LiveActivity")
 
-    /// Only works while the app is in the foreground, which is when sessions start.
-    func start() {
+    /// Only works while the app is in the foreground, which is when sessions start. Leftover
+    /// activities from a previous run are ended first; this must complete before the new
+    /// request, or it would end the new activity too.
+    func start() async {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        Task { await Self.endAll() }
+        await Self.endAll()
         do {
             let activity = try Activity.request(
                 attributes: SessionActivityAttributes(),
