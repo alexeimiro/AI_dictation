@@ -15,8 +15,10 @@ SWIFT_VERSION = 6.0
 DEVELOPMENT_TEAM =
 
 // Signing. Simulator/default builds use automatic signing. scripts/device_build.sh switches to
-// manual signing with the development profiles created by scripts/provision_dev.mjs.
+// manual signing with the development profiles created by scripts/provision_dev.mjs;
+// scripts/testflight_upload.sh uses the App Store profiles and Apple Distribution.
 MURMUR_SIGN_STYLE = Automatic
+MURMUR_SIGN_IDENTITY = Apple Development
 MURMUR_PROFILE_APP =
 MURMUR_PROFILE_KEYBOARD =
 MURMUR_PROFILE_WIDGETS =

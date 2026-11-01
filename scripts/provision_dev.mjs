@@ -8,7 +8,9 @@
 //   App Group group.com.antonmironenko.murmur, and the three App IDs below with the
 //   App Groups capability enabled and that group assigned.
 //
-// Usage: node scripts/provision_dev.mjs   (reads Config/asc.env)
+// Usage: node scripts/provision_dev.mjs              development profiles (reads Config/asc.env)
+//        node scripts/provision_dev.mjs --appstore  App Store profiles for TestFlight uploads,
+//                                                   creating a distribution certificate if needed
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -26,11 +28,13 @@ const env = Object.fromEntries(
     }),
 );
 
+const APP_STORE = process.argv.includes("--appstore");
+const PROFILE_PREFIX = APP_STORE ? "Murmur AppStore" : "Murmur Dev";
 const APP_GROUP = "group.com.antonmironenko.murmur";
 const TARGETS = [
-  { identifier: "com.antonmironenko.murmur", profile: "Murmur Dev App" },
-  { identifier: "com.antonmironenko.murmur.keyboard", profile: "Murmur Dev Keyboard" },
-  { identifier: "com.antonmironenko.murmur.widgets", profile: "Murmur Dev Widgets" },
+  { identifier: "com.antonmironenko.murmur", profile: `${PROFILE_PREFIX} App` },
+  { identifier: "com.antonmironenko.murmur.keyboard", profile: `${PROFILE_PREFIX} Keyboard` },
+  { identifier: "com.antonmironenko.murmur.widgets", profile: `${PROFILE_PREFIX} Widgets` },
 ];
 const PROFILES_DIR = path.join(os.homedir(), "Library/Developer/Xcode/UserData/Provisioning Profiles");
 
@@ -66,21 +70,59 @@ function fail(message) {
   process.exit(1);
 }
 
-// 1. The development certificate whose private key is in this Mac's keychain.
-const localIdentities = execFileSync("security", ["find-identity", "-v", "-p", "codesigning"], { encoding: "utf8" })
-  .match(/[0-9A-F]{40}/g) ?? [];
-const certificates = await api("GET",
-  "/v1/certificates?filter[certificateType]=DEVELOPMENT,IOS_DEVELOPMENT&fields[certificates]=name,certificateContent,expirationDate&limit=200");
-const certificate = certificates.data.find((cert) => {
-  const der = Buffer.from(cert.attributes.certificateContent, "base64");
-  return localIdentities.includes(crypto.createHash("sha1").update(der).digest("hex").toUpperCase());
-});
-if (!certificate) fail("No development certificate in this team matches a signing identity in the keychain.");
+// 1. The signing certificate whose private key is in this Mac's keychain.
+function localIdentities() {
+  return execFileSync("security", ["find-identity", "-v", "-p", "codesigning"], { encoding: "utf8" })
+    .match(/[0-9A-F]{40}/g) ?? [];
+}
+async function findCertificate() {
+  const types = APP_STORE ? "DISTRIBUTION,IOS_DISTRIBUTION" : "DEVELOPMENT,IOS_DEVELOPMENT";
+  const certificates = await api("GET",
+    `/v1/certificates?filter[certificateType]=${types}&fields[certificates]=name,certificateContent,expirationDate&limit=200`);
+  const local = localIdentities();
+  return certificates.data.find((cert) => {
+    const der = Buffer.from(cert.attributes.certificateContent, "base64");
+    return local.includes(crypto.createHash("sha1").update(der).digest("hex").toUpperCase());
+  });
+}
+// Creates a distribution certificate from a fresh key and imports both into the login keychain.
+async function createDistributionCertificate() {
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "murmur-dist-"));
+  const keyFile = path.join(work, "key.pem");
+  const csrFile = path.join(work, "request.csr");
+  execFileSync("openssl", ["req", "-new", "-newkey", "rsa:2048", "-nodes", "-keyout", keyFile,
+    "-out", csrFile, "-subj", "/CN=Murmur Distribution"], { stdio: "ignore" });
+  const csrContent = fs.readFileSync(csrFile, "utf8").replace(/-----[^-]+-----|\s/g, "");
+  const created = await api("POST", "/v1/certificates", {
+    data: { type: "certificates", attributes: { certificateType: "DISTRIBUTION", csrContent } },
+  });
+  const certFile = path.join(work, "cert.cer");
+  fs.writeFileSync(certFile, Buffer.from(created.data.attributes.certificateContent, "base64"));
+  const pemFile = path.join(work, "cert.pem");
+  execFileSync("openssl", ["x509", "-inform", "DER", "-in", certFile, "-out", pemFile]);
+  // SHA1/3DES: the only PKCS#12 encryption `security import` accepts.
+  const p12File = path.join(work, "identity.p12");
+  const password = crypto.randomBytes(12).toString("hex");
+  execFileSync("openssl", ["pkcs12", "-export", "-keypbe", "PBE-SHA1-3DES", "-certpbe", "PBE-SHA1-3DES",
+    "-macalg", "sha1", "-inkey", keyFile, "-in", pemFile,
+    "-out", p12File, "-passout", `pass:${password}`], { stdio: "ignore" });
+  execFileSync("security", ["import", p12File, "-k", path.join(os.homedir(), "Library/Keychains/login.keychain-db"),
+    "-P", password, "-T", "/usr/bin/codesign"], { stdio: "inherit" });
+  fs.rmSync(work, { recursive: true, force: true });
+  console.log(`✔ created distribution certificate ${created.data.id}`);
+}
+let certificate = await findCertificate();
+if (!certificate && APP_STORE) {
+  await createDistributionCertificate();
+  certificate = await findCertificate();
+}
+if (!certificate) fail("No matching certificate in this team has a signing identity in the keychain.");
 console.log(`✔ certificate ${certificate.attributes.name} (${certificate.id}), expires ${certificate.attributes.expirationDate.slice(0, 10)}`);
 
 // 2. The test devices (DEVICE_UDID is comma-separated), registering any that are new.
+// App Store profiles don't list devices.
 const devices = [];
-for (const udid of env.DEVICE_UDID.split(",").map((item) => item.trim()).filter(Boolean)) {
+for (const udid of APP_STORE ? [] : env.DEVICE_UDID.split(",").map((item) => item.trim()).filter(Boolean)) {
   const found = await api("GET", `/v1/devices?filter[udid]=${udid}&fields[devices]=name,status`);
   let device = found.data[0];
   if (!device) {
@@ -116,11 +158,11 @@ for (const target of TARGETS) {
   const created = await api("POST", "/v1/profiles", {
     data: {
       type: "profiles",
-      attributes: { name: target.profile, profileType: "IOS_APP_DEVELOPMENT" },
+      attributes: { name: target.profile, profileType: APP_STORE ? "IOS_APP_STORE" : "IOS_APP_DEVELOPMENT" },
       relationships: {
         bundleId: { data: { type: "bundleIds", id: bundleId.id } },
         certificates: { data: [{ type: "certificates", id: certificate.id }] },
-        devices: { data: devices.map((device) => ({ type: "devices", id: device.id })) },
+        ...(APP_STORE ? {} : { devices: { data: devices.map((device) => ({ type: "devices", id: device.id })) } }),
       },
     },
   });
@@ -136,4 +178,4 @@ for (const target of TARGETS) {
   }
   console.log(`✔ ${target.profile} → ${target.identifier} (installed ${uuid})`);
 }
-console.log("Profiles ready. Build with scripts/device_build.sh.");
+console.log(`Profiles ready. Build with scripts/${APP_STORE ? "testflight_upload" : "device_build"}.sh.`);
