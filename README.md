@@ -4,7 +4,9 @@ A Wispr Flow–style voice keyboard for iOS. You dictate in any app, the iPhone 
 speech on-device, and Claude cleans up the text before the keyboard inserts it. "Murmur" is a
 working name: it is set in `Config/Base.xcconfig` and `Brand.swift`.
 
-The plan, decisions and phases are in [docs/PLAN.md](docs/PLAN.md).
+The product plan, decisions and phases are in [docs/PLAN.md](docs/PLAN.md). The implementation
+plan for matching the complete 42-screen reference onboarding is in
+[docs/ONBOARDING_PARITY_PLAN.md](docs/ONBOARDING_PARITY_PLAN.md).
 
 ## How it works
 

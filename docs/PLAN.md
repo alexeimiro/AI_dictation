@@ -2,7 +2,9 @@
 
 ## Context
 Build an iOS clone of Wispr Flow, a voice-first keyboard: dictate in any app, and AI cleans up the text before it is inserted.
-- **Inputs:** 21 onboarding screenshots (`Wispr Flow iOS Onboarding/0–20.png`) and `App_Structure.md` (39 flows).
+- **Inputs:** 42 captured onboarding/home screenshots in `artifacts/wispr-onboarding/`, the
+  matching contact sheet and demo video, and `App_Structure.md` (39 broader product flows). See
+  `ONBOARDING_PARITY_PLAN.md` for the implementation-ready screen mapping.
 - **Public research:** Wispr's help center, changelog and App Store listing fill in the screens we have no screenshots for.
 - **Starting point:** the repo holds only those files, so this is greenfield.
 - **Toolchain:** Xcode 26.6 / iOS 26.5 SDK, Homebrew, Node 26, Docker. The paired iPhone 16 Pro runs iOS 26.6.1 with Developer Mode on.
