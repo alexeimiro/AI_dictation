@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Builds Murmur for the iPhone and installs it.
+# Builds Murmur for iPhone and installs it on every test device (over Wi-Fi once paired).
 #
 # Signing is manual, with development profiles created through the App Store Connect API by
 # scripts/provision_dev.mjs (xcodebuild's own API-key provisioning is rejected for this key).
-# Reads Config/asc.env: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH, DEVICE_UDID.
+# Reads Config/asc.env: ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH, DEVICE_UDID (comma-separated).
 #   scripts/device_build.sh             provision if needed, build, install
-#   scripts/device_build.sh --refresh   recreate the profiles first (e.g. after capability changes)
+#   scripts/device_build.sh --refresh   recreate the profiles first (after adding a device or
+#                                       changing capabilities)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source Config/asc.env
@@ -16,9 +17,11 @@ if [[ "${1:-}" == "--refresh" || "$installed" -lt 3 ]]; then
   node scripts/provision_dev.mjs
 fi
 
+# A generic destination: a phone that's asleep on Wi-Fi isn't offered as a destination, but the
+# install below wakes it.
 xcodegen generate -q
 xcodebuild -project Murmur.xcodeproj -scheme Murmur \
-  -destination "platform=iOS,id=$DEVICE_UDID" \
+  -destination "generic/platform=iOS" \
   -derivedDataPath build/DerivedData \
   MURMUR_SIGN_STYLE=Manual \
   MURMUR_PROFILE_APP="Murmur Dev App" \
@@ -26,5 +29,11 @@ xcodebuild -project Murmur.xcodeproj -scheme Murmur \
   MURMUR_PROFILE_WIDGETS="Murmur Dev Widgets" \
   build | grep -E "error:|BUILD (SUCCEEDED|FAILED)" | sort -u
 
-xcrun devicectl device install app --device "$DEVICE_UDID" \
-  build/DerivedData/Build/Products/Debug-iphoneos/Murmur.app
+status=0
+IFS=',' read -ra udids <<< "$DEVICE_UDID"
+for udid in "${udids[@]}"; do
+  echo "Installing on $udid"
+  xcrun devicectl device install app --device "$udid" \
+    build/DerivedData/Build/Products/Debug-iphoneos/Murmur.app || status=1
+done
+exit $status

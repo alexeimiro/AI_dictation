@@ -13,10 +13,12 @@ struct SettingsView: View {
                     LabeledContent("Languages", value: languagesSummary)
                 }
                 Toggle("AI cleanup", isOn: $settings.aiCleanupEnabled)
+                    .tint(Palette.toggleGreen)
                 Picker("Default style", selection: $settings.defaultStyle) {
                     ForEach(StylePreset.allCases) { Text($0.title).tag($0) }
                 }
                 Toggle("Use built-in mic", isOn: $settings.useBuiltInMic)
+                    .tint(Palette.toggleGreen)
                 Picker("Disable after", selection: $settings.disableAfter) {
                     ForEach(DisableAfter.allCases) { Text($0.title).tag($0) }
                 }
@@ -27,10 +29,13 @@ struct SettingsView: View {
                     Text("QWERTY").tag(KeyboardLayoutPreference.qwerty)
                 }
                 Toggle("Keyboard feedback", isOn: $settings.keyboardFeedback)
+                    .tint(Palette.toggleGreen)
                 Toggle("Interaction sounds", isOn: $settings.interactionSounds)
+                    .tint(Palette.toggleGreen)
             }
             Section("System") {
                 Toggle("Live Activities", isOn: $settings.liveActivities)
+                    .tint(Palette.toggleGreen)
             }
             Section {
                 Picker("Auto-delete transcripts", selection: $settings.transcriptRetention) {

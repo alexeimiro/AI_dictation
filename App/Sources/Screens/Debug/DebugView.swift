@@ -70,7 +70,7 @@ struct DebugView: View {
 
     private func metricsRow(_ title: String, _ summary: MetricsSummary) -> some View {
         LabeledContent(title) {
-            Text(summary.median.map { "\($0) ms / \(summary.p95 ?? $0) ms" } ?? "—")
+            Text(verbatim: summary.median.map { "\($0) ms / \(summary.p95 ?? $0) ms" } ?? "—")
                 .monospacedDigit()
         }
     }

@@ -13,13 +13,12 @@ struct HomeView: View {
         List {
             Section {
                 SessionCard()
-                if !model.setup.isComplete, records.isEmpty {
+            }
+            if !model.setup.isComplete, records.isEmpty {
+                Section {
                     SetupChecklistCard()
                 }
             }
-            .listRowBackground(Color.clear)
-            .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
 
             if records.isEmpty {
                 Section {
@@ -81,6 +80,7 @@ struct HomeView: View {
                 Button(role: .destructive) { model.history.delete(transcript.id) } label: {
                     Label("Delete", systemImage: "trash")
                 }
+                .tint(Palette.danger)
             }
             .contextMenu {
                 Button { model.router.open(.transcript(transcript.id)) } label: { Label("Details", systemImage: "info.circle") }
@@ -189,8 +189,9 @@ struct SessionCard: View {
                     .foregroundStyle(Palette.ink)
             }
         }
-        .padding(16)
-        .background(Palette.paper, in: .rect(cornerRadius: Metrics.cardRadius))
+        .padding(.vertical, 4)
+        // In a List row, default-style buttons fire on a tap anywhere in the row, all of them at once.
+        .buttonStyle(.borderless)
     }
 
     private var statusText: String {
@@ -237,9 +238,9 @@ struct SetupChecklistCard: View {
             .font(.ui(15, .medium))
             .foregroundStyle(Palette.ink)
         }
-        .padding(16)
+        .padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.paper, in: .rect(cornerRadius: Metrics.cardRadius))
+        .buttonStyle(.borderless)
     }
 
     private func checkRow(_ title: String, ok: Bool) -> some View {

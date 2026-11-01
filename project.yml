@@ -64,6 +64,9 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        # Light only until the palette (MurmurUI Theme.swift) gets dark variants. The keyboard
+        # follows the host app's appearance and is not affected.
+        UIUserInterfaceStyle: Light
         UIBackgroundModes:
           - audio
         NSMicrophoneUsageDescription: Murmur listens only while you dictate, to turn your speech into text on your iPhone.

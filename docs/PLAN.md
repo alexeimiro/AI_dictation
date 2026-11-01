@@ -38,7 +38,7 @@ Keyboard ext ── Darwin post + command file (one-time token) ──► Murmur
 2. **No acknowledgement.** The keyboard writes a one-time `launchToken` and opens `murmur://session/start?t=…`.
    - It walks the responder chain to the `UIApplication` and calls `open(_:options:completionHandler:)`, which compiles against the 26.5 SDK.
    - The app starts the session only if the token is fresh (under 20 s). Otherwise it asks for confirmation, so a web page can't turn on the mic.
-   - It then shows "Murmur is on — Swipe right across the bottom edge to continue".
+   - It then shows "Murmur is on — Swipe right along the bottom edge of the screen to go back to your app", with a finger animated over the real home indicator (iOS shows no ◀︎ breadcrumb for keyboard-initiated opens).
    - When the keyboard reappears with a pending request, it starts recording.
 3. **Hot mic.**
    - **Audio session:** `.playAndRecord`, mode `.default`, options `[.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]`. Without HFP, the mic is the built-in one and AirPods music quality is kept. Also `setAllowHapticsAndSystemSoundsDuringRecording(true)`.

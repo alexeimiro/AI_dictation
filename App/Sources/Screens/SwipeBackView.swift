@@ -6,7 +6,6 @@ import SwiftUI
 struct SwipeBackView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var animate = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,12 +27,17 @@ struct SwipeBackView: View {
             content
                 .padding(.horizontal, Metrics.screenMargin)
             Spacer()
-            gestureHint
-                .padding(.bottom, 24)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.paper)
-        .onAppear { animate = true }
+        .overlay(alignment: .bottom) {
+            // Only once the mic is on: recording can't start after leaving the app.
+            if model.session.isLive {
+                SwipeHint()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                    .ignoresSafeArea(edges: .bottom)
+            }
+        }
     }
 
     @ViewBuilder
@@ -63,31 +67,35 @@ struct SwipeBackView: View {
         default:
             VStack(spacing: 18) {
                 SerifTitle("Murmur is on", accent: "on", size: 52)
-                Text("Swipe right across the bottom edge to continue")
+                Text("Swipe right along the bottom edge of the screen to go back to your app")
                     .font(.ui(19))
                     .foregroundStyle(Palette.text)
                     .multilineTextAlignment(.center)
-                Text("or tap ◀︎ in the top-left corner")
+                Text("Keyboards can't use the microphone, so Murmur keeps it on for your next dictations.")
                     .font(.ui(15))
                     .foregroundStyle(Palette.textSecondary)
+                    .multilineTextAlignment(.center)
             }
         }
     }
+}
 
-    /// A finger sliding along the home indicator.
-    private var gestureHint: some View {
-        ZStack(alignment: .leading) {
-            Capsule()
-                .fill(Palette.ink.opacity(0.15))
-                .frame(width: 140, height: 5)
-            Image(systemName: "hand.point.up.left.fill")
-                .font(.system(size: 30))
-                .foregroundStyle(Palette.ink)
-                .offset(x: animate ? 120 : -10, y: 14)
-                .opacity(animate ? 0.2 : 1)
-                .animation(.easeInOut(duration: 1.3).repeatForever(autoreverses: false), value: animate)
-        }
-        .frame(width: 160, height: 60)
-        .accessibilityHidden(true)
+/// A finger sliding along the system home indicator, which is where the swipe has to start.
+/// No bar of our own: one drawn above the real edge looks like the thing to swipe and does
+/// nothing. The ◀︎ breadcrumb isn't mentioned either; iOS doesn't show it reliably when a
+/// keyboard opened the app.
+private struct SwipeHint: View {
+    @State private var animate = false
+
+    var body: some View {
+        Image(systemName: "hand.point.down.fill")
+            .font(.system(size: 30))
+            .foregroundStyle(Palette.ink)
+            .offset(x: animate ? 55 : -55)
+            .opacity(animate ? 0 : 1)
+            .animation(.easeInOut(duration: 1.3).repeatForever(autoreverses: false), value: animate)
+            .padding(.bottom, 12)
+            .accessibilityHidden(true)
+            .onAppear { animate = true }
     }
 }

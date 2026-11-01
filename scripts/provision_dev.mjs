@@ -78,11 +78,22 @@ const certificate = certificates.data.find((cert) => {
 if (!certificate) fail("No development certificate in this team matches a signing identity in the keychain.");
 console.log(`✔ certificate ${certificate.attributes.name} (${certificate.id}), expires ${certificate.attributes.expirationDate.slice(0, 10)}`);
 
-// 2. The test device.
-const devices = await api("GET", `/v1/devices?filter[udid]=${env.DEVICE_UDID}&fields[devices]=name,status`);
-const device = devices.data.find((item) => item.attributes.status === "ENABLED");
-if (!device) fail(`Device ${env.DEVICE_UDID} is not registered and enabled.`);
-console.log(`✔ device ${device.attributes.name} (${device.id})`);
+// 2. The test devices (DEVICE_UDID is comma-separated), registering any that are new.
+const devices = [];
+for (const udid of env.DEVICE_UDID.split(",").map((item) => item.trim()).filter(Boolean)) {
+  const found = await api("GET", `/v1/devices?filter[udid]=${udid}&fields[devices]=name,status`);
+  let device = found.data[0];
+  if (!device) {
+    const name = `Murmur test ${udid.slice(-6)}`;
+    device = (await api("POST", "/v1/devices", {
+      data: { type: "devices", attributes: { name, platform: "IOS", udid } },
+    })).data;
+    console.log(`✔ registered ${name}`);
+  }
+  if (device.attributes.status !== "ENABLED") fail(`Device ${udid} is registered but disabled.`);
+  console.log(`✔ device ${device.attributes.name} (${device.id})`);
+  devices.push(device);
+}
 
 fs.mkdirSync(PROFILES_DIR, { recursive: true });
 
@@ -109,7 +120,7 @@ for (const target of TARGETS) {
       relationships: {
         bundleId: { data: { type: "bundleIds", id: bundleId.id } },
         certificates: { data: [{ type: "certificates", id: certificate.id }] },
-        devices: { data: [{ type: "devices", id: device.id }] },
+        devices: { data: devices.map((device) => ({ type: "devices", id: device.id })) },
       },
     },
   });
