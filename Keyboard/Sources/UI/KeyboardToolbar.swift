@@ -5,8 +5,8 @@ private let ink = Color(red: 0.192, green: 0.176, blue: 0.220)
 
 /// The mic and ✓ buttons: an ink circle with a white glyph, swapped on a dark keyboard, where an
 /// ink circle disappears into the backdrop.
-private let actionFill = Color(UIColor { $0.userInterfaceStyle == .dark ? .white : UIColor(ink) })
-private let actionGlyph = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(ink) : .white })
+let actionFill = Color(UIColor { $0.userInterfaceStyle == .dark ? .white : UIColor(ink) })
+let actionGlyph = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(ink) : .white })
 
 /// The row above the keys: app button, status / style pill / banners, and the mic.
 struct KeyboardToolbar: View {
@@ -29,7 +29,9 @@ struct KeyboardToolbar: View {
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.secondary)
             }
-            micButton
+            if !model.showsVoicePad {
+                micButton
+            }
         }
         .foregroundStyle(.primary)
         .padding(.horizontal, 8)

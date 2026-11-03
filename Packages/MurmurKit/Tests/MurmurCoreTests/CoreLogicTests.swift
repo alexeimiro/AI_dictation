@@ -153,6 +153,21 @@ struct SharedSettingsTests {
         #expect(settings.verifiedEngines["ru-RU"]?.engine == "speech")
         #expect(settings.transcriberEngine == nil)
     }
+
+    @Test func readyHapticIsOnByDefaultAndTheVoiceLayoutPersists() throws {
+        let suite = "test.murmur.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = SharedSettings(defaults: defaults)
+        #expect(settings.readyHaptic)
+        #expect(settings.keyboardLayout == .numbers)
+        settings.readyHaptic = false
+        settings.keyboardLayout = .voice
+        let reread = SharedSettings(defaults: defaults)
+        #expect(!reread.readyHaptic)
+        #expect(reread.keyboardLayout == .voice)
+    }
 }
 
 struct IPCMessageTests {

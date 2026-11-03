@@ -8,9 +8,11 @@ private final class FakeHost: KeyboardSessionHost {
     var currentDocumentIdentifier: UUID? = UUID()
     var openedURLs: [URL] = []
     var inserted: [DictationResult] = []
+    var outcomes: [DictationOutcome] = []
 
     func openContainingApp(_ url: URL) { openedURLs.append(url) }
     func insertDictation(_ result: DictationResult) { inserted.append(result) }
+    func dictationDidFinish(_ outcome: DictationOutcome) { outcomes.append(outcome) }
     func sessionClientDidChange(_ client: KeyboardSessionClient) {}
 }
 
@@ -40,9 +42,11 @@ private final class FakeApp {
         publish(.error)
     }
 
-    func finish(_ requestId: UUID, text: String, document: UUID?) throws {
+    func finish(_ requestId: UUID, text: String, document: UUID?, status: ResultStatus = .cleaned,
+                message: String? = nil) throws {
         try transport.payloads.write(result: DictationResult(
-            requestId: requestId, documentIdentifier: document, text: text, status: .cleaned, createdAt: Date()))
+            requestId: requestId, documentIdentifier: document, text: text, status: status, message: message,
+            createdAt: Date()))
         publish(.ready)
         transport.post(.resultReady)
     }
@@ -91,11 +95,13 @@ struct KeyboardSessionClientTests {
         try app.finish(requestId, text: "Hello world.", document: host.currentDocumentIdentifier)
         #expect(await waitUntil { host.inserted.count == 1 })
         #expect(host.inserted.first?.text == "Hello world.")
+        #expect(host.outcomes == [.ready])
 
         // A second resultReady must not insert again.
         transport.post(.resultReady)
         try? await Task.sleep(for: .milliseconds(100))
         #expect(host.inserted.count == 1)
+        #expect(host.outcomes == [.ready])
         #expect(client.phase == .idle)
         #expect(host.openedURLs.isEmpty)
     }
@@ -161,11 +167,57 @@ struct KeyboardSessionClientTests {
         try app.finish(requestId, text: "Elsewhere.", document: UUID())
         #expect(await waitUntil { client.pendingResult != nil })
         #expect(host.inserted.isEmpty)
+        #expect(host.outcomes == [.ready])
 
         client.insertPendingResult()
         #expect(host.inserted.map(\.text) == ["Elsewhere."])
         client.insertPendingResult()
         #expect(host.inserted.count == 1)
+        #expect(host.outcomes == [.ready], "inserting a held result is the user's own tap")
+    }
+
+    @Test func emptyResultIsAProblemAndCancellingIsSilent() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport)
+        client.host = host
+        app.publish(.ready)
+        client.activate()
+
+        client.micTapped()
+        guard case .starting(let first) = client.phase else { return }
+        #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
+        client.stopTapped()
+        try app.finish(first, text: "", document: host.currentDocumentIdentifier, status: .empty,
+                       message: "We didn't catch anything")
+        #expect(await waitUntil { if case .notice = client.phase { true } else { false } })
+        #expect(host.outcomes == [.problem])
+
+        client.micTapped()
+        #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
+        client.stopTapped()
+        client.cancelTapped()
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(client.phase == .idle)
+        #expect(host.outcomes == [.problem])
+    }
+
+    @Test func aSlowResultIsAProblemOnce() async {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport, resultTimeout: .milliseconds(300))
+        client.host = host
+        app.publish(.ready)
+        client.activate()
+
+        client.micTapped()
+        #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
+        client.stopTapped()
+        #expect(await waitUntil { if case .notice = client.phase { true } else { false } })
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(host.outcomes == [.problem])
     }
 
     @Test func sessionFailureShowsTheAppsReasonWhileOpeningTheApp() async throws {

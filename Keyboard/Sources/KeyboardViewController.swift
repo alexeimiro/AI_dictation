@@ -14,18 +14,25 @@ final class KeyboardInputView: UIInputView, UIInputViewAudioFeedback {
 final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     private let model = KeyboardModel()
     private let keyGrid = KeyGridView()
+    /// The voice pad's row of keys, under `padHost`.
+    private let padKeys = KeyGridView()
     private let repeater = KeyRepeater()
     private let settings = SharedSettings.shared
     private var toolbarHost: UIHostingController<KeyboardToolbar>?
     private var panelHost: UIHostingController<ListeningPanel>?
+    private var padHost: UIHostingController<VoicePad>?
     private var client: KeyboardSessionClient?
     private var plane: KeyboardPlane = .numbers
+    /// The voice layout: the pad is home, and the full keys get a key back to it.
+    private var usesVoicePad = false
     private var shift: ShiftState = .off
     private var lastShiftTap = Date.distantPast
-    private var lastInsertedDictation: String?
+    /// The last dictation, while the text before the cursor still ends with it (the pad's Undo).
+    private var undoableDictation: String?
     private var layoutSignature = ""
     private var memoryTimer: Timer?
     private lazy var haptics = UIImpactFeedbackGenerator(style: .light)
+    private lazy var readyHaptics = UINotificationFeedbackGenerator()
 
     private static let keyboardHeight: CGFloat = 272
 
@@ -49,15 +56,21 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
 
         wireActions()
         buildViews()
-        plane = settings.keyboardLayout == .qwerty ? .letters : .numbers
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         model.hasFullAccess = hasFullAccess
         model.defaultStyle = settings.defaultStyle
+        model.announcesReady = hasFullAccess && settings.readyHaptic
         loadLanguages()
         if hasFullAccess { haptics.prepare() }
+        usesVoicePad = settings.keyboardLayout == .voice
+        plane = switch settings.keyboardLayout {
+        case .numbers: .numbers
+        case .qwerty: .letters
+        case .voice: .voice
+        }
         updateAutoShift()
         reloadKeys()
         client?.activate()
@@ -75,6 +88,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         super.textDidChange(textInput)
         updateAutoShift()
         reloadKeys()
+        refreshUndo()
+    }
+
+    override func selectionDidChange(_ textInput: UITextInput?) {
+        super.selectionDidChange(textInput)
+        refreshUndo()
     }
 
     // MARK: Views
@@ -92,6 +111,17 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         keyGrid.onKeyUp = { [weak self] spec in self?.keyUp(spec) }
         view.addSubview(keyGrid)
 
+        let pad = embed(VoicePad(model: model), in: view)
+        // A keyboard extension gets no touches where it draws nothing; a barely-there fill makes
+        // the pad's empty space a trackpad.
+        pad.view.backgroundColor = UIColor(white: 0, alpha: 0.001)
+        padHost = pad
+        padKeys.translatesAutoresizingMaskIntoConstraints = false
+        padKeys.globeTarget = self
+        padKeys.onKeyDown = { [weak self] spec in self?.keyDown(spec) }
+        padKeys.onKeyUp = { [weak self] spec in self?.keyUp(spec) }
+        view.addSubview(padKeys)
+
         let height = view.heightAnchor.constraint(equalToConstant: Self.keyboardHeight)
         height.priority = UILayoutPriority(999)
         NSLayoutConstraint.activate([
@@ -108,8 +138,18 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             panel.view.leadingAnchor.constraint(equalTo: keyGrid.leadingAnchor),
             panel.view.trailingAnchor.constraint(equalTo: keyGrid.trailingAnchor),
             panel.view.bottomAnchor.constraint(equalTo: keyGrid.bottomAnchor),
+            pad.view.topAnchor.constraint(equalTo: keyGrid.topAnchor),
+            pad.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            pad.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            pad.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            padKeys.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            padKeys.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            padKeys.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            padKeys.heightAnchor.constraint(equalToConstant: 58),
         ])
         panel.view.isHidden = true
+        pad.view.isHidden = true
+        padKeys.isHidden = true
     }
 
     private func embed<Content: View>(_ content: Content, in container: UIView) -> UIHostingController<Content> {
@@ -127,18 +167,27 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     /// held would cancel its touch (and stop delete auto-repeat).
     private func reloadKeys() {
         let returnTitle = KeyboardLayouts.returnTitle(for: textDocumentProxy.returnKeyType ?? .default)
+        if model.returnTitle != returnTitle { model.returnTitle = returnTitle }
         let showsGlobe = needsInputModeSwitchKey
-        let signature = "\(plane)|\(shift)|\(showsGlobe)|\(returnTitle)"
+        let signature = "\(plane)|\(shift)|\(showsGlobe)|\(usesVoicePad)|\(returnTitle)"
         guard signature != layoutSignature else { return }
         layoutSignature = signature
-        keyGrid.configure(rows: KeyboardLayouts.rows(
-            for: plane, shift: shift, showsGlobe: showsGlobe, returnTitle: returnTitle))
+        let rows = KeyboardLayouts.rows(for: plane, shift: shift, showsGlobe: showsGlobe,
+                                        showsVoicePad: usesVoicePad, returnTitle: returnTitle)
+        (plane == .voice ? padKeys : keyGrid).configure(rows: rows)
+        updateKeyAreas()
     }
 
-    private func updateCaptureUI() {
+    /// The keys, the voice pad or the listening panel, whichever fits the plane and the phase. The
+    /// pad shows its own listening state, so it keeps the panel hidden.
+    private func updateKeyAreas() {
         let capturing = model.isCapturing
-        panelHost?.view.isHidden = !capturing
-        keyGrid.isHidden = capturing
+        let onPad = plane == .voice
+        if model.showsVoicePad != onPad { model.showsVoicePad = onPad }
+        padHost?.view.isHidden = !onPad
+        padKeys.isHidden = !onPad || capturing
+        keyGrid.isHidden = onPad || capturing
+        panelHost?.view.isHidden = onPad || !capturing
     }
 
     private func wireActions() {
@@ -160,6 +209,18 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             setLanguage: { [weak self] language in
                 self?.model.languageOverride = language
                 self?.client?.languageOverride = language?.tag
+            },
+            deleteDown: { [weak self] in self?.keyDown(KeySpec(action: .delete)) },
+            deleteUp: { [weak self] in self?.keyUp(KeySpec(action: .delete)) },
+            deleteWord: { [weak self] in
+                self?.repeater.stop()
+                self?.deleteWordBackward()
+            },
+            returnKey: { [weak self] in self?.keyDown(KeySpec(action: .returnKey)) },
+            undo: { [weak self] in self?.undoLastDictation() },
+            moveCursor: { [weak self] offset in
+                self?.textDocumentProxy.adjustTextPosition(byCharacterOffset: offset)
+                self?.clearUndo()
             })
     }
 
@@ -184,6 +245,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
 
     private func keyDown(_ spec: KeySpec) {
         feedback()
+        switch spec.action {
+        case .character, .space, .returnKey, .delete: clearUndo()
+        default: break
+        }
         switch spec.action {
         case .character(let value):
             textDocumentProxy.insertText(value)
@@ -297,12 +362,47 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         let text = TextJoiner.prepare(result.text, traits: traits)
         guard !text.isEmpty else { return }
         textDocumentProxy.insertText(text)
-        lastInsertedDictation = text
+        undoableDictation = text
+        model.undoableWords = text.split(whereSeparator: \.isWhitespace).count
+    }
+
+    /// Success or warning, so a dictation can finish while nobody watches the screen.
+    func dictationDidFinish(_ outcome: DictationOutcome) {
+        guard hasFullAccess, settings.readyHaptic else { return }
+        readyHaptics.notificationOccurred(outcome == .ready ? .success : .warning)
     }
 
     func sessionClientDidChange(_ client: KeyboardSessionClient) {
         model.update(from: client)
-        updateCaptureUI()
+        if model.isProcessing, model.announcesReady { readyHaptics.prepare() }
+        updateKeyAreas()
+    }
+
+    // MARK: Undo
+
+    /// The text before the cursor must still end with the dictation. Apps may hand over only the
+    /// end of a long one, so a context that is entirely the dictation's tail counts too.
+    private func undoStillApplies(_ text: String) -> Bool {
+        let before = textDocumentProxy.documentContextBeforeInput ?? ""
+        return before.hasSuffix(text) || (!before.isEmpty && text.hasSuffix(before))
+    }
+
+    private func refreshUndo() {
+        if let text = undoableDictation, !undoStillApplies(text) { clearUndo() }
+    }
+
+    private func undoLastDictation() {
+        guard let text = undoableDictation, undoStillApplies(text) else { return clearUndo() }
+        feedback()
+        for _ in 0..<text.count { textDocumentProxy.deleteBackward() }
+        clearUndo()
+        updateAutoShift()
+        reloadKeys()
+    }
+
+    private func clearUndo() {
+        undoableDictation = nil
+        if model.undoableWords != nil { model.undoableWords = nil }
     }
 
     /// Return would submit here (send/go/search…), so dictations must stay on one line.

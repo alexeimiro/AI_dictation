@@ -27,8 +27,11 @@ struct SettingsView: View {
                 Picker("Layout", selection: $settings.keyboardLayout) {
                     Text("Numbers first").tag(KeyboardLayoutPreference.numbers)
                     Text("QWERTY").tag(KeyboardLayoutPreference.qwerty)
+                    Text("Voice pad").tag(KeyboardLayoutPreference.voice)
                 }
                 Toggle("Keyboard feedback", isOn: $settings.keyboardFeedback)
+                    .tint(Palette.toggleGreen)
+                Toggle("Vibrate when text is ready", isOn: $settings.readyHaptic)
                     .tint(Palette.toggleGreen)
                 Toggle("Interaction sounds", isOn: $settings.interactionSounds)
                     .tint(Palette.toggleGreen)

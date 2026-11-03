@@ -9,6 +9,7 @@ final class SettingsModel {
     var disableAfter: DisableAfter { didSet { settings.disableAfter = disableAfter } }
     var keyboardLayout: KeyboardLayoutPreference { didSet { settings.keyboardLayout = keyboardLayout } }
     var keyboardFeedback: Bool { didSet { settings.keyboardFeedback = keyboardFeedback } }
+    var readyHaptic: Bool { didSet { settings.readyHaptic = readyHaptic } }
     var interactionSounds: Bool { didSet { settings.interactionSounds = interactionSounds } }
     var defaultStyle: StylePreset { didSet { settings.defaultStyle = defaultStyle } }
     var useBuiltInMic: Bool { didSet { settings.useBuiltInMic = useBuiltInMic } }
@@ -32,6 +33,7 @@ final class SettingsModel {
         disableAfter = settings.disableAfter
         keyboardLayout = settings.keyboardLayout
         keyboardFeedback = settings.keyboardFeedback
+        readyHaptic = settings.readyHaptic
         interactionSounds = settings.interactionSounds
         defaultStyle = settings.defaultStyle
         useBuiltInMic = settings.useBuiltInMic

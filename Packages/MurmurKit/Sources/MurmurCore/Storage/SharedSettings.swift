@@ -36,6 +36,8 @@ public enum KeyboardLayoutPreference: String, Codable, Sendable, CaseIterable {
     /// Numbers-first layout with a dictation row (the default, like Wispr Flow).
     case numbers
     case qwerty
+    /// A big talk button with a few keys; ABC and 123 open the full keys.
+    case voice
 }
 
 /// Which on-device recognizer passed validation for a language on this device, so the check isn't
@@ -65,7 +67,7 @@ public final class SharedSettings: @unchecked Sendable {
     }
 
     private enum Key: String {
-        case disableAfter, keyboardLayout, keyboardFeedback, interactionSounds, defaultStyle
+        case disableAfter, keyboardLayout, keyboardFeedback, readyHaptic, interactionSounds, defaultStyle
         case useBuiltInMic, aiCleanupEnabled, transcriberEngine, liveActivities, transcriptRetention
         case primaryLanguage, secondaryLanguage, verifiedEngines
         /// Phase 1 single-language setting, migrated into `primaryLanguage`.
@@ -86,6 +88,13 @@ public final class SharedSettings: @unchecked Sendable {
     public var keyboardFeedback: Bool {
         get { bool(.keyboardFeedback, default: true) }
         set { defaults.set(newValue, forKey: Key.keyboardFeedback.rawValue) }
+    }
+
+    /// A vibration when a dictation's text is ready, so nobody has to watch the screen (requires
+    /// Full Access).
+    public var readyHaptic: Bool {
+        get { bool(.readyHaptic, default: true) }
+        set { defaults.set(newValue, forKey: Key.readyHaptic.rawValue) }
     }
 
     /// Start/stop sounds ("Turning off audio").

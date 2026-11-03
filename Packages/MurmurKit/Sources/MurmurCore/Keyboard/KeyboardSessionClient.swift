@@ -9,7 +9,18 @@ public protocol KeyboardSessionHost: AnyObject {
     func openContainingApp(_ url: URL)
     /// Insert a finished dictation into the focused field.
     func insertDictation(_ result: DictationResult)
+    /// A dictation the keyboard was waiting on came back (or is running late), so the user can be
+    /// told without watching the screen.
+    func dictationDidFinish(_ outcome: DictationOutcome)
     func sessionClientDidChange(_ client: KeyboardSessionClient)
+}
+
+/// How a dictation the keyboard was waiting on ended.
+public enum DictationOutcome: Equatable, Sendable {
+    /// The text went into the field, or is held for "Insert last dictation".
+    case ready
+    /// Nothing usable came back, or the result is running late.
+    case problem
 }
 
 /// Keyboard-side dictation state machine. Lives in MurmurCore so it can be unit-tested against
@@ -317,6 +328,7 @@ public final class KeyboardSessionClient {
             }
             guard let self, !Task.isCancelled, case .processing(requestId) = self.phase else { return }
             self.setPhase(.notice("This is taking longer than usual. Your dictation will be saved in Murmur."))
+            self.host?.dictationDidFinish(.problem)
         }
     }
 
@@ -410,6 +422,7 @@ public final class KeyboardSessionClient {
             } else {
                 setPhase(.idle)
             }
+            if result.status != .cancelled { host?.dictationDidFinish(.problem) }
             return
         }
         setPhase(.idle)
@@ -418,9 +431,11 @@ public final class KeyboardSessionClient {
         let fresh = clock().timeIntervalSince(result.createdAt) < 60
         if sameField, fresh, transport.payloads.claim(result.requestId) {
             host?.insertDictation(result)
+            host?.dictationDidFinish(.ready)
             if let message = result.message { setPhase(.notice(message)) }
         } else if !transport.payloads.isClaimed(result.requestId) {
             pendingResult = result
+            host?.dictationDidFinish(.ready)
         }
         notifyHost()
     }

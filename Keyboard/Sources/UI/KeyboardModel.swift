@@ -19,6 +19,14 @@ final class KeyboardModel {
     /// Recent mic levels for the waveform, oldest first.
     var levels: [Double] = Array(repeating: 0.06, count: 30)
     var debugMemory: String?
+    /// The voice layout's pad is up; the toolbar drops its mic, since the pad has the big one.
+    var showsVoicePad = false
+    /// The field's return key title ("return", "send", …), for the pad's return button.
+    var returnTitle = "return"
+    /// Words in the last dictation, while it can still be undone.
+    var undoableWords: Int?
+    /// A vibration will say when the text is ready, so the pad's hint can promise it.
+    var announcesReady = false
 
     @ObservationIgnored var actions = Actions()
 
@@ -32,6 +40,12 @@ final class KeyboardModel {
         var openApp: () -> Void = {}
         var setStyle: (StylePreset?) -> Void = { _ in }
         var setLanguage: (DictationLanguage?) -> Void = { _ in }
+        var deleteDown: () -> Void = {}
+        var deleteUp: () -> Void = {}
+        var deleteWord: () -> Void = {}
+        var returnKey: () -> Void = {}
+        var undo: () -> Void = {}
+        var moveCursor: (Int) -> Void = { _ in }
     }
 
     var isCapturing: Bool {
@@ -39,6 +53,10 @@ final class KeyboardModel {
         case .listening, .processing: true
         default: false
         }
+    }
+
+    var isProcessing: Bool {
+        if case .processing = phase { true } else { false }
     }
 
     var listeningSince: Date? {

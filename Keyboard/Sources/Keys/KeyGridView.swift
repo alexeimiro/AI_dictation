@@ -94,6 +94,7 @@ final class KeyButton: UIControl {
         case .plane(.letters): "Letters"
         case .plane(.numbers): "Numbers"
         case .plane(.symbols): "More symbols"
+        case .plane(.voice): "Voice pad"
         case .globe: "Next keyboard"
         }
     }

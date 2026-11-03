@@ -4,6 +4,8 @@ enum KeyboardPlane: Equatable {
     case numbers
     case symbols
     case letters
+    /// The voice pad: a big talk button (see `VoicePad`) above one row of keys.
+    case voice
 }
 
 enum ShiftState {
@@ -42,9 +44,14 @@ struct KeySpec {
 
 /// Key rows for each plane. The numbers-first plane is the default, like Wispr Flow's keyboard.
 enum KeyboardLayouts {
-    static func rows(for plane: KeyboardPlane, shift: ShiftState, showsGlobe: Bool, returnTitle: String) -> [[KeySpec]] {
-        let bottom = bottomRow(plane: plane, showsGlobe: showsGlobe, returnTitle: returnTitle)
+    /// `showsVoicePad` adds a key back to the pad, for the voice layout's full keys.
+    static func rows(for plane: KeyboardPlane, shift: ShiftState, showsGlobe: Bool, showsVoicePad: Bool,
+                     returnTitle: String) -> [[KeySpec]] {
+        let bottom = bottomRow(plane: plane, showsGlobe: showsGlobe, showsVoicePad: showsVoicePad,
+                               returnTitle: returnTitle)
         switch plane {
+        case .voice:
+            return [voiceRow(showsGlobe: showsGlobe)]
         case .numbers:
             return [
                 "1234567890".map { .char(String($0)) },
@@ -86,19 +93,39 @@ enum KeyboardLayouts {
 
     private static let deleteKey = KeySpec(action: .delete, systemImage: "delete.left", weight: 1.4, style: .function)
 
-    private static func bottomRow(plane: KeyboardPlane, showsGlobe: Bool, returnTitle: String) -> [KeySpec] {
+    private static func bottomRow(plane: KeyboardPlane, showsGlobe: Bool, showsVoicePad: Bool,
+                                  returnTitle: String) -> [KeySpec] {
         var row: [KeySpec] = []
         switch plane {
         case .letters:
             row.append(KeySpec(action: .plane(.numbers), label: "123", weight: 1.3, style: .function))
-        case .numbers, .symbols:
+        case .numbers, .symbols, .voice:
             row.append(KeySpec(action: .plane(.letters), label: "ABC", weight: 1.3, style: .function))
+        }
+        if showsVoicePad {
+            row.append(KeySpec(action: .plane(.voice), systemImage: "mic", weight: 1.1, style: .function))
         }
         if showsGlobe {
             row.append(KeySpec(action: .globe, systemImage: "globe", weight: 1.1, style: .function))
         }
-        row.append(KeySpec(action: .space, label: "space", weight: showsGlobe ? 4.6 : 5.7))
+        let extraKeys = CGFloat([showsVoicePad, showsGlobe].filter { $0 }.count)
+        row.append(KeySpec(action: .space, label: "space", weight: 5.7 - 1.1 * extraKeys))
         row.append(KeySpec(action: .returnKey, label: returnTitle, weight: 2.1, style: .returnKey))
+        return row
+    }
+
+    /// The voice pad's one row: the ways out to the full keys, the punctuation dictation most
+    /// often leaves out, and space. Delete and return sit beside the talk button.
+    private static func voiceRow(showsGlobe: Bool) -> [KeySpec] {
+        var row = [
+            KeySpec(action: .plane(.letters), label: "ABC", weight: 1.3, style: .function),
+            KeySpec(action: .plane(.numbers), label: "123", weight: 1.3, style: .function),
+        ]
+        if showsGlobe {
+            row.append(KeySpec(action: .globe, systemImage: "globe", weight: 1.1, style: .function))
+        }
+        row += [",", ".", "?"].map(KeySpec.char)
+        row.append(KeySpec(action: .space, label: "space", weight: showsGlobe ? 3.3 : 4.4))
         return row
     }
 
