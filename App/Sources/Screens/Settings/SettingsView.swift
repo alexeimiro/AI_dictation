@@ -44,7 +44,7 @@ struct SettingsView: View {
             } header: {
                 Text("Privacy")
             } footer: {
-                Text("Transcripts stay on this iPhone. Your voice is recognized on the device; only the text goes to the cleanup service.")
+                Text("Transcripts stay on this iPhone. To write your text, the recording and its transcript go to OpenAI; Murmur's servers don't keep either.")
             }
             Section {
                 NavigationLink("Debug", value: Route.debug)

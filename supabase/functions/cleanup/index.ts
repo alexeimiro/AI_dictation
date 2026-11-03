@@ -1,25 +1,20 @@
 // POST /functions/v1/cleanup
-// Turns an on-device transcript into the text the user meant to type, using Claude.
+// Turns a transcript into the text the user meant to type, using an OpenAI model.
 // Body: CleanupRequest (see _shared/types.ts). Responses:
 //   200 { text, status: "cleaned" | "raw", words, model, ttftMs, totalMs, remaining }
 //   400 bad_request · 401 unauthorized · 402 limit_reached · 429 rate_limited
 //   502/503 cleanup_unavailable → the app inserts its locally formatted transcript instead.
-// Env: ANTHROPIC_API_KEY (required), CLEANUP_MODEL, CLEANUP_TIMEOUT_MS (response headers, default
-// 5000), CLEANUP_DEADLINE_MS (whole call incl. streamed body, default 9000), CLEANUP_DISABLED=1.
-import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
-import { DEFAULT_MODEL, describeCleanupError, runCleanup } from "../_shared/cleanup.ts";
+// Env: OPENAI_API_KEY (required), CLEANUP_MODEL (default gpt-6-astra), CLEANUP_EFFORT (reasoning
+// effort, default low), CLEANUP_DEADLINE_MS (whole call, default 9000), CLEANUP_DISABLED=1.
+import { DEFAULT_EFFORT, DEFAULT_MODEL, describeCleanupError, runCleanup } from "../_shared/cleanup.ts";
 import { adminClient, authenticate, background, corsHeaders, json } from "../_shared/http.ts";
 import { countWords } from "../_shared/text.ts";
 import { LIMITS, parseCleanupRequest } from "../_shared/types.ts";
 
 const admin = adminClient();
-// Created on first use: without the ANTHROPIC_API_KEY secret the constructor throws, which should
-// surface as `cleanup_unavailable` (the app falls back to local formatting), not a boot failure.
-let anthropic: Anthropic | null = null;
 const model = Deno.env.get("CLEANUP_MODEL") ?? DEFAULT_MODEL;
-/** Time allowed for Anthropic's response headers; the SDK retries a timeout once. */
-const timeoutMs = envNumber("CLEANUP_TIMEOUT_MS", 5000);
-/** Hard bound on the whole call including the streamed body; must stay below the app's request timeout. */
+const effort = Deno.env.get("CLEANUP_EFFORT") ?? DEFAULT_EFFORT;
+/** Hard bound on the whole call; must stay below the app's request timeout (11 s). */
 const deadlineMs = envNumber("CLEANUP_DEADLINE_MS", 9000);
 /** Kill switch: answers 503 before any database or model call. */
 const disabled = Deno.env.get("CLEANUP_DISABLED") === "1";
@@ -82,9 +77,15 @@ Deno.serve(async (request) => {
     });
   }
 
+  // Without the secret, answer like an outage: the app inserts its locally formatted text.
+  const apiKey = Deno.env.get("OPENAI_API_KEY");
+  if (!apiKey) {
+    console.error("OPENAI_API_KEY is not set");
+    return json({ error: "cleanup_unavailable" }, 503);
+  }
+
   try {
-    anthropic ??= new Anthropic();
-    const outcome = await runCleanup(anthropic, body, { model, timeoutMs, deadlineMs });
+    const outcome = await runCleanup(body, { model, effort, apiKey, deadlineMs });
     const words = countWords(outcome.text, body.language);
     background(admin.rpc("record_usage", {
       p_user: caller.userId,
@@ -108,8 +109,7 @@ Deno.serve(async (request) => {
       outWords: words,
       inputTokens: outcome.usage.input,
       outputTokens: outcome.usage.output,
-      cacheReadTokens: outcome.usage.cacheRead,
-      cacheCreationTokens: outcome.usage.cacheCreation,
+      cachedTokens: outcome.usage.cacheRead,
     }));
     return json({
       text: outcome.text,
@@ -122,7 +122,7 @@ Deno.serve(async (request) => {
     });
   } catch (error) {
     const label = describeCleanupError(error);
-    if (label === "cleanup failed") console.error(label, error);
+    if (label === "cleanup failed") console.error(label, error instanceof Error ? error.name : String(error));
     else console.error(label, error instanceof Error ? error.message : String(error));
     return json({ error: "cleanup_unavailable" }, 502);
   }

@@ -18,7 +18,7 @@ struct EmailSignInView: View {
                        color: Palette.ink, tracking: 0)
                 .padding(.top, 73.3)
             if let sentTo {
-                Text("Enter the 6-digit code we sent to \(sentTo).")
+                Text("Enter the 6-digit code we sent to \(sentTo), or open the link in that email on this iPhone.")
                     .font(.ui(16))
                     .foregroundStyle(Palette.textSecondary)
                     .multilineTextAlignment(.center)

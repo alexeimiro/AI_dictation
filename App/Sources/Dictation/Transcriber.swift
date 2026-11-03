@@ -35,9 +35,14 @@ protocol Transcriber: AnyObject, Sendable {
 }
 
 enum TranscriberEngine: String, CaseIterable, Identifiable {
-    /// Per language: SpeechTranscriber when it supports the language and passes validation,
-    /// otherwise DictationTranscriber. Default.
+    /// OpenAI when the backend is configured, otherwise on-device. Default.
     case auto
+    /// OpenAI through the `transcribe` function, with on-device models that are already
+    /// installed as the fallback.
+    case openAI
+    /// On-device only. Per language: SpeechTranscriber when it supports the language and passes
+    /// validation, otherwise DictationTranscriber.
+    case onDevice
     /// Force Apple SpeechAnalyzer + SpeechTranscriber (iOS 26 model) for every language.
     case speechTranscriber
     /// Force Apple SpeechAnalyzer + DictationTranscriber (supports contextual strings).
@@ -50,6 +55,8 @@ enum TranscriberEngine: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .auto: "Automatic (recommended)"
+        case .openAI: "OpenAI"
+        case .onDevice: "On-device"
         case .speechTranscriber: "SpeechTranscriber"
         case .dictationTranscriber: "DictationTranscriber"
         case .stub: "Stub (no ASR)"
@@ -60,12 +67,21 @@ enum TranscriberEngine: String, CaseIterable, Identifiable {
         SharedSettings.shared.transcriberEngine.flatMap(TranscriberEngine.init(rawValue:)) ?? .auto
     }
 
-    /// Debug: the engine forced for every language, or nil for automatic selection.
+    /// Debug: the on-device engine forced for every language, or nil for automatic selection.
     var kindOverride: AppleSpeechTranscriber.Kind? {
         switch self {
         case .speechTranscriber: .speech
         case .dictationTranscriber: .dictation
-        case .auto, .stub: nil
+        case .auto, .openAI, .onDevice, .stub: nil
+        }
+    }
+
+    /// Whether a session transcribes in the cloud. `cloudAvailable`: the backend is configured.
+    func usesCloud(cloudAvailable: Bool) -> Bool {
+        switch self {
+        case .auto: cloudAvailable
+        case .openAI: true
+        case .onDevice, .speechTranscriber, .dictationTranscriber, .stub: false
         }
     }
 }

@@ -23,14 +23,14 @@ enum HistoryFixtures {
                 language: "ru-RU", style: .casual,
                 rawText: "э-э привет можешь скинуть отчёт до пятницы вопросительный знак спасибо большое",
                 cleanedText: "Привет, можешь скинуть отчёт до пятницы? Спасибо большое!",
-                status: .cleaned, metrics: metrics(6.2, 7), cleanupModel: "claude-opus-5-5", source: .keyboard),
+                status: .cleaned, metrics: metrics(6.2, 7), cleanupModel: "gpt-6-astra", source: .keyboard),
             Transcript(
                 id: UUID(uuidString: "11111111-1111-1111-1111-111111111102")!,
                 createdAt: now.addingTimeInterval(-15 * 60),
                 language: "en-US", style: .casual,
                 rawText: "um so I was thinking we could meet at like three no wait four pm on thursday",
                 cleanedText: "I was thinking we could meet at 4 PM on Thursday.",
-                status: .cleaned, metrics: metrics(5.1, 11), cleanupModel: "claude-opus-5-5",
+                status: .cleaned, metrics: metrics(5.1, 11), cleanupModel: "gpt-6-astra",
                 insertedAt: now.addingTimeInterval(-15 * 60 + 3), source: .keyboard),
             Transcript(
                 id: UUID(uuidString: "11111111-1111-1111-1111-111111111103")!,
@@ -46,7 +46,7 @@ enum HistoryFixtures {
                 language: "en-US", style: .formal,
                 rawText: "things to do today first run the laundry second buy groceries and third call mom",
                 cleanedText: "Things to do today:\n1. Run the laundry\n2. Buy groceries\n3. Call mom",
-                status: .cleaned, metrics: metrics(7.8, 15), cleanupModel: "claude-opus-5-5",
+                status: .cleaned, metrics: metrics(7.8, 15), cleanupModel: "gpt-6-astra",
                 insertedAt: now.addingTimeInterval(-26 * 3600 + 4), source: .keyboard),
             Transcript(
                 id: UUID(uuidString: "11111111-1111-1111-1111-111111111105")!,

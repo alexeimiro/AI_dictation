@@ -108,7 +108,7 @@ private struct PrivacyNote: View {
         var bold = AttributedString("never sells")
         bold.font = .ui(14, .semibold)
         text += bold
-        text += AttributedString(" what you say, and your voice stays on your iPhone. Full Access just lets the keyboard work with the app.")
+        text += AttributedString(" what you say. Full Access just lets the keyboard work with the Murmur app.")
         return text
     }
 }

@@ -36,7 +36,7 @@ protocol Cleaning: AnyObject {
 }
 
 /// Turns a finished recording into the text the keyboard inserts:
-/// on-device transcript → AI cleanup (Claude, via the `cleanup` function) → `DictationResult`.
+/// transcript (OpenAI, or on-device) → AI cleanup (OpenAI, via the `cleanup` function) → `DictationResult`.
 /// Falls back to `LocalFormatter` when cleanup is off, unavailable, or the dictation is tiny.
 @MainActor
 final class DictationPipeline {
@@ -69,9 +69,10 @@ final class DictationPipeline {
             raw = try await transcriber.finishUtterance()
         } catch {
             logger.error("Transcription failed: \(error.localizedDescription, privacy: .public)")
+            let limited = (error as? CloudTranscriptionError) == .limitReached
             return outcome(
-                dictation, raw: "", text: "", status: .failed,
-                message: "Couldn't transcribe that. Please try again.", errorReason: error.localizedDescription,
+                dictation, raw: "", text: "", status: limited ? .limitReached : .failed,
+                message: Self.transcriptionMessage(for: error), errorReason: error.localizedDescription,
                 style: style, cleanupModel: nil,
                 metrics: TranscriptMetrics(audioSeconds: audioSeconds, words: 0, asrMs: Self.milliseconds(since: stoppedAt)))
         }
@@ -173,6 +174,16 @@ final class DictationPipeline {
             logger.notice("Cleanup unavailable, using local formatting: \(String(describing: error), privacy: .public)")
         }
         return outcome
+    }
+
+    /// What the keyboard shows when no text came back.
+    static func transcriptionMessage(for error: Error) -> String {
+        switch error as? CloudTranscriptionError {
+        case .limitReached: "Dictation limit reached. Get unlimited access in Murmur."
+        case .rateLimited: "Too many dictations in a minute. Try again shortly."
+        case .unavailable: "Couldn't reach transcription. Check your connection and try again."
+        case .notConfigured, nil: "Couldn't transcribe that. Please try again."
+        }
     }
 
     private static func describe(_ failure: CleanupClient.Failure) -> String {

@@ -1,6 +1,11 @@
 import { assert, assertEquals, assertFalse, assertRejects, assertStringIncludes } from "jsr:@std/assert@1";
-import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
-import { buildSystemBlocks, describeCleanupError, runCleanup } from "../_shared/cleanup.ts";
+import {
+  buildInstructionParts,
+  buildResponsesRequest,
+  CleanupAPIError,
+  describeCleanupError,
+  runCleanup,
+} from "../_shared/cleanup.ts";
 import {
   buildLanguageBlock,
   buildTranscriptMessage,
@@ -31,113 +36,108 @@ const russianRequest: CleanupRequest = {
 // A signal that never fires: the deadline default (`AbortSignal.timeout`) would leave a timer
 // behind, which Deno's test sanitizer reports as a leak.
 const signal = new AbortController().signal;
-const options = { model: "claude-opus-5-5", timeoutMs: 5000, deadlineMs: 9000, signal };
 
 interface Captured {
-  params?: Record<string, unknown>;
-  options?: Record<string, unknown>;
+  url?: string;
+  init?: RequestInit;
+  body?: Record<string, unknown>;
 }
 
-/** Minimal stand-in for `client.beta.messages.stream(...)`. */
-function fakeClient(reply: Record<string, unknown>, captured: Captured = {}, failure?: Error): Anthropic {
+/** A Responses API reply with the given text, merged with `overrides`. */
+function reply(text: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    beta: {
-      messages: {
-        stream(params: Record<string, unknown>, options: Record<string, unknown>) {
-          captured.params = params;
-          captured.options = options;
-          const textHandlers: Array<(delta: string) => void> = [];
-          return {
-            on(event: string, handler: (delta: string) => void) {
-              if (event === "text") textHandlers.push(handler);
-              return this;
-            },
-            finalMessage() {
-              if (failure) return Promise.reject(failure);
-              textHandlers.forEach((handler) => handler("x"));
-              return Promise.resolve({
-                model: "claude-opus-5-5",
-                stop_reason: "end_turn",
-                usage: {
-                  input_tokens: 40,
-                  output_tokens: 12,
-                  cache_read_input_tokens: 1900,
-                  cache_creation_input_tokens: 0,
-                },
-                content: [{ type: "text", text: "Can you send me the report by Friday?" }],
-                ...reply,
-              });
-            },
-          };
-        },
-      },
-    },
-  } as unknown as Anthropic;
+    model: "gpt-6-astra-2026-09-01",
+    status: "completed",
+    incomplete_details: null,
+    output: [
+      { type: "reasoning", summary: [] },
+      { type: "message", role: "assistant", content: [{ type: "output_text", text, annotations: [] }] },
+    ],
+    usage: { input_tokens: 1950, output_tokens: 12, input_tokens_details: { cached_tokens: 1900 } },
+    ...overrides,
+  };
 }
 
-type SystemBlock = { type: string; text: string; cache_control?: unknown };
+/** Stands in for `fetch`, answering with `body` (or failing with `failure`). */
+function fakeFetch(body: Record<string, unknown>, captured: Captured = {}, status = 200, failure?: Error) {
+  return ((url: string, init: RequestInit) => {
+    captured.url = url;
+    captured.init = init;
+    captured.body = JSON.parse(String(init.body));
+    if (failure) return Promise.reject(failure);
+    return Promise.resolve(Response.json(body, { status }));
+  }) as unknown as typeof fetch;
+}
 
-Deno.test("sends the agreed request shape to Claude", async () => {
+function options(fetcher: typeof fetch) {
+  return { model: "gpt-6-astra", effort: "low", apiKey: "sk-test", deadlineMs: 9000, signal, fetcher };
+}
+
+const cleaned = reply("Can you send me the report by Friday?");
+
+Deno.test("sends the agreed request shape to OpenAI", async () => {
   const captured: Captured = {};
-  await runCleanup(fakeClient({}, captured), request, options);
-  const params = captured.params!;
-  assertEquals(params.model, "claude-opus-5-5");
-  assertEquals(params.max_tokens, 16000);
-  assertEquals(params.betas, ["server-side-fallback-2026-07-01"]);
-  assertEquals(params.fallbacks, "default");
-  assertEquals(params.output_config, { effort: "low" });
-  assertFalse("thinking" in params, "Opus 5.5 rejects explicit thinking config; effort controls it");
-  const system = params.system as SystemBlock[];
-  assertEquals(system.length, 3, "shared rules → language pack → user context");
-  assertEquals(system[0].text, CLEANUP_RULES);
-  assertEquals(system[1].text, buildLanguageBlock(LANGUAGE_RULES.en));
-  assertEquals(system[2].text, buildUserContext(request, resolveLanguage("en-US")));
-  for (const block of system) assertEquals(block.cache_control, { type: "ephemeral" });
-  const messages = params.messages as Array<{ role: string; content: string }>;
-  assertEquals(messages, [{ role: "user", content: buildTranscriptMessage(request.transcript) }]);
-  assertEquals(captured.options, { timeout: 5000, maxRetries: 1, signal });
+  await runCleanup(request, options(fakeFetch(cleaned, captured)));
+  assertEquals(captured.url, "https://api.openai.com/v1/responses");
+  assertEquals((captured.init!.headers as Record<string, string>).Authorization, "Bearer sk-test");
+  assertEquals(captured.init!.signal, signal);
+  const body = captured.body!;
+  assertEquals(body.model, "gpt-6-astra");
+  assertEquals(body.reasoning, { effort: "low" });
+  assertEquals(body.store, false, "dictations are never stored as responses on OpenAI's side");
+  assertEquals(body.max_output_tokens, 16000);
+  assertEquals(body.prompt_cache_key, "murmur-cleanup-en");
+  assertEquals(body.instructions, [
+    CLEANUP_RULES,
+    buildLanguageBlock(LANGUAGE_RULES.en),
+    buildUserContext(request, resolveLanguage("en-US")),
+  ].join("\n\n"));
+  assertEquals(body.input, [{ role: "user", content: buildTranscriptMessage(request.transcript) }]);
 });
 
-Deno.test("returns the cleaned text, timing, language and usage", async () => {
-  const outcome = await runCleanup(fakeClient({}), request, options);
+Deno.test("returns the cleaned text, language and usage", async () => {
+  const outcome = await runCleanup(request, options(fakeFetch(cleaned)));
   assertEquals(outcome.status, "cleaned");
   assertEquals(outcome.text, "Can you send me the report by Friday?");
   assertEquals(outcome.language, "en");
-  assertEquals(outcome.stopReason, "end_turn");
-  assertEquals(outcome.usage, { input: 40, output: 12, cacheRead: 1900, cacheCreation: 0 });
+  assertEquals(outcome.model, "gpt-6-astra-2026-09-01");
+  assertEquals(outcome.stopReason, "completed");
+  assertEquals(outcome.usage, { input: 1950, output: 12, cacheRead: 1900, cacheCreation: 0 });
   assertEquals(outcome.cacheReadTokens, 1900);
-  assert(outcome.ttftMs !== null);
+  assertEquals(outcome.ttftMs, null);
 });
 
-Deno.test("a Russian request gets the Russian pack and reports language ru", async () => {
+Deno.test("a Russian request gets the Russian pack and its own cache key", async () => {
   const captured: Captured = {};
   const outcome = await runCleanup(
-    fakeClient({ content: [{ type: "text", text: "Можешь скинуть отчёт до пятницы? Спасибо большое!" }] }, captured),
     russianRequest,
-    options,
+    options(fakeFetch(reply("Можешь скинуть отчёт до пятницы? Спасибо большое!"), captured)),
   );
   assertEquals(outcome.status, "cleaned");
   assertEquals(outcome.language, "ru");
-  const system = captured.params!.system as SystemBlock[];
-  assertEquals(system[1].text, buildLanguageBlock(LANGUAGE_RULES.ru));
-  assertStringIncludes(system[2].text, "Language: ru-RU (");
+  assertEquals(captured.body!.prompt_cache_key, "murmur-cleanup-ru");
+  const instructions = captured.body!.instructions as string;
+  assertStringIncludes(instructions, buildLanguageBlock(LANGUAGE_RULES.ru));
+  assertStringIncludes(instructions, "Language: ru-RU (");
 });
 
 Deno.test("refusals and truncation fall back to the transcript", async () => {
-  for (const stopReason of ["refusal", "max_tokens"]) {
-    const outcome = await runCleanup(fakeClient({ stop_reason: stopReason, content: [] }), request, options);
+  const refusal = reply("", {
+    output: [{ type: "message", role: "assistant", content: [{ type: "refusal", refusal: "I can't help with that." }] }],
+  });
+  const truncated = reply("Can you send", { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } });
+  for (const [body, reason] of [[refusal, "refusal"], [truncated, "max_output_tokens"]] as const) {
+    const outcome = await runCleanup(request, options(fakeFetch(body)));
     assertEquals(outcome.status, "raw");
-    assertEquals(outcome.reason, stopReason);
-    assertEquals(outcome.stopReason, stopReason);
+    assertEquals(outcome.reason, reason);
     assertEquals(outcome.text, request.transcript);
   }
 });
 
 Deno.test("an answer instead of a cleanup is rejected", async () => {
   const outcome = await runCleanup(
-    fakeClient({ content: [{ type: "text", text: "Sure! Here's a summary of the report you asked for." }] }),
     request,
-    options,
+    options(fakeFetch(reply("Sure! Here's a summary of the report you asked for."))),
   );
   assertEquals(outcome.status, "raw");
   assertEquals(outcome.reason, "assistant_reply");
@@ -145,39 +145,45 @@ Deno.test("an answer instead of a cleanup is rejected", async () => {
 
 Deno.test("a translated reply is rejected as script_changed", async () => {
   const outcome = await runCleanup(
-    fakeClient({ content: [{ type: "text", text: "Can you send me the report by Friday? Thanks a lot!" }] }),
     russianRequest,
-    options,
+    options(fakeFetch(reply("Can you send me the report by Friday? Thanks a lot!"))),
   );
   assertEquals(outcome.status, "raw");
   assertEquals(outcome.reason, "script_changed");
   assertEquals(outcome.text, russianRequest.transcript);
 });
 
-Deno.test("thinking blocks are ignored; only text blocks are read", async () => {
+Deno.test("reasoning items are ignored; only message text is read", async () => {
   const outcome = await runCleanup(
-    fakeClient({
-      content: [
-        { type: "thinking", thinking: "", signature: "sig" },
-        { type: "text", text: "Hello there." },
-      ],
-    }),
     { ...request, transcript: "uh hello there" },
-    options,
+    options(fakeFetch(reply("Hello there."))),
   );
   assertEquals(outcome.text, "Hello there.");
 });
 
-Deno.test("a deadline abort propagates as APIUserAbortError and is labelled 'cleanup deadline'", async () => {
-  const abort = new Anthropic.APIUserAbortError();
-  await assertRejects(() => runCleanup(fakeClient({}, {}, abort), request, options), Anthropic.APIUserAbortError);
-  assertEquals(describeCleanupError(abort), "cleanup deadline");
-  assertEquals(describeCleanupError(new Anthropic.APIConnectionTimeoutError()), "anthropic timeout");
-  assertEquals(describeCleanupError(new Anthropic.RateLimitError(429, undefined, "slow down", new Headers())),
-    "anthropic rate limited");
-  assertEquals(describeCleanupError(Anthropic.APIError.generate(500, undefined, "boom", new Headers())),
-    "anthropic error 500");
+Deno.test("HTTP errors carry only the status and code; failures get log labels", async () => {
+  const error = await assertRejects(
+    () => runCleanup(request, options(fakeFetch({ error: { code: "rate_limit_exceeded", message: "secret" } }, {}, 429))),
+    CleanupAPIError,
+  );
+  assertEquals(error.status, 429);
+  assertFalse(error.message.includes("secret"));
+  assertEquals(describeCleanupError(error), "openai rate limited");
+  assertEquals(describeCleanupError(new CleanupAPIError(500, null)), "openai error 500");
+  assertEquals(describeCleanupError(new DOMException("deadline", "TimeoutError")), "cleanup deadline");
+  assertEquals(describeCleanupError(new TypeError("network")), "openai connection");
   assertEquals(describeCleanupError(new Error("boom")), "cleanup failed");
+  await assertRejects(
+    () => runCleanup(request, options(fakeFetch({}, {}, 200, new DOMException("deadline", "TimeoutError")))),
+    DOMException,
+  );
+});
+
+Deno.test("the effort and model follow the options", () => {
+  const body = buildResponsesRequest(request, resolveLanguage("en-US"), { model: "gpt-6.1-terra", effort: "none" });
+  assertEquals(body.model, "gpt-6.1-terra");
+  assertEquals(body.reasoning, { effort: "none" });
+  assertEquals(buildResponsesRequest(request, resolveLanguage("en-US"), { model: "m" }).reasoning, { effort: "low" });
 });
 
 Deno.test({
@@ -186,8 +192,8 @@ Deno.test({
   sanitizeOps: false,
   async fn() {
     const captured: Captured = {};
-    await runCleanup(fakeClient({}, captured), request, { model: "claude-opus-5-5", timeoutMs: 5000, deadlineMs: 20 });
-    const deadline = captured.options!.signal as AbortSignal;
+    await runCleanup(request, { model: "gpt-6-astra", apiKey: "k", deadlineMs: 20, fetcher: fakeFetch(cleaned, captured) });
+    const deadline = captured.init!.signal as AbortSignal;
     assert(deadline instanceof AbortSignal);
     assertFalse(deadline.aborted);
     await new Promise((resolve) => deadline.addEventListener("abort", resolve, { once: true }));
@@ -209,8 +215,8 @@ Deno.test("language resolution from tags", () => {
 
 Deno.test("the language block is byte-identical for every user of a language", () => {
   const ru = resolveLanguage("ru-RU");
-  const alice = buildSystemBlocks(russianRequest, ru);
-  const bob = buildSystemBlocks({
+  const alice = buildInstructionParts(russianRequest, ru);
+  const bob = buildInstructionParts({
     ...russianRequest,
     dictationId: "11111111-2222-4333-8444-555555555555",
     transcript: "совсем другой текст",
@@ -219,10 +225,9 @@ Deno.test("the language block is byte-identical for every user of a language", (
     snippets: [{ token: "⟦s:1a2b3c4d⟧", trigger: "моя ссылка" }],
   }, ru);
   assertEquals(alice.length, 3);
-  assertEquals(alice[0].text, bob[0].text);
-  assertEquals(alice[1].text, bob[1].text);
-  assert(alice[2].text !== bob[2].text, "only the per-user block differs");
-  assertEquals(alice.filter((block) => block.cache_control).length, 3, "at most 4 cache breakpoints");
+  assertEquals(alice[0], bob[0]);
+  assertEquals(alice[1], bob[1]);
+  assert(alice[2] !== bob[2], "only the per-user part differs, and it comes last");
 
   const block = buildLanguageBlock(LANGUAGE_RULES.ru);
   assertEquals(block, buildLanguageBlock(LANGUAGE_RULES.ru));
@@ -298,14 +303,11 @@ Deno.test("request validation", () => {
   assertEquals(LIMITS.anonymousTranscriptChars, 6000);
 });
 
-Deno.test("the shared rules stay above the 512-token cache minimum", () => {
-  // ~4 characters per token for English prose.
-  assert(CLEANUP_RULES.length / 4 > 600, `rules are only ~${Math.round(CLEANUP_RULES.length / 4)} tokens`);
+Deno.test("the shared prefix clears OpenAI's 1,024-token caching minimum", () => {
+  // ~4 characters per token for English prose; Cyrillic costs more per character.
+  const englishPrefix = CLEANUP_RULES.length + buildLanguageBlock(LANGUAGE_RULES.en).length;
+  assert(englishPrefix / 4 > 1100, `the English prefix is only ~${Math.round(englishPrefix / 4)} tokens`);
   assertFalse(/\$\{|\d{4}-\d{2}-\d{2}/.test(CLEANUP_RULES), "no volatile content in the cached prefix");
-  // The Russian block is cached on top of block 1, so it has no minimum of its own. Cyrillic
-  // costs more tokens per character than English, so chars/4 is not asserted for it; its real
-  // size is printed by the live "golden: ru: token profile" test (countTokens) — record the
-  // measured value here after the first run: block1 = ?, block1 + ru = ?, all three (ru) = ?.
   assert(buildLanguageBlock(LANGUAGE_RULES.ru).length > 2000);
 });
 

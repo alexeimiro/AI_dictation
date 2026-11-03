@@ -73,7 +73,7 @@
 		<true/>
 	</dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Murmur listens only while you dictate, to turn your speech into text on your iPhone.</string>
+	<string>Murmur listens only while you dictate, to turn your speech into text.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIAppFonts</key>

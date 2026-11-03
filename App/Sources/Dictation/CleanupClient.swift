@@ -2,7 +2,7 @@ import Foundation
 import MurmurCore
 import Supabase
 
-/// Calls the `cleanup` Edge Function (Claude) with the on-device transcript.
+/// Calls the `cleanup` Edge Function (an OpenAI model) with the transcript.
 @MainActor
 final class CleanupClient: Cleaning {
     struct Response: Decodable, Sendable {

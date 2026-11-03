@@ -41,6 +41,11 @@ final class SessionController {
     @ObservationIgnored private let publisher: HotStatePublisher
     @ObservationIgnored private let pipeline: DictationPipeline
     @ObservationIgnored private let assets: SpeechAssetManager
+    @ObservationIgnored private let transcription: (any CloudTranscribing)?
+    /// This session transcribes with OpenAI (decided when it starts).
+    @ObservationIgnored private var usesCloud = false
+    /// In the cloud, the on-device languages already installed, for when a request fails.
+    @ObservationIgnored private var onDeviceFallbacks: [String: ResolvedLanguage] = [:]
     @ObservationIgnored private let history: any TranscriptSink
     @ObservationIgnored private let settings = SharedSettings.shared
     @ObservationIgnored private let audio = AudioCapture()
@@ -67,11 +72,13 @@ final class SessionController {
     /// With "Disable after: Immediately", a session that isn't used still ends after this.
     static let immediateIdleGrace: TimeInterval = 60
 
-    init(transport: IPCTransport, pipeline: DictationPipeline, assets: SpeechAssetManager, history: any TranscriptSink) {
+    init(transport: IPCTransport, pipeline: DictationPipeline, assets: SpeechAssetManager, history: any TranscriptSink,
+         transcription: (any CloudTranscribing)? = nil) {
         self.transport = transport
         self.publisher = HotStatePublisher(transport: transport)
         self.pipeline = pipeline
         self.assets = assets
+        self.transcription = transcription
         self.history = history
         publisher.set(.off)
         commandObservation = transport.observe(.command) { [weak self] in
@@ -99,9 +106,9 @@ final class SessionController {
             guard let micFormat = audio.inputFormat else { throw AudioCapture.CaptureError.noInput }
 
             defer { startDetail = nil }
+            usesCloud = TranscriberEngine.current.usesCloud(cloudAvailable: transcription?.isConfigured == true)
             let primary = try await readyPrimaryLanguage()
-            let transcriber: Transcriber = TranscriberEngine.current == .stub
-                ? StubTranscriber() : AppleSpeechTranscriber()
+            let transcriber = makeTranscriber()
             try await transcriber.prepare(micFormat: micFormat, language: primary)
             self.transcriber = transcriber
             engineName = transcriber.displayName
@@ -128,17 +135,29 @@ final class SessionController {
         }
     }
 
+    private func makeTranscriber() -> Transcriber {
+        if TranscriberEngine.current == .stub { return StubTranscriber() }
+        guard usesCloud, let transcription else { return AppleSpeechTranscriber() }
+        return OpenAITranscriber(client: transcription, fallback: AppleSpeechTranscriber(),
+                                 fallbackLanguages: onDeviceFallbacks)
+    }
+
     /// Resolves the primary language and makes its model ready, reporting the first-run
-    /// download in `startDetail`. The secondary language is readied in the background.
+    /// download in `startDetail`. The secondary language is readied in the background. In the
+    /// cloud nothing is downloaded: an on-device model is used only if it's already installed.
     private func readyPrimaryLanguage() async throws -> ResolvedLanguage {
         let tag = await LanguageResolver.primaryTag(settings: settings)
         primaryTag = tag
         let name = DictationLanguage(tag: tag).localizedName
-        startDetail = "Preparing \(name) speech recognition… The first time, this downloads the language model."
         let primary: ResolvedLanguage
         if TranscriberEngine.current == .stub {
             primary = ResolvedLanguage(tag: tag, locale: Locale(identifier: tag), engine: .speech)
+        } else if usesCloud {
+            primary = cloudLanguage(tag)
+            onDeviceFallbacks = [:]
+            if let onDevice = await installedOnDeviceLanguage(tag) { onDeviceFallbacks[tag] = onDevice }
         } else {
+            startDetail = "Preparing \(name) speech recognition… The first time, this downloads the language model."
             primary = try await assets.ensureReady(
                 tag: tag, contextualStrings: pipeline.contextualStrings(),
                 override: TranscriberEngine.current.kindOverride
@@ -151,6 +170,25 @@ final class SessionController {
         languages = [tag: primary]
         prepareSecondaryLanguage()
         return primary
+    }
+
+    /// For OpenAI the language is just its tag, plus the dictionary terms as keyword hints.
+    private func cloudLanguage(_ tag: String) -> ResolvedLanguage {
+        ResolvedLanguage(tag: tag, locale: Locale(identifier: tag), engine: .speech,
+                         contextualStrings: pipeline.contextualStrings())
+    }
+
+    /// The on-device model for `tag` if it's already downloaded and verified. Never downloads.
+    private func installedOnDeviceLanguage(_ tag: String) async -> ResolvedLanguage? {
+        guard await assets.status(for: tag).isReady else { return nil }
+        return try? await assets.ensureReady(
+            tag: tag, contextualStrings: pipeline.contextualStrings(), override: TranscriberEngine.current.kindOverride)
+    }
+
+    /// Lets a running cloud session fall back to a language whose model turned up later.
+    private func addFallback(_ language: ResolvedLanguage) {
+        onDeviceFallbacks[language.tag] = language
+        (transcriber as? OpenAITranscriber)?.addFallbackLanguage(language)
     }
 
     private static func detail(for event: SpeechAssetManager.InstallEvent, language name: String) -> String? {
@@ -170,6 +208,14 @@ final class SessionController {
             return
         }
         secondaryTask?.cancel()
+        if usesCloud {
+            languages[tag] = cloudLanguage(tag)
+            secondaryTask = Task { [weak self] in
+                guard let self, let onDevice = await installedOnDeviceLanguage(tag), !Task.isCancelled else { return }
+                addFallback(onDevice)
+            }
+            return
+        }
         secondaryTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -203,6 +249,9 @@ final class SessionController {
         if languages[tag] == nil {
             if TranscriberEngine.current == .stub {
                 languages[tag] = ResolvedLanguage(tag: tag, locale: Locale(identifier: tag), engine: .speech)
+            } else if usesCloud {
+                languages[tag] = cloudLanguage(tag)
+                if let onDevice = await installedOnDeviceLanguage(tag) { addFallback(onDevice) }
             } else {
                 do {
                     languages[tag] = try await assets.ensureReady(

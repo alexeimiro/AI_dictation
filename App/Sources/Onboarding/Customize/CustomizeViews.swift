@@ -23,7 +23,7 @@ struct DataChoiceView: View {
                     VStack(spacing: 10) {
                         DataChoiceCard(
                             title: "Improve \(Brand.name) for everyone",
-                            detail: "To make \(Brand.name) better, this option lets us review your transcripts and edits to improve cleanup. Your audio never leaves your iPhone.",
+                            detail: "To make \(Brand.name) better, this option lets us review your transcripts and edits to improve transcription and cleanup.",
                             locked: false, isSelected: choice == .improveModel) {
                                 store.send(.selectDataChoice(.improveModel, at: Date()))
                             }

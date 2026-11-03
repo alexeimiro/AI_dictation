@@ -1,45 +1,44 @@
 // Live checks against the real model. Costs money; opt in with:
-//   RUN_GOLDEN=1 ANTHROPIC_API_KEY=... deno test --allow-env --allow-net supabase/functions/cleanup/golden_test.ts
+//   RUN_GOLDEN=1 OPENAI_API_KEY=... deno test --allow-env --allow-net supabase/functions/cleanup/golden_test.ts
 // The English set guards the shared rules; the `ru:` set guards the Russian language pack. The
 // two probes at the end print latency by dictation length and the token size of each system block.
 import { assert, assertEquals, assertFalse } from "jsr:@std/assert@1";
-import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
-import { buildSystemBlocks, type CleanupOutcome, DEFAULT_MODEL, runCleanup } from "../_shared/cleanup.ts";
-import { buildTranscriptMessage, resolveLanguage } from "../_shared/prompt.ts";
+import { type CleanupOutcome, DEFAULT_EFFORT, DEFAULT_MODEL, runCleanup } from "../_shared/cleanup.ts";
 import { countWords } from "../_shared/text.ts";
 import type { CleanupRequest } from "../_shared/types.ts";
 
 const enabled = Deno.env.get("RUN_GOLDEN") === "1";
 const model = Deno.env.get("CLEANUP_MODEL") ?? DEFAULT_MODEL;
+const effort = Deno.env.get("CLEANUP_EFFORT") ?? DEFAULT_EFFORT;
 
 type Clean = (request: Partial<CleanupRequest>) => Promise<CleanupOutcome>;
 
-function golden(name: string, defaults: Partial<CleanupRequest>, fn: (clean: Clean, client: Anthropic) => Promise<void>) {
+function golden(name: string, defaults: Partial<CleanupRequest>, fn: (clean: Clean) => Promise<void>) {
   Deno.test({
     name: `golden: ${name}`,
     ignore: !enabled,
     sanitizeResources: false,
     sanitizeOps: false,
     async fn() {
-      const client = new Anthropic();
+      const apiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
       await fn(async (partial) => {
-        const outcome = await runCleanup(client, {
+        const outcome = await runCleanup({
           dictationId: crypto.randomUUID(),
           transcript: "",
           style: "casual",
           ...defaults,
           ...partial,
-        }, { model, timeoutMs: 20_000, deadlineMs: 30_000 });
+        }, { model, effort, apiKey, deadlineMs: 30_000 });
         console.log(`  [${outcome.status}${outcome.reason ? `:${outcome.reason}` : ""}] ${outcome.totalMs} ms ` +
-          `(ttft ${outcome.ttftMs} ms, cache read ${outcome.usage.cacheRead}, created ${outcome.usage.cacheCreation}) ` +
+          `(in ${outcome.usage.input}, cached ${outcome.usage.cacheRead}, out ${outcome.usage.output}) ` +
           `→ ${JSON.stringify(outcome.text)}`);
         return outcome;
-      }, client);
+      });
     },
   });
 }
 
-type GoldenFn = (clean: Clean, client: Anthropic) => Promise<void>;
+type GoldenFn = (clean: Clean) => Promise<void>;
 const english = (name: string, fn: GoldenFn) => golden(name, { language: "en-US" }, fn);
 const russian = (name: string, fn: GoldenFn) => golden(`ru: ${name}`, { language: "ru-RU" }, fn);
 
@@ -221,25 +220,12 @@ russian("latency probe 30/60/120 words", async (clean) => {
   }
 });
 
-russian("token profile", async (_clean, client) => {
-  const base: CleanupRequest = { dictationId: crypto.randomUUID(), transcript: "", style: "casual" };
-  const count = async (label: string, language: string | undefined, blocks: number, transcript: string) => {
-    const resolved = resolveLanguage(language);
-    const system = buildSystemBlocks({ ...base, language, transcript }, resolved).slice(0, blocks);
-    const result = await client.beta.messages.countTokens({
-      model,
-      system,
-      messages: [{ role: "user", content: buildTranscriptMessage(transcript) }],
-    });
-    console.log(`  tokens ${label}: ${result.input_tokens}`);
-    return result.input_tokens;
-  };
+russian("prompt cache", async (clean) => {
+  // The second call shares the first one's prefix (rules + Russian pack), so OpenAI should
+  // report cached input tokens; the log shows how much of the prompt was reused.
   const transcript = probeTranscript(30);
-  await count("block 1 (shared rules) + 30-word transcript", "ru-RU", 1, transcript);
-  await count("blocks 1-2 (shared + ru pack) + 30-word transcript", "ru-RU", 2, transcript);
-  await count("blocks 1-3 (ru, no dictionary) + 30-word transcript", "ru-RU", 3, transcript);
-  await count("blocks 1-3 (en, no dictionary) + 30-word transcript", "en-US", 3, transcript);
-  for (const words of [60, 120]) {
-    await count(`blocks 1-3 (ru) + ${words}-word transcript`, "ru-RU", 3, probeTranscript(words));
-  }
+  await clean({ transcript });
+  const second = await clean({ transcript });
+  console.log(`  second call: ${second.usage.cacheRead} of ${second.usage.input} input tokens cached`);
+  assert(second.usage.input > 0);
 });

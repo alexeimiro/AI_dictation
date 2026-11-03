@@ -71,7 +71,7 @@ targets:
         UIUserInterfaceStyle: Light
         UIBackgroundModes:
           - audio
-        NSMicrophoneUsageDescription: Murmur listens only while you dictate, to turn your speech into text on your iPhone.
+        NSMicrophoneUsageDescription: Murmur listens only while you dictate, to turn your speech into text.
         NSSupportsLiveActivities: true
         CFBundleURLTypes:
           - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)

@@ -7,7 +7,7 @@ import type { CleanupRequest, Style } from "./types.ts";
  * of it. Never put per-language, per-user or per-request data in here — that would break the
  * cache for everyone.
  */
-export const CLEANUP_RULES = `You are the text-cleanup step of a voice keyboard. The user spoke into their phone; an on-device speech recognizer produced the transcript you receive. Your output is inserted directly into whatever text field the user is typing in — a chat message, an email, a note, a search box, or a prompt for an AI assistant.
+export const CLEANUP_RULES = `You are the text-cleanup step of a voice keyboard. The user spoke into their phone; a speech recognizer produced the transcript you receive. Your output is inserted directly into whatever text field the user is typing in — a chat message, an email, a note, a search box, or a prompt for an AI assistant.
 
 Rewrite the transcript into the text the user meant to type:
 

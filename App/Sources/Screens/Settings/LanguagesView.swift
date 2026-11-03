@@ -34,7 +34,7 @@ struct LanguagesView: View {
                     statusRow(secondary)
                 }
             } footer: {
-                Text("Adds a language switch to the keyboard. Recognition runs on the device in one language at a time.")
+                Text("Adds a language switch to the keyboard. Each dictation is transcribed in one language.")
             }
             Section {
                 DisclosureGroup("Speech diagnostics") {

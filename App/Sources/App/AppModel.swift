@@ -51,7 +51,8 @@ final class AppModel {
         let practiceBuffer = PracticeTranscriptBuffer(
             history: history, fileURL: launchOptions.usesOnboardingFixtures ? nil : PracticeTranscriptBuffer.defaultFileURL)
         self.practiceBuffer = practiceBuffer
-        let session = SessionController(transport: transport, pipeline: pipeline, assets: assets, history: practiceBuffer)
+        let session = SessionController(transport: transport, pipeline: pipeline, assets: assets, history: practiceBuffer,
+                                        transcription: TranscriptionClient(backend: backend))
         self.session = session
         self.languages = LanguageSettingsModel(assets: assets, session: session)
         self.setup = SetupStatus(payloads: transport.payloads)
@@ -217,7 +218,13 @@ final class AppModel {
             router.popToRoot()
             router.open(.settings)
         case .authCallback(let url):
-            Task { _ = await onboardingServices.auth.handleCallback(url) }
+            Task {
+                // The link in the sign-in email (Supabase's default emails carry only the link):
+                // signing in this way finishes "Continue with your email" too.
+                if await onboardingServices.auth.handleCallback(url) {
+                    onboarding.send(.authenticated(.email))
+                }
+            }
         }
     }
 

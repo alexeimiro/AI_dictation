@@ -10,8 +10,8 @@ Build an iOS clone of Wispr Flow, a voice-first keyboard: dictate in any app, an
 - **Toolchain:** Xcode 26.6 / iOS 26.5 SDK, Homebrew, Node 26, Docker. The paired iPhone 16 Pro runs iOS 26.6.1 with Developer Mode on.
 
 **Decisions made with the user**
-- **Speech recognition:** on-device (Apple SpeechAnalyzer).
-- **AI cleanup:** Claude `claude-opus-5-5` at `effort: "low"`, inside a Supabase Edge Function (TypeScript), so no API key ships in the app.
+- **Speech recognition:** OpenAI (`gpt-transcribe`) through the `transcribe` Supabase function, chosen on 2026-11-03; the audio leaves the iPhone but isn't stored. On-device Apple SpeechAnalyzer, the original choice, remains the fallback for installed languages and the engine for builds without a backend.
+- **AI cleanup:** an OpenAI model (`gpt-6-astra` at reasoning effort `low` by default) inside a Supabase Edge Function (TypeScript), so no API key ships in the app. Chosen on 2026-11-03 so that OpenAI handles both transcription and cleanup; it replaced Claude `claude-opus-5-5`, and Anthropic is no longer used.
 - **Backend:** Supabase for Auth, Postgres with RLS, and Functions.
 - **Branding:** working codename **Murmur**, set in one place (`Brand.swift` + `Config/Base.xcconfig`). We recreate the screenshots' layout, type and colors with original logo, visuals and copy; no Wispr videos, illustrations or trademarks.
 - **Deployment target:** iOS 26.0.
