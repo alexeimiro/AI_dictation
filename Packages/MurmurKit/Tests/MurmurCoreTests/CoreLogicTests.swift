@@ -119,6 +119,53 @@ struct LocalFormatterTests {
     }
 }
 
+struct CleanupGateTests {
+    @Test func cleanSpeechSkipsTheModel() {
+        for text in [
+            "Can you send me the report by Friday?",
+            "I think we should ship it on Monday, after the review.",
+            "At first I thought it was a bug.",
+            "Ask Valeria about iOS builds.",
+            "Можешь скинуть отчёт до пятницы? Спасибо большое!",
+            "Я думаю, что мы успеем к четвергу.",
+            "Вот этот файл надо отправить сегодня.",
+        ] {
+            #expect(!CleanupGate.needsModel(text, style: .casual), "\(text)")
+            #expect(!CleanupGate.needsModel(text, style: .formal), "\(text)")
+        }
+    }
+
+    @Test func spokenEditsNeedTheModel() {
+        for text in [
+            "Hey, can you send me the report by Friday question mark thanks",
+            "Let's meet at 3, no, wait, 4 PM on Thursday.",
+            "We could, like, meet tomorrow.",
+            "The the meeting moved.",
+            "Reach me at john dot smith at gmail dot com.",
+            "The budget got cut to twenty five thousand dollars.",
+            "Things to do today: first, run the laundry, second, buy groceries.",
+            "Можешь скинуть отчёт до пятницы вопросительный знак спасибо",
+            "Давай в три, нет, подожди, в четыре.",
+            "Ну, короче, я завтра приду.",
+            "Встречаемся в семь вечера.",
+            "Во-первых, запустить стирку, во-вторых, купить продукты.",
+        ] {
+            #expect(CleanupGate.needsModel(text, style: .casual), "\(text)")
+        }
+    }
+
+    @Test func stylesAndUnpunctuatedTextNeedTheModel() {
+        #expect(CleanupGate.needsModel("Can you send me the report by Friday?", style: .veryCasual))
+        #expect(CleanupGate.needsModel("Can you send me the report by Friday?", style: .excited))
+        #expect(CleanupGate.needsModel("can you send me the report by friday", style: .casual))
+    }
+
+    @Test func cuesAreWholeWords() {
+        #expect(!CleanupGate.needsModel("Check the dashboard and the dotted line.", style: .casual))
+        #expect(!CleanupGate.needsModel("Стоит купить сорочку.", style: .casual))
+    }
+}
+
 struct DictationLanguageTests {
     @Test func normalizesIdentifiers() {
         #expect(DictationLanguage(normalizing: "ru_RU").tag == "ru-RU")

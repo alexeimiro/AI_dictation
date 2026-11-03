@@ -37,7 +37,8 @@ protocol Cleaning: AnyObject {
 
 /// Turns a finished recording into the text the keyboard inserts:
 /// transcript (OpenAI, or on-device) → AI cleanup (OpenAI, via the `cleanup` function) → `DictationResult`.
-/// Falls back to `LocalFormatter` when cleanup is off, unavailable, or the dictation is tiny.
+/// Falls back to `LocalFormatter` when cleanup is off, unavailable, the dictation is tiny, or
+/// `CleanupGate` finds nothing in the transcript for the model to rewrite.
 @MainActor
 final class DictationPipeline {
     private let logger = Logger(subsystem: "Murmur", category: "Pipeline")
@@ -139,13 +140,16 @@ final class DictationPipeline {
     }
 
     /// The cleanup step shared by live dictations and Retry / Regenerate. Dictations of three
-    /// words or fewer skip the model unless `force` is set.
+    /// words or fewer, and transcripts already as the speaker meant them, skip the model unless
+    /// `force` is set.
     private func runCleanup(
         dictationId: UUID, raw: String, language: String?, style: StylePreset, localText: String,
         force: Bool = false
     ) async -> CleanupOutcome {
         var outcome = CleanupOutcome(text: localText, status: .raw)
-        guard cleanup.isConfigured, force || (settings.aiCleanupEnabled && WordCounter.count(raw) > 3) else {
+        guard cleanup.isConfigured,
+              force || (settings.aiCleanupEnabled && WordCounter.count(raw) > 3
+                        && CleanupGate.needsModel(raw, style: style)) else {
             return outcome
         }
         let started = ContinuousClock.now

@@ -79,6 +79,7 @@ Keyboard ext ── Darwin post + command file (one-time token) ──► Murmur
    - `DictationTranscriber` covers locales SpeechTranscriber lacks. Only it honors `AnalysisContext.contextualStrings` (at most 100 phrases).
 2. **Cleanup.**
    - Dictations of 3 words or fewer skip Claude.
+   - So do transcripts `CleanupGate` finds already clean: no spoken punctuation, self-correction, list, spelled-out address or number, repeated word, or leftover filler, in the casual or formal style. They get `LocalFormatter` only.
    - Otherwise `CleanupClient` calls `cleanup` with an 8 s timeout.
    - Snippet triggers come back from Claude as `⟦s:<id>⟧` placeholders, and the app substitutes the expansion. Expansions never go to the server, and nothing is expanded twice.
 3. **`TextJoiner`.**
