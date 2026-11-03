@@ -102,14 +102,15 @@ enum KeyboardLayouts {
         case .numbers, .symbols, .voice:
             row.append(KeySpec(action: .plane(.letters), label: "ABC", weight: 1.3, style: .function))
         }
+        // Spelled out: a mic icon here read as "dictate", not "back to the pad".
         if showsVoicePad {
-            row.append(KeySpec(action: .plane(.voice), systemImage: "mic", weight: 1.1, style: .function))
+            row.append(KeySpec(action: .plane(.voice), label: "voice", weight: 1.4, style: .function))
         }
         if showsGlobe {
             row.append(KeySpec(action: .globe, systemImage: "globe", weight: 1.1, style: .function))
         }
-        let extraKeys = CGFloat([showsVoicePad, showsGlobe].filter { $0 }.count)
-        row.append(KeySpec(action: .space, label: "space", weight: 5.7 - 1.1 * extraKeys))
+        let extraWidth = (showsVoicePad ? 1.4 : 0) + (showsGlobe ? 1.1 : 0)
+        row.append(KeySpec(action: .space, label: "space", weight: 5.7 - extraWidth))
         row.append(KeySpec(action: .returnKey, label: returnTitle, weight: 2.1, style: .returnKey))
         return row
     }

@@ -31,8 +31,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     private var undoableDictation: String?
     private var layoutSignature = ""
     private var memoryTimer: Timer?
-    private lazy var haptics = UIImpactFeedbackGenerator(style: .light)
-    private lazy var readyHaptics = UINotificationFeedbackGenerator()
+    private lazy var haptics = UIImpactFeedbackGenerator(style: .light, view: view)
+    private lazy var readyHaptics = UINotificationFeedbackGenerator(view: view)
 
     private static let keyboardHeight: CGFloat = 272
 
@@ -192,7 +192,15 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
 
     private func wireActions() {
         model.actions = KeyboardModel.Actions(
-            mic: { [weak self] in self?.client?.micTapped() },
+            mic: { [weak self] in
+                guard let self else { return }
+                // On the voice layout's full keys, talking goes back to the pad.
+                if usesVoicePad, plane != .voice {
+                    plane = .voice
+                    reloadKeys()
+                }
+                client?.micTapped()
+            },
             stop: { [weak self] in self?.client?.stopTapped() },
             cancel: { [weak self] in self?.client?.cancelTapped() },
             insertPending: { [weak self] in self?.client?.insertPendingResult() },
