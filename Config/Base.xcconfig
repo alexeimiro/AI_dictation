@@ -7,6 +7,9 @@ MURMUR_APP_NAME = Murmur
 MURMUR_BUNDLE_PREFIX = com.antonmironenko
 MURMUR_URL_SCHEME = murmur
 MURMUR_APP_GROUP = group.$(MURMUR_BUNDLE_PREFIX).murmur
+// Legal pages linked from sign-in. `//` starts a comment here, so write https:/$()/example.com/terms.
+MURMUR_TERMS_URL =
+MURMUR_PRIVACY_URL =
 
 MARKETING_VERSION = 0.1.0
 CURRENT_PROJECT_VERSION = 1

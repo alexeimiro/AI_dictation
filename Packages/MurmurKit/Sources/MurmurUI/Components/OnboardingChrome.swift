@@ -1,43 +1,76 @@
 import SwiftUI
 
-/// Back chevron followed by N progress segments (survey and setup steps).
+/// Back chevron, progress segments and an optional Skip (survey, setup and practice steps).
+/// Each segment fills from 0 to 1, so a phase can show partial progress.
 public struct SegmentedProgressHeader: View {
-    let segments: Int
-    let filled: Int
+    let fills: [Double]
     let onBack: (() -> Void)?
+    let onSkip: (() -> Void)?
+
+    public init(fills: [Double], onBack: (() -> Void)? = nil, onSkip: (() -> Void)? = nil) {
+        self.fills = fills
+        self.onBack = onBack
+        self.onSkip = onSkip
+    }
 
     public init(segments: Int, filled: Int, onBack: (() -> Void)? = nil) {
-        self.segments = segments
-        self.filled = filled
-        self.onBack = onBack
+        self.init(fills: (0..<segments).map { $0 < filled ? 1 : 0 }, onBack: onBack)
     }
 
     public var body: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 0) {
             Button {
                 onBack?()
             } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 20, weight: .medium))
+                    .font(.system(size: 22.5, weight: .regular))
                     .foregroundStyle(Palette.ink)
-                    .frame(width: 30, height: 44, alignment: .leading)
+                    .frame(width: 35, height: 44, alignment: .leading)
+                    .contentShape(.rect)
             }
             .accessibilityLabel("Back")
             .opacity(onBack == nil ? 0 : 1)
             .disabled(onBack == nil)
 
             HStack(spacing: 16) {
-                ForEach(0..<segments, id: \.self) { index in
-                    Capsule()
-                        .fill(index < filled ? Palette.ink : Palette.progressOff)
-                        .frame(height: 3.5)
+                ForEach(fills.indices, id: \.self) { index in
+                    ProgressSegment(fill: fills[index])
                 }
             }
             .accessibilityElement()
-            .accessibilityLabel("Step \(filled) of \(segments)")
+            .accessibilityLabel("Progress")
+            .accessibilityValue("\(Int((fills.reduce(0, +) / Double(max(fills.count, 1)) * 100).rounded())) percent")
+
+            if let onSkip {
+                Button("Skip", action: onSkip)
+                    .font(.ui(17))
+                    .foregroundStyle(Palette.muted)
+                    .padding(.leading, 25)
+                    .frame(height: 44)
+                    .contentShape(.rect)
+            }
         }
-        .padding(.horizontal, Metrics.screenMargin)
+        .padding(.leading, 24)
+        .padding(.trailing, onSkip == nil ? 24 : 25)
         .frame(height: 44)
+    }
+}
+
+private struct ProgressSegment: View {
+    let fill: Double
+
+    var body: some View {
+        Capsule()
+            .fill(Palette.progressOff)
+            .overlay(alignment: .leading) {
+                GeometryReader { proxy in
+                    Capsule()
+                        .fill(Palette.ink)
+                        .frame(width: proxy.size.width * min(max(fill, 0), 1))
+                }
+            }
+            .frame(height: 4)
+            .animation(.easeInOut(duration: 0.45), value: fill)
     }
 }
 
@@ -52,7 +85,7 @@ public struct CircleBackButton: View {
     public var body: some View {
         Button(action: action) {
             Image(systemName: "chevron.left")
-                .font(.system(size: 20, weight: .medium))
+                .font(.system(size: 22, weight: .medium))
                 .foregroundStyle(Palette.ink)
                 .frame(width: 44, height: 44)
                 .background(Palette.paper, in: .circle)
@@ -90,41 +123,54 @@ public struct PageDots: View {
     }
 }
 
-/// Selectable survey row: icon + label in a rounded card.
+/// Selectable survey row: an optional icon, a label and an optional second line, in a rounded card.
 public struct OptionCard: View {
     let title: String
-    let systemImage: String
+    let subtitle: String?
+    let systemImage: String?
     let isSelected: Bool
+    let height: CGFloat
     let action: () -> Void
 
-    public init(_ title: String, systemImage: String, isSelected: Bool, action: @escaping () -> Void) {
+    public init(_ title: String, subtitle: String? = nil, systemImage: String? = nil, isSelected: Bool,
+                height: CGFloat = Metrics.cardHeight, action: @escaping () -> Void) {
         self.title = title
+        self.subtitle = subtitle
         self.systemImage = systemImage
         self.isSelected = isSelected
+        self.height = height
         self.action = action
     }
 
     public var body: some View {
         Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: systemImage)
-                    .font(.system(size: 19))
-                    .frame(width: 26)
-                Text(title)
-                    .font(.ui(17.5))
-                    .multilineTextAlignment(.leading)
+            HStack(spacing: 10) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.system(size: 19))
+                        .frame(width: 24)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.ui(subtitle == nil ? 17 : 19, subtitle == nil ? .regular : .semibold))
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.ui(17))
+                    }
+                }
+                .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
             }
             .foregroundStyle(Palette.text)
-            .padding(.horizontal, 22)
-            .frame(maxWidth: .infinity, minHeight: Metrics.cardHeight)
+            .padding(.horizontal, systemImage == nil ? 25 : 22)
+            .frame(maxWidth: .infinity, minHeight: height)
             .background(isSelected ? Palette.selectedFill : Palette.paper,
                         in: .rect(cornerRadius: Metrics.cardRadius))
             .overlay {
                 RoundedRectangle(cornerRadius: Metrics.cardRadius)
-                    .strokeBorder(isSelected ? Palette.ink : Palette.cardBorder,
-                                  lineWidth: isSelected ? 2 : Metrics.borderWidth)
+                    .stroke(isSelected ? Palette.ink : Palette.cardBorder, lineWidth: Metrics.borderWidth)
             }
+            .contentShape(.rect(cornerRadius: Metrics.cardRadius))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])

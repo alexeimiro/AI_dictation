@@ -110,6 +110,8 @@ targets:
         MurmurURLScheme: $(MURMUR_URL_SCHEME)
         MurmurSupabaseHost: $(SUPABASE_HOST)
         MurmurSupabaseAnonKey: $(SUPABASE_ANON_KEY)
+        MurmurTermsURL: $(MURMUR_TERMS_URL)
+        MurmurPrivacyURL: $(MURMUR_PRIVACY_URL)
     entitlements:
       path: App/Murmur.entitlements
       properties:
@@ -204,6 +206,19 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: $(MURMUR_BUNDLE_PREFIX).murmur.tests
         GENERATE_INFOPLIST_FILE: YES
 
+  MurmurUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: Tests/MurmurUITests
+    dependencies:
+      - target: Murmur
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MURMUR_BUNDLE_PREFIX).murmur.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: Murmur
+
 schemes:
   Murmur:
     build:
@@ -220,6 +235,17 @@ schemes:
         - package: MurmurKit/MurmurCoreTests
     archive:
       config: Release
+  # The onboarding journey on fake services (minutes, so it is kept out of the Murmur scheme).
+  OnboardingJourney:
+    build:
+      targets:
+        Murmur: all
+        MurmurUITests: [test]
+    test:
+      config: Debug
+      gatherCoverageData: false
+      targets:
+        - MurmurUITests
   MurmurKeyboard:
     build:
       targets:

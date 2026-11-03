@@ -26,7 +26,7 @@ Keyboard ext ──command file + Darwin notify──► App session (hot mic) �
 | Path | What it is |
 |---|---|
 | `project.yml` | XcodeGen spec. The `.xcodeproj` is generated, not committed. |
-| `App/` | The app: session controller, dictation pipeline (per-language engine selection, Claude cleanup), SwiftData history, Home / Settings / Debug screens |
+| `App/` | The app: session controller, dictation pipeline (per-language engine selection, Claude cleanup), SwiftData history, onboarding, Home / Settings / Debug screens |
 | `Keyboard/` | The keyboard extension: UIKit key grid, SwiftUI toolbar and listening panel |
 | `Widgets/` | The Live Activity UI |
 | `Shared/Activity/` | Live Activity attributes and intents, compiled into the app and the widget extension |
@@ -54,7 +54,33 @@ xcodebuild -project Murmur.xcodeproj -scheme Murmur \
 
 # Screenshots of every screen with seeded history (scripts/out/*.png)
 scripts/screenshots.sh
+
+# The onboarding journey on fake services: sign-in, Settings, prompts and dictation are simulated
+xcodebuild -project Murmur.xcodeproj -scheme OnboardingJourney \
+  -destination 'platform=iOS Simulator,name=iPhone 16 Pro (Onboarding)' test
+
+# Every onboarding state next to its reference (build/onboarding-parity/*-compare.png)
+scripts/onboarding_parity.sh
 ```
+
+## Onboarding
+
+A fresh install opens onboarding (`App/Sources/Onboarding/`) instead of Home: the 42-screen
+journey in [docs/ONBOARDING_PARITY_PLAN.md](docs/ONBOARDING_PARITY_PLAN.md), with Murmur's own
+copy and artwork. Each screen sends events to `OnboardingReducer`, a pure state machine; the
+checkpoint is saved in the App Group after every step, so going to Settings, a permission change or
+a termination resumes on the same screen. Completion is written only after the plan offer is
+acknowledged, and the practice dictations then land in history once.
+
+- Installs that already have history or a keyboard that has run skip it; Settings › Debug ›
+  Replay onboarding starts it again.
+- Screenshot routes: `-onboarding-step <step>` with `-onboarding-variant <name>` and
+  `-permission-fixtures keyboard,fullAccess,mic=granted` (fixture data, nothing persisted).
+  `-onboarding-fixtures` runs the whole journey on fake services; `-onboarding-reset` restarts it.
+- Sign-in uses Supabase: Apple (native, needs the Sign in with Apple capability), Google (OAuth;
+  needs a Google client in the Supabase project) and email (a six-digit code; locally the email
+  arrives in the mail catcher at http://127.0.0.1:54324). A build without a backend offers
+  "Continue without an account".
 
 ## Languages
 

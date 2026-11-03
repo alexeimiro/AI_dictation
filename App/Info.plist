@@ -57,10 +57,14 @@
 	</array>
 	<key>MurmurAppGroupID</key>
 	<string>$(MURMUR_APP_GROUP)</string>
+	<key>MurmurPrivacyURL</key>
+	<string>$(MURMUR_PRIVACY_URL)</string>
 	<key>MurmurSupabaseAnonKey</key>
 	<string>$(SUPABASE_ANON_KEY)</string>
 	<key>MurmurSupabaseHost</key>
 	<string>$(SUPABASE_HOST)</string>
+	<key>MurmurTermsURL</key>
+	<string>$(MURMUR_TERMS_URL)</string>
 	<key>MurmurURLScheme</key>
 	<string>$(MURMUR_URL_SCHEME)</string>
 	<key>NSAppTransportSecurity</key>

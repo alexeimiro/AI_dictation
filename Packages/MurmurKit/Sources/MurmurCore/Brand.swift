@@ -31,6 +31,15 @@ public enum Brand {
         return components.url!
     }
 
+    /// Linked from the sign-in screen; nil until `MURMUR_TERMS_URL` / `MURMUR_PRIVACY_URL` are set.
+    public static var termsURL: URL? {
+        infoValue("MurmurTermsURL").flatMap(URL.init(string:))
+    }
+
+    public static var privacyURL: URL? {
+        infoValue("MurmurPrivacyURL").flatMap(URL.init(string:))
+    }
+
     private static func infoValue(_ key: String) -> String? {
         guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
               !value.isEmpty, !value.hasPrefix("$(") else { return nil }

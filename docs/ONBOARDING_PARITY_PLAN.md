@@ -280,3 +280,69 @@ Exit: all acceptance targets pass and the generated contact sheet has a one-to-o
 - The full physical-device journey passes twice: fresh install and interrupted/resumed install.
 - Unit, UI, package, and app tests pass; the plan’s acceptance target is documented with a final
   overlay contact sheet.
+
+## Implementation notes (2026-11-01)
+
+Built in `App/Sources/Onboarding/` (state, reducer, store, persistence, services, fixtures, one folder
+per phase), with the shared primitives in `MurmurUI` re-measured at 402 pt. Verified on the
+simulator only (iPhone 16 Pro, iOS 26.5).
+
+### Where it differs from the plan
+
+- **One welcome step.** The carousel (01–03) is a single `welcome` step; the page is view state
+  because the carousel autoplays. Routes: `-onboarding-step welcome -onboarding-variant
+  dictionary|speed|languages` (references 01, 02 and 03, in capture order). Old checkpoints
+  holding `welcome1`…`welcome3` migrate to `welcome`.
+- **Full Access is confirmed in practice, not on return from Settings.** iOS only shows Full Access
+  once the keyboard has run, so keyboard setup advances when the keyboard is detected (input-mode
+  check, or a keyboard that has already reported Full Access). The practice screen checks Full
+  Access once the Murmur keyboard is up and points to Settings if it never reports in.
+- **A denied microphone can skip the exercises** (Open Settings, or "Skip the exercises" to the
+  wrap-up), so onboarding can still finish.
+- **Data choice starts unselected.** Reference 32 preselects sharing; the screenshot route uses
+  `-onboarding-variant improve` to show the selected state.
+- **Copy that would be untrue for Murmur was rewritten**: "Dozens of languages", the Full Access
+  privacy note, "Improve Murmur for everyone", "Murmur is coming to your computer" (there is no
+  desktop app: the action records an email for a link later), the streak card, and the free plan
+  (1,000 words a week, from `quota_status`). Wispr, ChatGPT, Gmail and Slack artwork is replaced by
+  original SwiftUI drawings; the Google and Microsoft buttons are text-only until the providers'
+  official marks are added.
+- **Email sign-in uses a six-digit code** (plus the emailed link) instead of password sign-up;
+  `supabase/templates/sign_in_code.html` puts the code in the local emails.
+
+### Parity results
+
+`scripts/onboarding_parity.sh` shoots every state; `artifacts/onboarding-parity/contact-sheet.jpg`
+is the 01–42 set and `compare-sheet.jpg` shows reference | Murmur | 50 % overlay for each.
+
+- Text, buttons, cards and headers on the app-owned screens are within 3 pt vertically of the
+  reference (measured row by row against the captures), and font sizes are within 1 pt.
+- Larger deltas are not layout errors: the original illustrations on 35 and 41 have different
+  shapes; 21, 23 and 27 compare against a reference that includes the text cursor; lines differ
+  in width where "Murmur" or rewritten copy replaces the reference text.
+- 07 was captured mid-animation, so only its settled positions (title, Google and Apple) are
+  matched; 19 is a second capture of the microphone prompt and is shown as the keyboard-switch
+  screen behind it; 11–15, 18 and 36 are iOS Settings and system prompts.
+- At XXXL text, pages scroll above the buttons; larger accessibility sizes are capped at XXXL.
+
+### Tests
+
+- `OnboardingReducerTests` (every transition, gate, back and skip edge), `OnboardingPersistenceTests`
+  (checkpoints, termination, migration, exactly-once completion and history seeding) and helper
+  tests run in the Murmur scheme.
+- `OnboardingJourney` scheme (`Tests/MurmurUITests`): fresh install to Home and relaunch, back with
+  answers kept, unavailable providers and the email code, termination at keyboard setup, each
+  exercise and the offer, and the trial, subscriber, free and offline offers.
+
+### Still open
+
+- **Sign in with Apple**: enable the capability for `com.antonmironenko.murmur` (ASC), regenerate
+  the profiles (`scripts/provision_dev.mjs`), add `com.apple.developer.applesignin` to the app
+  entitlements, and turn on `[auth.external.apple]` with the bundle ID as client ID in Supabase.
+- **Google**: an OAuth client in the Supabase project (`[auth.external.google]`).
+- **Legal links**: set `MURMUR_TERMS_URL` and `MURMUR_PRIVACY_URL` (`Config/Base.xcconfig`); until then
+  the sign-in footnote shows them as plain text.
+- **Physical device**: the plan's device matrix (Settings round trip with Full Access, the keyboard
+  picker, real prompts, English and Russian practice, background recovery) hasn't been run.
+- The keyboard itself doesn't show the reference's coaching captions ("Tap the mic to start
+  speaking →", "Congrats 🎉") during practice, and Settings has no picture-in-picture guide.

@@ -18,10 +18,18 @@ public enum Palette {
     public static let text = Color(hex: 0x28272C)
     public static let textSecondary = Color(hex: 0x5A595C)
     public static let splash = Color(hex: 0x2E2A34)
-    public static let cream = Color(hex: 0xFFFFF0)
-    public static let selectedFill = Color(hex: 0xFEFFEB)
-    public static let cardBorder = Color(hex: 0xD0CED2)
-    public static let disabled = Color(hex: 0xACACB0)
+    public static let cream = Color(hex: 0xFFFFEB)
+    public static let selectedFill = Color(hex: 0xFFFFEB)
+    public static let cardBorder = Color(hex: 0xD3CED6)
+    public static let disabled = Color(hex: 0xADABAF)
+    /// "Skip", secondary copy on the permission sheets.
+    public static let muted = Color(hex: 0x7F7B81)
+    /// Legal copy under the sign-in buttons.
+    public static let fineprint = Color(hex: 0x656067)
+    /// The "default style" accent on the style screen.
+    public static let purple = Color(hex: 0xA88ED5)
+    /// Behind the microphone sheet.
+    public static let sheetBackdrop = Color(hex: 0xCCCCCC)
     public static let progressOff = Color(hex: 0xC1BDC4)
     public static let accent = Color(hex: 0xFFA83E)
     public static let lavender = Color(hex: 0xF0D7FF)
@@ -39,14 +47,16 @@ public enum Palette {
     public static let danger = Color(hex: 0xE5484D)
 }
 
-/// Layout constants measured from the 393 pt-wide references.
+/// Layout constants measured from the 402 × 874 pt references (iPhone 16 Pro).
 public enum Metrics {
     public static let screenMargin: CGFloat = 30
     public static let authMargin: CGFloat = 20
-    public static let buttonHeight: CGFloat = 53
-    public static let buttonRadius: CGFloat = 12
-    public static let cardHeight: CGFloat = 64
-    public static let cardRadius: CGFloat = 13
-    public static let cardSpacing: CGFloat = 13
-    public static let borderWidth: CGFloat = 1.6
+    public static let buttonHeight: CGFloat = 54
+    public static let buttonRadius: CGFloat = 13
+    /// Distance from the bottom of the screen to the bottom of the primary button.
+    public static let buttonBottom: CGFloat = 64
+    public static let cardHeight: CGFloat = 66
+    public static let cardRadius: CGFloat = 12
+    public static let cardSpacing: CGFloat = 12
+    public static let borderWidth: CGFloat = 2
 }

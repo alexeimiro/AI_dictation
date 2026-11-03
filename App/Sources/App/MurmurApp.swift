@@ -19,11 +19,40 @@ struct MurmurApp: App {
     }
 }
 
+/// Onboarding until it is finished, then Home. The two never share a navigation stack.
 struct RootView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         @Bindable var model = model
+        ZStack {
+            if model.onboarding.isComplete {
+                MainStack()
+                    .transition(.opacity)
+            } else {
+                OnboardingRootView()
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.35), value: model.onboarding.isComplete)
+        .fullScreenCover(isPresented: $model.showSwipeBack) {
+            SwipeBackView()
+        }
+        .confirmationDialog("Turn on Murmur?", isPresented: $model.confirmUntrustedStart,
+                            titleVisibility: .visible) {
+            Button("Turn On") { model.startSessionFromKeyboard() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("A link asked Murmur to start listening.")
+        }
+    }
+}
+
+/// Home and the screens pushed on top of it.
+struct MainStack: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
         @Bindable var router = model.router
         NavigationStack(path: $router.path) {
             HomeView()
@@ -37,15 +66,5 @@ struct RootView: View {
                 }
         }
         .tint(Palette.ink)
-        .fullScreenCover(isPresented: $model.showSwipeBack) {
-            SwipeBackView()
-        }
-        .confirmationDialog("Turn on Murmur?", isPresented: $model.confirmUntrustedStart,
-                            titleVisibility: .visible) {
-            Button("Turn On") { model.startSessionFromKeyboard() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("A link asked Murmur to start listening.")
-        }
     }
 }

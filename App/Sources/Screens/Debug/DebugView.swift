@@ -49,6 +49,10 @@ struct DebugView: View {
                 Button("Forget verified engines") {
                     SharedSettings.shared.verifiedEngines = [:]
                 }
+                Button("Replay onboarding") {
+                    model.router.popToRoot()
+                    model.onboarding.restart()
+                }
                 Button("Clear history", role: .destructive) { confirmClear = true }
             }
         }

@@ -16,6 +16,8 @@ final class SetupStatus {
     private(set) var microphone: AVAudioApplication.recordPermission = .undetermined
 
     @ObservationIgnored private let payloads: IPCPayloadStore
+    /// Called after every check, so onboarding can follow the user through Settings.
+    @ObservationIgnored var onChange: (() -> Void)?
 
     init(payloads: IPCPayloadStore) {
         self.payloads = payloads
@@ -30,6 +32,7 @@ final class SetupStatus {
         keyboardAdded = Self.isKeyboardAdded()
         fullAccessConfirmed = payloads.readKeyboardStatus()?.fullAccessAt != nil
         microphone = AVAudioApplication.shared.recordPermission
+        onChange?()
         // Turning on Full Access can relaunch the app, and the keyboard writes its status
         // asynchronously, so check again shortly after becoming active.
         Task { [weak self] in
@@ -37,12 +40,14 @@ final class SetupStatus {
             guard let self else { return }
             self.keyboardAdded = Self.isKeyboardAdded()
             self.fullAccessConfirmed = self.payloads.readKeyboardStatus()?.fullAccessAt != nil
+            self.onChange?()
         }
     }
 
     func requestMicrophone() async {
         _ = await AVAudioApplication.requestRecordPermission()
         microphone = AVAudioApplication.shared.recordPermission
+        onChange?()
     }
 
     /// Settings › Murmur, which has the Keyboards row (Murmur, Allow Full Access).

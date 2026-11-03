@@ -244,6 +244,15 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
+# The app signs in with the six-digit code from these emails (or their link).
+[auth.email.template.magic_link]
+subject = "Your Murmur sign-in code"
+content_path = "./supabase/templates/sign_in_code.html"
+
+[auth.email.template.confirmation]
+subject = "Your Murmur sign-in code"
+content_path = "./supabase/templates/sign_in_code.html"
+
 # Uncomment to customize email template
 # [auth.email.template.invite]
 # subject = "You have been invited"
