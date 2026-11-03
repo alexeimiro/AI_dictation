@@ -30,11 +30,16 @@ struct PracticeView: View {
                     GlobeKeyIllustration()
                         .frame(width: 271, height: 232)
                         .padding(.top, 30.7)
-                } else {
-                    editor
-                        .padding(.top, exercise == .basic ? 13 : 14)
-                        .padding(.horizontal, 20)
                 }
+                // Under the guide the box stays focused but hidden, so the real keyboard is up to
+                // switch from (reference 20); picking Murmur's reveals the same box, keyboard still up.
+                editor
+                    .padding(.top, exercise == .basic ? 13 : 14)
+                    .padding(.horizontal, 20)
+                    .frame(height: showsKeyboardGuide ? 0 : nil, alignment: .top)
+                    .opacity(showsKeyboardGuide ? 0 : 1)
+                    .allowsHitTesting(!showsKeyboardGuide)
+                    .accessibilityHidden(showsKeyboardGuide)
                 feedback
                 if done {
                     Button("Next") { store.send(.next) }
