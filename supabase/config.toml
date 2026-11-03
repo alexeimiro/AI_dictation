@@ -425,11 +425,16 @@ enabled = true
 
 # Murmur Edge Functions. The cleanup function verifies the caller's JWT (anonymous users allowed
 # during development); account helpers use the service role internally.
+# These verify the caller's JWT themselves (`authenticate` → getClaims, which handles the new
+# asymmetric signing keys); the gateway's own check only knows the legacy JWT secret.
 [functions.cleanup]
-verify_jwt = true
+verify_jwt = false
+
+[functions.transcribe]
+verify_jwt = false
 
 [functions.delete-account]
-verify_jwt = true
+verify_jwt = false
 
 [functions.auth-lookup]
 verify_jwt = false

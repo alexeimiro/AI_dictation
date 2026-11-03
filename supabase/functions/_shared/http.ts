@@ -16,9 +16,26 @@ export function json(body: unknown, status = 200): Response {
 /** Service-role client. Never expose its results unfiltered. */
 export function adminClient(): SupabaseClient {
   const url = Deno.env.get("SUPABASE_URL");
-  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-  if (!url || !key) throw new Error("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set");
+  const key = serverKey(Deno.env.get("SUPABASE_SECRET_KEYS"), Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
+  if (!url || !key) throw new Error("SUPABASE_URL / SUPABASE_SECRET_KEYS not set");
   return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+}
+
+/**
+ * The key that bypasses RLS. Projects with the new API keys get `SUPABASE_SECRET_KEYS`, a JSON
+ * object of named keys ({"default": "sb_secret_…"}); the legacy `SUPABASE_SERVICE_ROLE_KEY` is
+ * deprecated at the end of 2026 and absent from newer projects.
+ */
+export function serverKey(secretKeys: string | undefined, legacyKey: string | undefined): string | undefined {
+  if (secretKeys) {
+    try {
+      const keys = JSON.parse(secretKeys) as Record<string, unknown>;
+      if (typeof keys.default === "string" && keys.default) return keys.default;
+    } catch {
+      // Malformed: fall back to the legacy key.
+    }
+  }
+  return legacyKey || undefined;
 }
 
 export interface Caller {

@@ -106,3 +106,11 @@ Deno.test("surfaces OpenAI errors without the response body", async () => {
   assertEquals(error.status, 400);
   assertFalse(error.message.includes("secret detail"));
 });
+
+Deno.test("the server key prefers the new secret keys", async () => {
+  const { serverKey } = await import("../_shared/http.ts");
+  assertEquals(serverKey('{"default":"sb_secret_new"}', "legacy"), "sb_secret_new");
+  assertEquals(serverKey(undefined, "legacy"), "legacy");
+  assertEquals(serverKey("not json", "legacy"), "legacy");
+  assertEquals(serverKey('{"billing":"sb_secret_x"}', undefined), undefined);
+});
