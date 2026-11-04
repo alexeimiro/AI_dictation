@@ -49,6 +49,11 @@ enum KeyboardChrome {
             ? UIColor(red: 0.490, green: 0.410, blue: 0.620, alpha: 0.36)
             : UIColor(red: 0.655, green: 0.555, blue: 0.835, alpha: 0.18)
     }
+    static let listeningUIColor = UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 1.000, green: 0.365, blue: 0.390, alpha: 1)
+            : UIColor(red: 0.800, green: 0.105, blue: 0.145, alpha: 1)
+    }
     static let borderUIColor = UIColor { traits in
         if traits.accessibilityContrast == .high {
             return traits.userInterfaceStyle == .dark
@@ -68,7 +73,58 @@ enum KeyboardChrome {
     static let accent = Color(uiColor: accentUIColor)
     static let accentGlyph = Color(uiColor: accentGlyphUIColor)
     static let accentSoft = Color(uiColor: accentSoftUIColor)
+    static let listening = Color(uiColor: listeningUIColor)
     static let border = Color(uiColor: borderUIColor)
+}
+
+/// A persistent recording badge shared by both keyboard layouts. The red live dot and explicit
+/// recognition direction make listening distinguishable from the idle and processing states.
+struct RecognitionIndicator: View {
+    let direction: String
+    var since: Date?
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulses = false
+
+    var body: some View {
+        HStack(spacing: 7) {
+            ZStack {
+                Circle()
+                    .fill(KeyboardChrome.listening.opacity(0.20))
+                    .frame(width: 16, height: 16)
+                    .scaleEffect(pulses ? 1.28 : 0.86)
+                Circle()
+                    .fill(KeyboardChrome.listening)
+                    .frame(width: 8, height: 8)
+            }
+            Text("Listening")
+                .fontWeight(.semibold)
+            Text("· \(direction)")
+                .foregroundStyle(.secondary)
+            if let since {
+                Text(since, style: .timer)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.system(size: 14, weight: .medium))
+        .lineLimit(1)
+        .minimumScaleFactor(0.82)
+        .padding(.horizontal, 12)
+        .frame(height: 32)
+        .background(KeyboardChrome.listening.opacity(0.09), in: .capsule)
+        .overlay {
+            Capsule().stroke(KeyboardChrome.listening.opacity(0.34), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Listening for \(direction)")
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                pulses = true
+            }
+        }
+    }
 }
 
 /// A small, tactile press treatment used by the mic, toolbar controls, and sheet chips.

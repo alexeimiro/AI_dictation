@@ -54,7 +54,13 @@ struct VoicePad: View {
     private var hint: some View {
         switch model.phase {
         case .listening:
-            caption("Tap ✓ when you're done")
+            VStack(spacing: 2) {
+                RecognitionIndicator(direction: model.recognitionDirection,
+                                     since: model.listeningSince)
+                Text("Tap ✓ when you're done")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
         case .processing:
             caption(model.announcesReady ? "Transcribing · we'll tap when it's ready" : "Transcribing…")
         default:

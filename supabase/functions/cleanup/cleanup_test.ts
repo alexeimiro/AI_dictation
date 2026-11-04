@@ -1,4 +1,11 @@
-import { assert, assertEquals, assertFalse, assertRejects, assertStringIncludes } from "jsr:@std/assert@1";
+import {
+  assert,
+  assertEquals,
+  assertFalse,
+  assertNotMatch,
+  assertRejects,
+  assertStringIncludes,
+} from "jsr:@std/assert@1";
 import {
   buildInstructionParts,
   buildResponsesRequest,
@@ -129,7 +136,12 @@ Deno.test("translation requests name the target and allow the expected script ch
     options(fakeFetch(reply("Raporu cuma gününe kadar gönderebilir misin? Çok teşekkürler!"), captured)),
   );
   assertEquals(outcome.status, "cleaned");
-  assertStringIncludes(captured.body!.instructions as string, "Translation: translate the cleaned transcript into Turkish");
+  const instructions = captured.body!.instructions as string;
+  assertStringIncludes(instructions, "Source language: ru-RU.");
+  assertStringIncludes(instructions, "Translation target: Turkish");
+  assertStringIncludes(instructions, "(tr-TR). Translation mode is ON.");
+  assertStringIncludes(instructions, "never return the source-language transcript");
+  assertNotMatch(instructions, /Language: ru-RU \(keep the output in the language that was spoken\)/);
   assert(guardOutput(russianRequest.transcript, outcome.text, "ru-RU", true).ok);
 });
 

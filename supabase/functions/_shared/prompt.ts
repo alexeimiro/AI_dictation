@@ -233,7 +233,11 @@ export function buildLanguageBlock(rules: LanguageRules): string {
  */
 export function buildUserContext(request: CleanupRequest, language: ResolvedLanguage): string {
   const lines: string[] = ["<context>"];
-  lines.push(`Language: ${language.tag ?? "auto"} (keep the output in the language that was spoken).`);
+  if (request.targetLanguage) {
+    lines.push(`Source language: ${language.tag ?? "auto"}.`);
+  } else {
+    lines.push(`Language: ${language.tag ?? "auto"} (keep the output in the language that was spoken).`);
+  }
   lines.push(`Style: ${language.rules.styles[request.style ?? "casual"]}`);
   if (request.targetLanguage) {
     let targetName = request.targetLanguage;
@@ -241,8 +245,10 @@ export function buildUserContext(request: CleanupRequest, language: ResolvedLang
       targetName = new Intl.DisplayNames(["en"], { type: "language" }).of(request.targetLanguage) ?? targetName;
     } catch { /* The tag was already normalized; its code is still a safe, clear fallback. */ }
     lines.push(
-      `Translation: translate the cleaned transcript into ${targetName} (${request.targetLanguage}). ` +
-        "Preserve its meaning and requested writing style. Output only the translation in the target language.",
+      `Translation target: ${targetName} (${request.targetLanguage}). Translation mode is ON. ` +
+        "Translate the entire cleaned transcript into the target language, even when the source-language rules " +
+        "normally say to keep the spoken language or script. Preserve its meaning and requested writing style. " +
+        "Output only the translation in the target language; never return the source-language transcript.",
     );
   }
 

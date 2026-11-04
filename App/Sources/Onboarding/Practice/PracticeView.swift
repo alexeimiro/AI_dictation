@@ -187,6 +187,22 @@ struct PracticeView: View {
 
     @ViewBuilder
     private var feedback: some View {
+        switch model.practice.state {
+        case .listening:
+            PracticeRecognitionIndicator(mode: .listening)
+                .padding(.top, 12)
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        case .processing:
+            PracticeRecognitionIndicator(mode: .processing)
+                .padding(.top, 12)
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        default:
+            fallbackFeedback
+        }
+    }
+
+    @ViewBuilder
+    private var fallbackFeedback: some View {
         if fullAccessHint {
             HStack(spacing: 10) {
                 Text("Turn on Allow Full Access so the keyboard can dictate.")
@@ -226,6 +242,60 @@ struct PracticeView: View {
             if model.setup.fullAccessConfirmed { return }
         }
         fullAccessHint = true
+    }
+}
+
+/// Keeps speech recognition visible above the system keyboard. The practice screen previously
+/// relied on the keyboard's changing mic glyph, which was easy to miss while watching the text
+/// field for the result.
+private struct PracticeRecognitionIndicator: View {
+    enum Mode: Equatable { case listening, processing }
+
+    let mode: Mode
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulses = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if mode == .listening {
+                ZStack {
+                    Circle()
+                        .fill(Palette.danger.opacity(0.16))
+                        .frame(width: 24, height: 24)
+                        .scaleEffect(pulses ? 1.2 : 0.85)
+                    Circle()
+                        .fill(Palette.danger)
+                        .frame(width: 10, height: 10)
+                }
+                Image(systemName: "waveform")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Palette.danger)
+                Text("Listening — speak now")
+            } else {
+                ProgressView()
+                    .tint(Palette.accent)
+                Text("Turning your speech into text…")
+            }
+        }
+        .font(.ui(15, .semibold))
+        .foregroundStyle(Palette.ink)
+        .padding(.horizontal, 16)
+        .frame(height: 44)
+        .background(Palette.paper, in: .capsule)
+        .overlay {
+            Capsule()
+                .stroke(mode == .listening ? Palette.danger.opacity(0.45) : Palette.accent.opacity(0.35),
+                        lineWidth: 1.5)
+        }
+        .shadow(color: Palette.ink.opacity(0.08), radius: 8, y: 3)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(mode == .listening ? "Listening. Speak now." : "Turning your speech into text.")
+        .onAppear {
+            guard mode == .listening, !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true)) {
+                pulses = true
+            }
+        }
     }
 }
 

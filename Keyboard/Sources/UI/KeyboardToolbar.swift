@@ -81,7 +81,9 @@ struct KeyboardToolbar: View {
                 caption("Opening Murmur…")
             case .starting:
                 caption("Starting…")
-            case .idle, .listening, .processing:
+            case .listening:
+                RecognitionIndicator(direction: model.recognitionDirection)
+            case .idle, .processing:
                 HStack(spacing: 6) {
                     stylePill
                     languagePill
@@ -247,15 +249,7 @@ struct ListeningPanel: View {
     @ViewBuilder
     private var status: some View {
         if let since = model.listeningSince {
-            HStack(spacing: 6) {
-                Text("Listening")
-                Text(since, style: .timer).monospacedDigit()
-            }
-            .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
-            .frame(height: 30)
-            .background(KeyboardChrome.surface, in: .capsule)
+            RecognitionIndicator(direction: model.recognitionDirection, since: since)
         } else {
             HStack(spacing: 8) {
                 ProgressView()

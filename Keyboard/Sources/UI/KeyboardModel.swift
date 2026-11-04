@@ -107,6 +107,15 @@ final class KeyboardModel {
         translationEnabled ? "\(effectiveLanguage.shortCode) → \(targetLanguage.shortCode)" : effectiveLanguage.shortCode
     }
 
+    /// Kept compact enough for the keyboard while making it clear which language the recognizer
+    /// is listening for. In translation mode the output language is shown too, so a user can
+    /// catch a reversed language pair before finishing the dictation.
+    var recognitionDirection: String {
+        translationEnabled
+            ? "\(effectiveLanguage.shortCode) → \(targetLanguage.shortCode)"
+            : effectiveLanguage.shortCode
+    }
+
     var idleHint: String {
         guard translationEnabled else { return "Speak to type" }
         return "Speak \(effectiveLanguage.localizedName) → Type in \(targetLanguage.localizedName)"
