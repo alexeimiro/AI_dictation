@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The voice layout's main area: a big talk button between delete and return, with a hint below.
+/// The voice layout's main area: a big talk button with cancel on the left while capturing and
+/// delete in the familiar right-hand position. Return lives in the bottom key row.
 /// Dragging anywhere off the buttons moves the cursor, like holding the space bar.
 struct VoicePad: View {
     let model: KeyboardModel
@@ -42,46 +43,20 @@ struct VoicePad: View {
             }
             .buttonStyle(.keyboardPress)
             .accessibilityLabel("Cancel transcription")
-        } else {
-            DeleteKey(model: model)
         }
     }
 
-    @ViewBuilder
     private var trailing: some View {
-        if let since = model.listeningSince {
-            Text(since, style: .timer)
-                .font(.system(size: 15, weight: .medium))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-        } else if !model.isCapturing {
-            Button(action: model.actions.returnKey) {
-                Group {
-                    if model.returnTitle == "return" {
-                        Image(systemName: "return.left").font(.system(size: 19))
-                    } else {
-                        Text(model.returnTitle)
-                            .font(.system(size: 16))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                    }
-                }
-                .frame(width: 72, height: 56)
-                .background { KeyFace(shape: Capsule()) }
-            }
-            .buttonStyle(.keyboardPress)
-            .accessibilityLabel(model.returnTitle)
-        }
+        DeleteKey(model: model)
     }
 
     @ViewBuilder
     private var hint: some View {
         switch model.phase {
         case .listening:
-            caption("Tap ✓ when you're done", systemImage: "waveform")
+            caption("Tap ✓ when you're done")
         case .processing:
-            caption(model.announcesReady ? "Transcribing · we'll tap when it's ready" : "Transcribing…",
-                    systemImage: "sparkles")
+            caption(model.announcesReady ? "Transcribing · we'll tap when it's ready" : "Transcribing…")
         default:
             if let words = model.undoableWords {
                 HStack(spacing: 10) {
@@ -97,28 +72,19 @@ struct VoicePad: View {
                 }
                 .font(.system(size: 15, weight: .medium))
             } else {
-                caption(model.idleHint, systemImage: model.translationEnabled ? "character.bubble" : "waveform")
+                caption(model.idleHint)
             }
         }
     }
 
-    private func caption(_ text: String, systemImage: String? = nil) -> some View {
-        HStack(spacing: 6) {
-            if let systemImage {
-                Image(systemName: systemImage)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(model.translationEnabled ? KeyboardChrome.accent : .secondary)
-            }
-            Text(text)
-                .font(.system(size: 13, weight: .medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.9)
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 11)
-        .frame(height: 28)
-        .background(KeyboardChrome.surface.opacity(0.72), in: .capsule)
-        .overlay { Capsule().stroke(KeyboardChrome.border, lineWidth: 0.5) }
+    private func caption(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13, weight: .medium))
+            .lineLimit(1)
+            .minimumScaleFactor(0.9)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 11)
+            .frame(height: 28)
     }
 
     private var trackpad: some Gesture {

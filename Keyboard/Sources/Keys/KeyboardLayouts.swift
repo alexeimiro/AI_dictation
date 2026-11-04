@@ -51,7 +51,8 @@ enum KeyboardLayouts {
                                returnTitle: returnTitle, languageCode: languageCode)
         switch plane {
         case .voice:
-            return [voiceRow(showsGlobe: showsGlobe, languageCode: languageCode)]
+            return [voiceRow(showsGlobe: showsGlobe, returnTitle: returnTitle,
+                             languageCode: languageCode)]
         case .numbers:
             return [
                 "1234567890".map { .char(String($0)) },
@@ -125,18 +126,19 @@ enum KeyboardLayouts {
         return row
     }
 
-    /// The voice pad's one row: the ways out to the full keys, the punctuation dictation most
-    /// often leaves out, and space. Delete and return sit beside the talk button.
-    private static func voiceRow(showsGlobe: Bool, languageCode: String) -> [KeySpec] {
+    /// The voice pad's compact typing row. Numbers and punctuation remain available through the
+    /// full letter keyboard; delete sits beside the talk button in the main pad.
+    private static func voiceRow(showsGlobe: Bool, returnTitle: String,
+                                 languageCode: String) -> [KeySpec] {
         var row = [
-            KeySpec(action: .plane(.letters), label: lettersLabel(languageCode), weight: 1.3, style: .function),
-            KeySpec(action: .plane(.numbers), label: "123", weight: 1.3, style: .function),
+            KeySpec(action: .plane(.letters), label: lettersLabel(languageCode), weight: 1.3,
+                    style: .function),
         ]
         if showsGlobe {
             row.append(KeySpec(action: .globe, systemImage: "globe", weight: 1.1, style: .function))
         }
-        row += [",", ".", "?"].map(KeySpec.char)
-        row.append(KeySpec(action: .space, label: "space", weight: showsGlobe ? 3.3 : 4.4))
+        row.append(KeySpec(action: .space, label: "space", weight: showsGlobe ? 5.5 : 6.6))
+        row.append(KeySpec(action: .returnKey, label: returnTitle, weight: 2.1, style: .returnKey))
         return row
     }
 
