@@ -1,12 +1,10 @@
 import MurmurCore
 import SwiftUI
 
-private let ink = Color(red: 0.192, green: 0.176, blue: 0.220)
-
 /// The mic and ✓ buttons: an ink circle with a white glyph, swapped on a dark keyboard, where an
 /// ink circle disappears into the backdrop.
-let actionFill = Color(UIColor { $0.userInterfaceStyle == .dark ? .white : UIColor(ink) })
-let actionGlyph = Color(UIColor { $0.userInterfaceStyle == .dark ? UIColor(ink) : .white })
+let actionFill = KeyboardChrome.accent
+let actionGlyph = KeyboardChrome.accentGlyph
 
 /// The row above the keys: app button, status / style pill / banners, and the mic.
 struct KeyboardToolbar: View {
@@ -16,9 +14,12 @@ struct KeyboardToolbar: View {
         HStack(spacing: 8) {
             Button(action: model.actions.openApp) {
                 Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 17, weight: .medium))
-                    .frame(width: 36, height: 36)
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 34, height: 34)
+                    .background { KeyboardSurface(shape: Circle()) }
+                    .frame(width: 44, height: 44)
             }
+            .buttonStyle(.keyboardPress)
             .accessibilityLabel("Settings")
 
             center
@@ -34,8 +35,11 @@ struct KeyboardToolbar: View {
             }
         }
         .foregroundStyle(.primary)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 6)
         .frame(height: 50)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(KeyboardChrome.border).frame(height: 0.5)
+        }
     }
 
     @ViewBuilder
@@ -47,13 +51,20 @@ struct KeyboardToolbar: View {
                         .font(.system(size: 14, weight: .medium))
                         .lineLimit(1)
                         .padding(.horizontal, 10)
-                        .frame(height: 30)
-                        .background(.thinMaterial, in: .capsule)
+                        .frame(height: 32)
+                        .background { KeyboardSurface(shape: Capsule(), active: true) }
+                        .frame(minHeight: 44)
                 }
+                .buttonStyle(.keyboardPress)
                 .accessibilityHint(pending.text)
                 Button(action: model.actions.dismissPending) {
-                    Image(systemName: "xmark").font(.system(size: 12, weight: .semibold))
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 30, height: 30)
+                        .background { KeyboardSurface(shape: Circle()) }
+                        .frame(width: 44, height: 44)
                 }
+                .buttonStyle(.keyboardPress)
                 .accessibilityLabel("Dismiss")
             }
         } else {
@@ -82,13 +93,24 @@ struct KeyboardToolbar: View {
     /// Opens the compact translation/source-language panel over the keyboard.
     private var languagePill: some View {
         Button(action: model.actions.showLanguageSelector) {
-            Text(model.languagePillTitle)
-                .font(.system(size: 13, weight: .semibold))
+            HStack(spacing: 5) {
+                if model.translationEnabled {
+                    Image(systemName: "character.bubble")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                Text(model.languagePillTitle)
+                    .font(.system(size: 13, weight: .semibold))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .opacity(0.65)
+            }
                 .padding(.horizontal, 9)
-                .frame(height: 30)
-                .background(.thinMaterial, in: .capsule)
+                .frame(height: 32)
+                .background { KeyboardSurface(shape: Capsule(), active: model.translationEnabled) }
+                .frame(minHeight: 44)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.keyboardPress)
+        .disabled(model.locksSessionOptions)
         .accessibilityLabel(model.translationEnabled
             ? "Translate from \(model.effectiveLanguage.localizedName) to \(model.targetLanguage.localizedName)"
             : "Dictation language: \(model.effectiveLanguage.localizedName)")
@@ -109,17 +131,18 @@ struct KeyboardToolbar: View {
             }
         } label: {
             HStack(spacing: 5) {
-                if model.sessionStatus.isLive {
-                    Circle().fill(Color.green).frame(width: 6, height: 6)
-                }
                 Text(model.effectiveStyle.title)
-                    .font(.system(size: 14, weight: .medium))
-                Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 13, weight: .medium))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
+                    .opacity(0.65)
             }
             .padding(.horizontal, 10)
-            .frame(height: 30)
-            .background(.thinMaterial, in: .capsule)
+            .frame(height: 32)
+            .background { KeyboardSurface(shape: Capsule()) }
+            .frame(minHeight: 44)
         }
+        .disabled(model.locksSessionOptions)
         .accessibilityLabel("Style: \(model.effectiveStyle.title)")
     }
 
@@ -143,8 +166,13 @@ struct KeyboardToolbar: View {
                     .minimumScaleFactor(0.8)
             }
             Button(action: dismiss) {
-                Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 30, height: 30)
+                    .background { KeyboardSurface(shape: Circle()) }
+                    .frame(width: 44, height: 44)
             }
+            .buttonStyle(.keyboardPress)
             .accessibilityLabel("Dismiss")
         }
     }
@@ -153,6 +181,7 @@ struct KeyboardToolbar: View {
         Button(action: model.actions.mic) {
             ZStack {
                 Circle().fill(actionFill)
+                Circle().stroke(.white.opacity(0.16), lineWidth: 0.7)
                 switch model.phase {
                 case .starting, .openingApp:
                     ProgressView().tint(actionGlyph)
@@ -163,7 +192,11 @@ struct KeyboardToolbar: View {
                 }
             }
             .frame(width: 40, height: 40)
+            .shadow(color: KeyboardChrome.accent.opacity(0.20), radius: 5, y: 2)
+            .frame(width: 44, height: 44)
         }
+        .buttonStyle(.keyboardPress)
+        .disabled(model.isTransitioning)
         .accessibilityLabel(model.isCapturing ? "Stop transcribing" : "Start Murmur")
     }
 }
@@ -178,8 +211,9 @@ struct ListeningPanel: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 20, weight: .semibold))
                     .frame(width: 58, height: 58)
-                    .background(.thinMaterial, in: .circle)
+                    .background { KeyboardSurface(shape: Circle()) }
             }
+            .buttonStyle(.keyboardPress)
             .accessibilityLabel("Cancel transcription")
             .padding(.leading, 20)
 
@@ -197,7 +231,10 @@ struct ListeningPanel: View {
                     .foregroundStyle(actionGlyph)
                     .frame(width: 58, height: 58)
                     .background(actionFill, in: .circle)
+                    .overlay { Circle().stroke(.white.opacity(0.16), lineWidth: 0.7) }
+                    .shadow(color: KeyboardChrome.accent.opacity(0.20), radius: 6, y: 2)
             }
+            .buttonStyle(.keyboardPress)
             .accessibilityLabel("Stop transcribing")
             .padding(.trailing, 20)
             .opacity(model.listeningSince == nil ? 0.3 : 1)
@@ -216,6 +253,9 @@ struct ListeningPanel: View {
             }
             .font(.system(size: 15, weight: .medium))
             .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .frame(height: 30)
+            .background(KeyboardChrome.surface, in: .capsule)
         } else {
             HStack(spacing: 8) {
                 ProgressView()
@@ -231,16 +271,17 @@ struct ListeningPanel: View {
 
 private struct Waveform: View {
     let levels: [Double]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(alignment: .center, spacing: 3) {
-            ForEach(Array(levels.enumerated()), id: \.offset) { _, level in
+            ForEach(Array(levels.suffix(20).enumerated()), id: \.offset) { _, level in
                 Capsule()
-                    .fill(.primary.opacity(0.8))
+                    .fill(KeyboardChrome.accent.opacity(0.82))
                     .frame(width: 3, height: max(4, 44 * level))
             }
         }
-        .animation(.linear(duration: 0.08), value: levels)
+        .animation(reduceMotion ? nil : .linear(duration: 0.08), value: levels)
         .accessibilityHidden(true)
     }
 }

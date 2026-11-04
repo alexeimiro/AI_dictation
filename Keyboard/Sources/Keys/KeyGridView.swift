@@ -12,8 +12,9 @@ final class KeyButton: UIControl {
         super.init(frame: .zero)
         isExclusiveTouch = true
         background.isUserInteractionEnabled = false
-        background.layer.cornerRadius = 8
+        background.layer.cornerRadius = 10
         background.layer.cornerCurve = .continuous
+        background.layer.borderWidth = 0.6
         addSubview(background)
 
         titleLabel.textAlignment = .center
@@ -24,13 +25,17 @@ final class KeyButton: UIControl {
         iconView.isUserInteractionEnabled = false
         addSubview(titleLabel)
         addSubview(iconView)
+        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) {
+            (button: KeyButton, _: UITraitCollection) in
+            button.updateColors()
+        }
 
         if let label = spec.label {
             titleLabel.text = label
             let isCharacter = spec.style == .character && label.count == 1
             titleLabel.font = isCharacter
-                ? .systemFont(ofSize: 25, weight: .regular)
-                : .systemFont(ofSize: 16, weight: .regular)
+                ? .systemFont(ofSize: 23, weight: .regular)
+                : .systemFont(ofSize: 15, weight: .medium)
         }
         if let systemImage = spec.systemImage {
             iconView.image = UIImage(systemName: systemImage,
@@ -45,43 +50,51 @@ final class KeyButton: UIControl {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override var isHighlighted: Bool {
-        didSet { updateColors() }
-    }
-
-    override func traitCollectionDidChange(_ previous: UITraitCollection?) {
-        super.traitCollectionDidChange(previous)
-        updateColors()
+        didSet {
+            updateColors()
+            let target = isHighlighted && !UIAccessibility.isReduceMotionEnabled
+                ? CGAffineTransform(scaleX: 0.965, y: 0.965) : .identity
+            guard transform != target else { return }
+            if UIAccessibility.isReduceMotionEnabled {
+                transform = target
+                return
+            }
+            UIView.animate(withDuration: 0.08, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+                self.transform = target
+            }
+        }
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let inset = bounds.insetBy(dx: 3, dy: 5)
+        let inset = bounds.insetBy(dx: 3, dy: 4)
         background.frame = inset
         titleLabel.frame = inset.insetBy(dx: 2, dy: 0)
         iconView.frame = inset
     }
 
     private func updateColors() {
-        let dark = traitCollection.userInterfaceStyle == .dark
         let base: UIColor
         switch spec.style {
         case .character:
-            base = dark ? UIColor(white: 0.42, alpha: 1) : .white
+            base = KeyboardChrome.keyUIColor
         case .function:
-            base = dark ? UIColor(white: 0.28, alpha: 1) : UIColor(red: 0.69, green: 0.71, blue: 0.75, alpha: 1)
+            base = KeyboardChrome.functionKeyUIColor
         case .returnKey:
-            base = dark ? UIColor(white: 0.28, alpha: 1) : UIColor(red: 0.69, green: 0.71, blue: 0.75, alpha: 1)
+            base = KeyboardChrome.accentUIColor
         }
-        let highlighted = spec.style == .character
-            ? (dark ? UIColor(white: 0.28, alpha: 1) : UIColor(red: 0.69, green: 0.71, blue: 0.75, alpha: 1))
-            : (dark ? UIColor(white: 0.42, alpha: 1) : .white)
+        let highlighted = spec.style == .returnKey
+            ? KeyboardChrome.accentUIColor.withAlphaComponent(0.72)
+            : KeyboardChrome.pressedKeyUIColor
         background.backgroundColor = isHighlighted ? highlighted : base
-        titleLabel.textColor = dark ? .white : .black
-        iconView.tintColor = dark ? .white : .black
+        let foreground = spec.style == .returnKey ? KeyboardChrome.accentGlyphUIColor : UIColor.label
+        titleLabel.textColor = foreground
+        iconView.tintColor = foreground
+        background.layer.borderColor = KeyboardChrome.borderUIColor.resolvedColor(with: traitCollection).cgColor
         background.layer.shadowColor = UIColor.black.cgColor
-        background.layer.shadowOpacity = dark ? 0 : 0.25
-        background.layer.shadowOffset = CGSize(width: 0, height: 1)
-        background.layer.shadowRadius = 0
+        background.layer.shadowOpacity = traitCollection.userInterfaceStyle == .dark ? 0.22 : 0.13
+        background.layer.shadowOffset = CGSize(width: 0, height: isHighlighted ? 0.5 : 1.5)
+        background.layer.shadowRadius = isHighlighted ? 0.5 : 1.5
     }
 
     private static func accessibilityLabel(for spec: KeySpec) -> String {

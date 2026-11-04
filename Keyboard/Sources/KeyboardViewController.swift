@@ -42,6 +42,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     override func loadView() {
         let inputView = KeyboardInputView(frame: .zero, inputViewStyle: .keyboard)
         inputView.allowsSelfSizing = true
+        inputView.backgroundColor = KeyboardChrome.backdropUIColor
         self.inputView = inputView
     }
 
@@ -61,6 +62,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        updateKeyboardAppearance()
         model.hasFullAccess = hasFullAccess
         model.defaultStyle = settings.defaultStyle
         model.announcesReady = hasFullAccess && settings.readyHaptic
@@ -81,6 +83,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        if model.showsLanguageSelector {
+            model.showsLanguageSelector = false
+            languageHost?.view.isHidden = true
+            updateLanguagePanelAccessibility(isPresented: false, postsFocusChange: false)
+        }
         repeater.stop()
         client?.deactivate()
         memoryTimer?.invalidate()
@@ -88,6 +95,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
+        updateKeyboardAppearance()
         updateAutoShift()
         reloadKeys()
         refreshUndo()
@@ -102,6 +110,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
 
     private func buildViews() {
         guard let view else { return }
+        view.backgroundColor = KeyboardChrome.backdropUIColor
         let toolbar = embed(KeyboardToolbar(model: model), in: view)
         let panel = embed(ListeningPanel(model: model), in: view)
         toolbarHost = toolbar
@@ -231,12 +240,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
                 self?.selectSourceLanguage(language)
             },
             showLanguageSelector: { [weak self] in
-                self?.languageHost?.view.isHidden = false
-                withAnimation(.easeOut(duration: 0.18)) { self?.model.showsLanguageSelector = true }
+                guard let self else { return }
+                self.languageHost?.view.isHidden = false
+                withAnimation(.easeOut(duration: 0.18)) { self.model.showsLanguageSelector = true }
+                self.updateLanguagePanelAccessibility(isPresented: true)
             },
             hideLanguageSelector: { [weak self] in
                 withAnimation(.easeIn(duration: 0.15)) { self?.model.showsLanguageSelector = false }
-                self?.languageHost?.view.isHidden = true
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(170))
+                    guard let self, !self.model.showsLanguageSelector else { return }
+                    self.languageHost?.view.isHidden = true
+                    self.updateLanguagePanelAccessibility(isPresented: false)
+                }
             },
             setTranslationEnabled: { [weak self] enabled in self?.setTranslationEnabled(enabled) },
             setTargetLanguage: { [weak self] language in self?.selectTargetLanguage(language) },
@@ -253,6 +269,30 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
                 self?.textDocumentProxy.adjustTextPosition(byCharacterOffset: offset)
                 self?.clearUndo()
             })
+    }
+
+    private func updateLanguagePanelAccessibility(isPresented: Bool, postsFocusChange: Bool = true) {
+        languageHost?.view.accessibilityViewIsModal = isPresented
+        toolbarHost?.view.accessibilityElementsHidden = isPresented
+        panelHost?.view.accessibilityElementsHidden = isPresented
+        padHost?.view.accessibilityElementsHidden = isPresented
+        keyGrid.accessibilityElementsHidden = isPresented
+        padKeys.accessibilityElementsHidden = isPresented
+
+        if postsFocusChange {
+            let focusTarget = isPresented ? languageHost?.view : toolbarHost?.view
+            DispatchQueue.main.async {
+                UIAccessibility.post(notification: .screenChanged, argument: focusTarget)
+            }
+        }
+    }
+
+    private func updateKeyboardAppearance() {
+        overrideUserInterfaceStyle = switch textDocumentProxy.keyboardAppearance {
+        case .dark: .dark
+        case .light: .light
+        default: .unspecified
+        }
     }
 
     /// Loads the app's installed on-device languages. Cloud recognition can additionally use the

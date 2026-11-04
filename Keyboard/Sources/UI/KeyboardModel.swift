@@ -68,6 +68,21 @@ final class KeyboardModel {
         if case .processing = phase { true } else { false }
     }
 
+    /// Session options are captured when dictation starts, so keep them stable until that run ends.
+    var locksSessionOptions: Bool {
+        switch phase {
+        case .openingApp, .starting, .listening, .processing: true
+        default: false
+        }
+    }
+
+    var isTransitioning: Bool {
+        switch phase {
+        case .openingApp, .starting, .processing: true
+        default: false
+        }
+    }
+
     var listeningSince: Date? {
         if case .listening(_, let since) = phase { since } else { nil }
     }
@@ -110,7 +125,7 @@ final class KeyboardModel {
         pendingResult = client.pendingResult
         if case .listening = client.phase {
             levels.removeFirst()
-            levels.append(max(0.06, client.level))
+            levels.append(min(1, max(0.06, client.level)))
         } else if levels.contains(where: { $0 > 0.06 }) {
             levels = Array(repeating: 0.06, count: levels.count)
         }
