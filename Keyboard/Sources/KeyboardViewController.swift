@@ -216,6 +216,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         model.actions = KeyboardModel.Actions(
             mic: { [weak self] in
                 guard let self else { return }
+                feedback()
                 // On the voice layout's full keys, talking goes back to the pad.
                 if usesVoicePad, plane != .voice {
                     plane = .voice
