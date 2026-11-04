@@ -117,11 +117,16 @@ final class KeyButton: UIControl {
 final class KeyGridView: UIView {
     var onKeyDown: ((KeySpec) -> Void)?
     var onKeyUp: ((KeySpec) -> Void)?
+    var onSpaceTrackStart: (() -> Void)?
+    var onSpaceTrackMove: ((Int) -> Void)?
     /// The globe key must forward its touches to `handleInputModeList(from:with:)`.
     weak var globeTarget: UIInputViewController?
 
     private var rows: [[KeyButton]] = []
     private let rowHeight: CGFloat = 54
+    private var spaceTrackOrigin: CGPoint = .zero
+    private var consumedSpaceTranslation: CGFloat = 0
+    private static let cursorStep: CGFloat = 9
 
     func configure(rows specs: [[KeySpec]]) {
         rows.flatMap { $0 }.forEach { $0.removeFromSuperview() }
@@ -132,6 +137,13 @@ final class KeyGridView: UIView {
                     button.addTarget(globeTarget,
                                      action: #selector(UIInputViewController.handleInputModeList(from:with:)),
                                      for: .allTouchEvents)
+                } else if spec.action == .space {
+                    // Delay insertion until release so a hold can turn the key into a trackpad.
+                    button.addTarget(self, action: #selector(spaceTapped(_:)), for: .touchUpInside)
+                    let hold = UILongPressGestureRecognizer(target: self, action: #selector(spaceTracked(_:)))
+                    hold.minimumPressDuration = 0.35
+                    hold.allowableMovement = .greatestFiniteMagnitude
+                    button.addGestureRecognizer(hold)
                 } else {
                     button.addTarget(self, action: #selector(keyDown(_:)), for: .touchDown)
                     button.addTarget(self, action: #selector(keyUp(_:)), for: [.touchUpInside, .touchUpOutside, .touchCancel])
@@ -177,5 +189,32 @@ final class KeyGridView: UIView {
 
     @objc private func keyUp(_ sender: KeyButton) {
         onKeyUp?(sender.spec)
+    }
+
+    @objc private func spaceTapped(_ sender: KeyButton) {
+        onKeyDown?(sender.spec)
+        onKeyUp?(sender.spec)
+    }
+
+    @objc private func spaceTracked(_ gesture: UILongPressGestureRecognizer) {
+        guard let button = gesture.view as? KeyButton else { return }
+        switch gesture.state {
+        case .began:
+            spaceTrackOrigin = gesture.location(in: self)
+            consumedSpaceTranslation = 0
+            button.isHighlighted = true
+            onSpaceTrackStart?()
+        case .changed:
+            let translation = gesture.location(in: self).x - spaceTrackOrigin.x
+            let steps = Int((translation - consumedSpaceTranslation) / Self.cursorStep)
+            guard steps != 0 else { return }
+            consumedSpaceTranslation += CGFloat(steps) * Self.cursorStep
+            onSpaceTrackMove?(steps)
+        case .ended, .cancelled, .failed:
+            button.isHighlighted = false
+            consumedSpaceTranslation = 0
+        default:
+            break
+        }
     }
 }

@@ -120,6 +120,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         keyGrid.globeTarget = self
         keyGrid.onKeyDown = { [weak self] spec in self?.keyDown(spec) }
         keyGrid.onKeyUp = { [weak self] spec in self?.keyUp(spec) }
+        keyGrid.onSpaceTrackStart = { [weak self] in self?.spaceTrackDidBegin() }
+        keyGrid.onSpaceTrackMove = { [weak self] offset in self?.moveCursor(offset) }
         view.addSubview(keyGrid)
 
         let pad = embed(VoicePad(model: model), in: view)
@@ -131,6 +133,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         padKeys.globeTarget = self
         padKeys.onKeyDown = { [weak self] spec in self?.keyDown(spec) }
         padKeys.onKeyUp = { [weak self] spec in self?.keyUp(spec) }
+        padKeys.onSpaceTrackStart = { [weak self] in self?.spaceTrackDidBegin() }
+        padKeys.onSpaceTrackMove = { [weak self] offset in self?.moveCursor(offset) }
         view.addSubview(padKeys)
 
         let languagePanel = embed(LanguageSelectorPanel(model: model), in: view)
@@ -266,10 +270,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             },
             returnKey: { [weak self] in self?.keyDown(KeySpec(action: .returnKey)) },
             undo: { [weak self] in self?.undoLastDictation() },
-            moveCursor: { [weak self] offset in
-                self?.textDocumentProxy.adjustTextPosition(byCharacterOffset: offset)
-                self?.clearUndo()
-            })
+            moveCursor: { [weak self] offset in self?.moveCursor(offset) })
     }
 
     private func updateLanguagePanelAccessibility(isPresented: Bool, postsFocusChange: Bool = true) {
@@ -449,6 +450,16 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             updateAutoShift()
             reloadKeys()
         }
+    }
+
+    private func spaceTrackDidBegin() {
+        feedback()
+        clearUndo()
+    }
+
+    private func moveCursor(_ offset: Int) {
+        textDocumentProxy.adjustTextPosition(byCharacterOffset: offset)
+        clearUndo()
     }
 
     /// Double space after a word types ". ", like the system keyboard.
