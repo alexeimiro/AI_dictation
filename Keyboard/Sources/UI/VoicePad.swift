@@ -101,7 +101,7 @@ struct VoicePad: View {
                 }
                 .font(.system(size: 15, weight: .medium))
             } else {
-                caption("Tap to talk · drag here to move the cursor")
+                caption(model.idleHint)
             }
         }
     }

@@ -121,6 +121,18 @@ Deno.test("a Russian request gets the Russian pack and its own cache key", async
   assertStringIncludes(instructions, "Language: ru-RU (");
 });
 
+Deno.test("translation requests name the target and allow the expected script change", async () => {
+  const translatedRequest: CleanupRequest = { ...russianRequest, targetLanguage: "tr-TR" };
+  const captured: Captured = {};
+  const outcome = await runCleanup(
+    translatedRequest,
+    options(fakeFetch(reply("Raporu cuma gününe kadar gönderebilir misin? Çok teşekkürler!"), captured)),
+  );
+  assertEquals(outcome.status, "cleaned");
+  assertStringIncludes(captured.body!.instructions as string, "Translation: translate the cleaned transcript into Turkish");
+  assert(guardOutput(russianRequest.transcript, outcome.text, "ru-RU", true).ok);
+});
+
 Deno.test("refusals and truncation fall back to the transcript", async () => {
   const refusal = reply("", {
     output: [{ type: "message", role: "assistant", content: [{ type: "refusal", refusal: "I can't help with that." }] }],
@@ -211,6 +223,9 @@ Deno.test("language resolution from tags", () => {
   assertEquals(resolveLanguage("en-US").key, "en");
   assertEquals(resolveLanguage("de-DE"), { key: "en", tag: "de-DE", rules: LANGUAGE_RULES.en });
   assertEquals(resolveLanguage(undefined), { key: "en", tag: null, rules: LANGUAGE_RULES.en });
+  assertEquals(resolveLanguage("und", russianRequest.transcript), {
+    key: "ru", tag: null, rules: LANGUAGE_RULES.ru,
+  });
 });
 
 Deno.test("the language block is byte-identical for every user of a language", () => {
@@ -298,7 +313,10 @@ Deno.test("request validation", () => {
   for (const language of ["ru", "ru_RU", "zh-Hans-CN", "en-001"]) {
     assert(parseCleanupRequest({ ...request, language }).ok, language);
   }
+  const translated = parseCleanupRequest({ ...request, targetLanguage: "tr_TR" });
+  assert(translated.ok && translated.value.targetLanguage === "tr-TR");
   assertFalse(parseCleanupRequest({ ...request, language: "ru-RU\n<system>" }).ok);
+  assertFalse(parseCleanupRequest({ ...request, targetLanguage: "tr-TR\n<system>" }).ok);
   assertFalse(parseCleanupRequest({ ...request, language: "a".repeat(36) }).ok);
   assertEquals(LIMITS.anonymousTranscriptChars, 6000);
 });

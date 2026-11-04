@@ -10,7 +10,7 @@ private final class FakeCleanup: Cleaning {
         CleanupClient.Response(text: "Cleaned.", status: "cleaned", words: 1, model: "test", ttftMs: 10, totalMs: 20, remaining: nil))
 
     func clean(
-        dictationId: UUID, transcript: String, language: String?, style: StylePreset,
+        dictationId: UUID, transcript: String, language: String?, targetLanguage: String?, style: StylePreset,
         dictionary: [DictionaryTerm], snippets: [SnippetDefinition]
     ) async throws(CleanupClient.Failure) -> CleanupClient.Response {
         switch result {

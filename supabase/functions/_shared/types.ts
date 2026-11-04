@@ -19,6 +19,8 @@ export interface CleanupRequest {
    * client did not say ("auto"). Only this sanitized value ever reaches the prompt.
    */
   language?: string;
+  /** Normalized BCP-47 output language. Omitted for ordinary same-language dictation. */
+  targetLanguage?: string;
   style?: Style;
   dictionary?: DictionaryEntry[];
   snippets?: SnippetRef[];
@@ -82,6 +84,8 @@ export function parseCleanupRequest(body: unknown): Parsed<CleanupRequest> {
   if (raw.transcript.length > LIMITS.transcriptChars) return { ok: false, error: "transcript too long" };
   const language = normalizeLanguageTag(raw.language);
   if (!language.ok) return { ok: false, error: language.error };
+  const targetLanguage = normalizeLanguageTag(raw.targetLanguage);
+  if (!targetLanguage.ok) return { ok: false, error: targetLanguage.error };
   if (raw.style !== undefined && !STYLES.includes(raw.style as Style)) {
     return { ok: false, error: "unknown style" };
   }
@@ -128,6 +132,7 @@ export function parseCleanupRequest(body: unknown): Parsed<CleanupRequest> {
       dictationId: raw.dictationId,
       transcript: raw.transcript,
       language: language.tag,
+      targetLanguage: targetLanguage.tag,
       style: raw.style as Style | undefined,
       dictionary,
       snippets,

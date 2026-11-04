@@ -52,6 +52,8 @@ public final class KeyboardSessionClient {
     public var styleOverride: StylePreset?
     /// BCP-47 tag chosen in the keyboard's language pill; nil means the primary language.
     public var languageOverride: String?
+    /// Nil for normal dictation; otherwise the model translates into this BCP-47 language.
+    public var translationTargetLanguage: String?
 
     public weak var host: KeyboardSessionHost?
 
@@ -447,7 +449,7 @@ public final class KeyboardSessionClient {
         let command = KeyboardCommand(
             requestId: requestId, kind: kind, createdAt: clock(),
             documentIdentifier: activeDocumentIdentifier, styleOverride: styleOverride,
-            languageOverride: languageOverride)
+            languageOverride: languageOverride, translationTargetLanguage: translationTargetLanguage)
         do {
             try transport.payloads.write(command: command)
         } catch {

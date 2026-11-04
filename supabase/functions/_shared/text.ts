@@ -52,7 +52,12 @@ export function cyrillicShare(text: string): number | null {
  * question, refused, produced something much longer than what was said, or translated or
  * transliterated the text into another script.
  */
-export function guardOutput(transcript: string, output: string, locale = "en"): GuardResult {
+export function guardOutput(
+  transcript: string,
+  output: string,
+  locale = "en",
+  allowTranslation = false,
+): GuardResult {
   const inputWords = countWords(transcript, locale);
   const outputWords = countWords(output, locale);
   if (outputWords === 0 && inputWords >= 3) return { ok: false, reason: "empty" };
@@ -60,9 +65,11 @@ export function guardOutput(transcript: string, output: string, locale = "en"): 
 
   const trimmedOutput = output.trimStart();
   const trimmedInput = transcript.trimStart();
-  for (const opener of ASSISTANT_OPENERS) {
-    if (opener.test(trimmedOutput) && !opener.test(trimmedInput)) {
-      return { ok: false, reason: "assistant_reply" };
+  if (!allowTranslation) {
+    for (const opener of ASSISTANT_OPENERS) {
+      if (opener.test(trimmedOutput) && !opener.test(trimmedInput)) {
+        return { ok: false, reason: "assistant_reply" };
+      }
     }
   }
 
@@ -71,7 +78,7 @@ export function guardOutput(transcript: string, output: string, locale = "en"): 
   // «Пулл-реквест на GitHub» keep a share between the thresholds and pass.
   const inputShare = cyrillicShare(transcript);
   const outputShare = cyrillicShare(output);
-  if (inputShare !== null && outputShare !== null) {
+  if (!allowTranslation && inputShare !== null && outputShare !== null) {
     if ((inputShare >= 0.7 && outputShare < 0.3) || (inputShare < 0.3 && outputShare >= 0.7)) {
       return { ok: false, reason: "script_changed" };
     }

@@ -46,12 +46,12 @@ struct KeySpec {
 enum KeyboardLayouts {
     /// `showsVoicePad` adds a key back to the pad, for the voice layout's full keys.
     static func rows(for plane: KeyboardPlane, shift: ShiftState, showsGlobe: Bool, showsVoicePad: Bool,
-                     returnTitle: String) -> [[KeySpec]] {
+                     returnTitle: String, languageCode: String = "en") -> [[KeySpec]] {
         let bottom = bottomRow(plane: plane, showsGlobe: showsGlobe, showsVoicePad: showsVoicePad,
-                               returnTitle: returnTitle)
+                               returnTitle: returnTitle, languageCode: languageCode)
         switch plane {
         case .voice:
-            return [voiceRow(showsGlobe: showsGlobe)]
+            return [voiceRow(showsGlobe: showsGlobe, languageCode: languageCode)]
         case .numbers:
             return [
                 "1234567890".map { .char(String($0)) },
@@ -80,27 +80,37 @@ enum KeyboardLayouts {
             case .on: "shift.fill"
             case .capsLock: "capslock.fill"
             }
+            let rows = letterRows(languageCode: languageCode)
             return [
-                letters("qwertyuiop"),
-                letters("asdfghjkl"),
-                [KeySpec(action: .shift, systemImage: shiftImage, weight: 1.4, style: .function)]
-                    + letters("zxcvbnm")
+                letters(rows[0]),
+                letters(rows[1]),
+                [KeySpec(action: .shift, systemImage: shiftImage, weight: 1.35, style: .function)]
+                    + letters(rows[2])
                     + [deleteKey],
                 bottom,
             ]
         }
     }
 
+    private static func letterRows(languageCode: String) -> [String] {
+        switch languageCode {
+        case "ru": ["йцукенгшщзх", "фывапролджэ", "ячсмитьбю"]
+        case "uk": ["йцукенгшщзх", "фівапролджє", "ячсмитьбю"]
+        default: ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+        }
+    }
+
     private static let deleteKey = KeySpec(action: .delete, systemImage: "delete.left", weight: 1.4, style: .function)
 
     private static func bottomRow(plane: KeyboardPlane, showsGlobe: Bool, showsVoicePad: Bool,
-                                  returnTitle: String) -> [KeySpec] {
+                                  returnTitle: String, languageCode: String) -> [KeySpec] {
         var row: [KeySpec] = []
         switch plane {
         case .letters:
             row.append(KeySpec(action: .plane(.numbers), label: "123", weight: 1.3, style: .function))
         case .numbers, .symbols, .voice:
-            row.append(KeySpec(action: .plane(.letters), label: "ABC", weight: 1.3, style: .function))
+            row.append(KeySpec(action: .plane(.letters), label: lettersLabel(languageCode), weight: 1.3,
+                               style: .function))
         }
         // Spelled out: a mic icon here read as "dictate", not "back to the pad".
         if showsVoicePad {
@@ -117,9 +127,9 @@ enum KeyboardLayouts {
 
     /// The voice pad's one row: the ways out to the full keys, the punctuation dictation most
     /// often leaves out, and space. Delete and return sit beside the talk button.
-    private static func voiceRow(showsGlobe: Bool) -> [KeySpec] {
+    private static func voiceRow(showsGlobe: Bool, languageCode: String) -> [KeySpec] {
         var row = [
-            KeySpec(action: .plane(.letters), label: "ABC", weight: 1.3, style: .function),
+            KeySpec(action: .plane(.letters), label: lettersLabel(languageCode), weight: 1.3, style: .function),
             KeySpec(action: .plane(.numbers), label: "123", weight: 1.3, style: .function),
         ]
         if showsGlobe {
@@ -128,6 +138,13 @@ enum KeyboardLayouts {
         row += [",", ".", "?"].map(KeySpec.char)
         row.append(KeySpec(action: .space, label: "space", weight: showsGlobe ? 3.3 : 4.4))
         return row
+    }
+
+    private static func lettersLabel(_ languageCode: String) -> String {
+        switch languageCode {
+        case "ru", "uk": "АБВ"
+        default: "ABC"
+        }
     }
 
     static func returnTitle(for type: UIReturnKeyType) -> String {

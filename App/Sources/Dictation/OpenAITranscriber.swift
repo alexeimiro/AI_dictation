@@ -123,7 +123,8 @@ final class OpenAITranscriber: Transcriber, @unchecked Sendable {
         do {
             let audio = try EncodedAudio(samples: pcm, sampleRate: Self.sampleRate)
             let text = try await client.transcribe(
-                audio: audio.data, format: audio.format, language: language?.tag,
+                audio: audio.data, format: audio.format,
+                language: language?.language.isAutomatic == true ? nil : language?.tag,
                 keywords: language?.contextualStrings ?? [])
             lock.withLock { cloudPausedUntil = nil }
             if listening { await fallback?.cancelUtterance() }

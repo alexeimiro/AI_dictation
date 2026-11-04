@@ -307,27 +307,36 @@ final class SessionController {
     func beginInAppDictation() -> UUID? {
         let id = UUID()
         return beginDictation(requestId: id, documentIdentifier: nil, style: nil, languageOverride: nil,
-                              source: .inApp) ? id : nil
+                              translationTargetLanguage: nil, source: .inApp) ? id : nil
     }
 
     @discardableResult
     private func beginDictation(requestId: UUID, documentIdentifier: UUID?, style: StylePreset?,
-                                languageOverride: String?, source: ActiveDictation.Source) -> Bool {
+                                languageOverride: String?, translationTargetLanguage: String?,
+                                source: ActiveDictation.Source) -> Bool {
         guard phase == .ready, let transcriber else {
             logger.notice("Start ignored in phase \(String(describing: self.phase), privacy: .public)")
             return false
         }
         let language: ResolvedLanguage
         if let languageOverride, languageOverride != primaryTag {
-            guard let ready = languages[languageOverride] else {
-                let name = DictationLanguage(tag: languageOverride).localizedName
+            if let ready = languages[languageOverride] {
+                language = ready
+            } else if usesCloud {
+                let cloud = cloudLanguage(languageOverride)
+                languages[languageOverride] = cloud
+                language = cloud
+            } else {
+                let requested = DictationLanguage(tag: languageOverride)
+                let name = requested.localizedName
                 logger.notice("Dictation in \(languageOverride, privacy: .public) requested before its model is ready")
                 rejectDictation(requestId: requestId, documentIdentifier: documentIdentifier, language: languageOverride,
-                                message: "\(name) is still being set up in Murmur. Try again in a moment.")
+                                message: requested.isAutomatic
+                                    ? "Automatic language detection needs cloud transcription. Choose a source language instead."
+                                    : "\(name) is still being set up in Murmur. Try again in a moment.")
                 prepareSecondaryLanguage()
                 return false
             }
-            language = ready
         } else {
             guard let primary = languages[primaryTag] else {
                 logger.error("No primary language loaded")
@@ -342,7 +351,9 @@ final class SessionController {
         transcriber.beginUtterance()
         audio.openGate()
         active = ActiveDictation(requestId: requestId, documentIdentifier: documentIdentifier,
-                                 style: style, language: language.tag, source: source, startedAt: Date())
+                                 style: style, language: language.tag,
+                                 translationTargetLanguage: translationTargetLanguage,
+                                 source: source, startedAt: Date())
         phase = .recording(requestId)
         publisher.set(.recording, requestTag: requestId.tag16)
         transport.post(.stateChanged)
@@ -450,6 +461,7 @@ final class SessionController {
         case .start:
             beginDictation(requestId: command.requestId, documentIdentifier: command.documentIdentifier,
                            style: command.styleOverride, languageOverride: command.languageOverride,
+                           translationTargetLanguage: command.translationTargetLanguage,
                            source: .keyboard)
         case .stop:
             if active?.requestId == command.requestId { endDictation(commit: true) }

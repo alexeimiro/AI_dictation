@@ -21,6 +21,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     private var toolbarHost: UIHostingController<KeyboardToolbar>?
     private var panelHost: UIHostingController<ListeningPanel>?
     private var padHost: UIHostingController<VoicePad>?
+    private var languageHost: UIHostingController<LanguageSelectorPanel>?
     private var client: KeyboardSessionClient?
     private var plane: KeyboardPlane = .numbers
     /// The voice layout: the pad is home, and the full keys get a key back to it.
@@ -64,6 +65,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         model.defaultStyle = settings.defaultStyle
         model.announcesReady = hasFullAccess && settings.readyHaptic
         loadLanguages()
+        loadTranslationSettings()
         if hasFullAccess { haptics.prepare() }
         usesVoicePad = settings.keyboardLayout == .voice
         plane = switch settings.keyboardLayout {
@@ -122,6 +124,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         padKeys.onKeyUp = { [weak self] spec in self?.keyUp(spec) }
         view.addSubview(padKeys)
 
+        let languagePanel = embed(LanguageSelectorPanel(model: model), in: view)
+        languagePanel.view.backgroundColor = .clear
+        languageHost = languagePanel
+
         let height = view.heightAnchor.constraint(equalToConstant: Self.keyboardHeight)
         height.priority = UILayoutPriority(999)
         NSLayoutConstraint.activate([
@@ -146,10 +152,15 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             padKeys.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             padKeys.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             padKeys.heightAnchor.constraint(equalToConstant: 58),
+            languagePanel.view.topAnchor.constraint(equalTo: view.topAnchor),
+            languagePanel.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            languagePanel.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            languagePanel.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         panel.view.isHidden = true
         pad.view.isHidden = true
         padKeys.isHidden = true
+        languagePanel.view.isHidden = true
     }
 
     private func embed<Content: View>(_ content: Content, in container: UIView) -> UIHostingController<Content> {
@@ -169,11 +180,13 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         let returnTitle = KeyboardLayouts.returnTitle(for: textDocumentProxy.returnKeyType ?? .default)
         if model.returnTitle != returnTitle { model.returnTitle = returnTitle }
         let showsGlobe = needsInputModeSwitchKey
-        let signature = "\(plane)|\(shift)|\(showsGlobe)|\(usesVoicePad)|\(returnTitle)"
+        let typingLanguage = model.effectiveLanguage.languageCode
+        let signature = "\(plane)|\(shift)|\(showsGlobe)|\(usesVoicePad)|\(returnTitle)|\(typingLanguage)"
         guard signature != layoutSignature else { return }
         layoutSignature = signature
         let rows = KeyboardLayouts.rows(for: plane, shift: shift, showsGlobe: showsGlobe,
-                                        showsVoicePad: usesVoicePad, returnTitle: returnTitle)
+                                        showsVoicePad: usesVoicePad, returnTitle: returnTitle,
+                                        languageCode: typingLanguage)
         (plane == .voice ? padKeys : keyGrid).configure(rows: rows)
         updateKeyAreas()
     }
@@ -215,9 +228,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
                 self?.client?.styleOverride = style
             },
             setLanguage: { [weak self] language in
-                self?.model.languageOverride = language
-                self?.client?.languageOverride = language?.tag
+                self?.selectSourceLanguage(language)
             },
+            showLanguageSelector: { [weak self] in
+                self?.languageHost?.view.isHidden = false
+                withAnimation(.easeOut(duration: 0.18)) { self?.model.showsLanguageSelector = true }
+            },
+            hideLanguageSelector: { [weak self] in
+                withAnimation(.easeIn(duration: 0.15)) { self?.model.showsLanguageSelector = false }
+                self?.languageHost?.view.isHidden = true
+            },
+            setTranslationEnabled: { [weak self] enabled in self?.setTranslationEnabled(enabled) },
+            setTargetLanguage: { [weak self] language in self?.selectTargetLanguage(language) },
+            swapLanguages: { [weak self] in self?.swapTranslationLanguages() },
             deleteDown: { [weak self] in self?.keyDown(KeySpec(action: .delete)) },
             deleteUp: { [weak self] in self?.keyUp(KeySpec(action: .delete)) },
             deleteWord: { [weak self] in
@@ -232,8 +255,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             })
     }
 
-    /// The language pill offers the secondary language only once the app has verified its
-    /// model, so a switch never lands on a language that can't be recognized.
+    /// Loads the app's installed on-device languages. Cloud recognition can additionally use the
+    /// compact common-language list exposed by `KeyboardModel`.
     private func loadLanguages() {
         let primary = settings.primaryLanguage.map(DictationLanguage.init(tag:)) ?? .englishUS
         let verified = settings.verifiedEngines
@@ -243,10 +266,99 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         }
         model.primaryLanguage = primary
         model.secondaryLanguage = secondary
-        if let override = model.languageOverride, override != secondary {
-            model.languageOverride = nil
-            client?.languageOverride = nil
+    }
+
+    /// Defaults to an installed system keyboard language, then to the iPhone interface language,
+    /// then the app's primary dictation language. The onboarding flow normally made the same
+    /// choice already; doing it here also handles upgraded installs.
+    private func loadTranslationSettings() {
+        let available = ([model.primaryLanguage] + (model.secondaryLanguage.map { [$0] } ?? [])
+                         + KeyboardModel.commonLanguages)
+            .reduce(into: [String: DictationLanguage]()) { result, language in
+                result[language.languageCode] = result[language.languageCode] ?? language
+            }
+        let installedIdentifiers = UITextInputMode.activeInputModes.compactMap(\.primaryLanguage)
+            + Locale.preferredLanguages
+        let defaultSource = installedIdentifiers.lazy
+            .map(DictationLanguage.init(normalizing:))
+            .compactMap { available[$0.languageCode] }
+            .first ?? model.primaryLanguage
+        let savedSource = settings.translationSourceLanguage.map(DictationLanguage.init(tag:))
+        let source = savedSource ?? defaultSource
+        model.languageOverride = source.languageCode == model.primaryLanguage.languageCode ? nil : source
+        client?.languageOverride = model.languageOverride?.tag
+
+        let target = settings.translationTargetLanguage.map(DictationLanguage.init(tag:))
+            ?? defaultTargetLanguage(source: source)
+        model.targetLanguage = target.languageCode == source.languageCode
+            ? fallbackTargetLanguage(excluding: source.languageCode) : target
+        model.translationEnabled = settings.translationEnabled
+        model.recentLanguages = settings.recentTranslationLanguages
+            .map(DictationLanguage.init(tag:))
+            .filter { !$0.isAutomatic }
+        syncTranslationToClient()
+    }
+
+    private func defaultTargetLanguage(source: DictationLanguage) -> DictationLanguage {
+        for identifier in Locale.preferredLanguages {
+            let language = DictationLanguage(normalizing: identifier)
+            if language.languageCode != source.languageCode { return language }
         }
+        return fallbackTargetLanguage(excluding: source.languageCode)
+    }
+
+    private func fallbackTargetLanguage(excluding sourceCode: String) -> DictationLanguage {
+        KeyboardModel.commonLanguages.first { $0.languageCode != sourceCode } ?? .englishUS
+    }
+
+    private func selectSourceLanguage(_ language: DictationLanguage?) {
+        let selected = language ?? model.primaryLanguage
+        model.languageOverride = selected.languageCode == model.primaryLanguage.languageCode ? nil : selected
+        settings.translationSourceLanguage = selected.tag
+        client?.languageOverride = model.languageOverride?.tag
+        if model.targetLanguage.languageCode == selected.languageCode {
+            selectTargetLanguage(fallbackTargetLanguage(excluding: selected.languageCode))
+        }
+        remember(selected)
+        reloadKeys()
+    }
+
+    private func selectTargetLanguage(_ language: DictationLanguage) {
+        guard !language.isAutomatic, language.languageCode != model.effectiveLanguage.languageCode else { return }
+        model.targetLanguage = language
+        settings.translationTargetLanguage = language.tag
+        remember(language)
+        syncTranslationToClient()
+    }
+
+    private func setTranslationEnabled(_ enabled: Bool) {
+        model.translationEnabled = enabled
+        settings.translationEnabled = enabled
+        if enabled, model.targetLanguage.languageCode == model.effectiveLanguage.languageCode {
+            selectTargetLanguage(fallbackTargetLanguage(excluding: model.effectiveLanguage.languageCode))
+        }
+        syncTranslationToClient()
+    }
+
+    private func swapTranslationLanguages() {
+        guard model.translationEnabled, !model.effectiveLanguage.isAutomatic else { return }
+        let oldSource = model.effectiveLanguage
+        let oldTarget = model.targetLanguage
+        selectSourceLanguage(oldTarget.languageCode == model.primaryLanguage.languageCode ? nil : oldTarget)
+        selectTargetLanguage(oldSource)
+    }
+
+    private func syncTranslationToClient() {
+        client?.translationTargetLanguage = model.translationEnabled ? model.targetLanguage.tag : nil
+    }
+
+    private func remember(_ language: DictationLanguage) {
+        guard !language.isAutomatic else { return }
+        let tags = [language.tag] + settings.recentTranslationLanguages.filter {
+            DictationLanguage(tag: $0).languageCode != language.languageCode
+        }
+        settings.recentTranslationLanguages = tags
+        model.recentLanguages = settings.recentTranslationLanguages.map(DictationLanguage.init(tag:))
     }
 
     // MARK: Keys

@@ -83,6 +83,18 @@ struct OpenAITranscriberTests {
         #expect(call.audio.count < wavSize / 3)
     }
 
+    @Test func automaticLanguageLetsTheCloudDetectIt() async throws {
+        let cloud = FakeCloud()
+        let automatic = ResolvedLanguage(tag: DictationLanguage.automatic.tag,
+                                         locale: Locale(identifier: "en-US"), engine: .speech)
+        let transcriber = OpenAITranscriber(client: cloud)
+        try await transcriber.prepare(micFormat: micFormat, language: automatic)
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        _ = try await transcriber.finishUtterance()
+        #expect(cloud.calls.first?.language == nil)
+    }
+
     @Test func silenceShorterThanAThirdOfASecondIsNotSent() async throws {
         let cloud = FakeCloud()
         let transcriber = OpenAITranscriber(client: cloud)

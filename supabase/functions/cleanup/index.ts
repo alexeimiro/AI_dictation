@@ -86,7 +86,7 @@ Deno.serve(async (request) => {
 
   try {
     const outcome = await runCleanup(body, { model, effort, apiKey, deadlineMs });
-    const words = countWords(outcome.text, body.language);
+    const words = countWords(outcome.text, body.targetLanguage ?? body.language);
     background(admin.rpc("record_usage", {
       p_user: caller.userId,
       p_dictation: body.dictationId,
@@ -99,6 +99,7 @@ Deno.serve(async (request) => {
       model: outcome.model,
       language: outcome.language,
       languageTag: body.language ?? null,
+      targetLanguageTag: body.targetLanguage ?? null,
       style: body.style ?? "casual",
       isAnonymous: caller.isAnonymous,
       stopReason: outcome.stopReason,

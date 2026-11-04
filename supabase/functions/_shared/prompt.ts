@@ -13,7 +13,7 @@ Rewrite the transcript into the text the user meant to type:
 
 1. Remove filler words and disfluencies: "um", "uh", "er", "hmm", and "like", "you know", "I mean", "so", "basically" when they are only fillers. Remove false starts, stutters and repeated words.
 2. Apply self-corrections. When the speaker corrects themselves ("at 3, no wait, 4 pm", "send it to John, actually Sarah", "scratch that"), keep only the corrected version.
-3. Fix punctuation, capitalization and obvious recognition errors. Keep the speaker's own words, meaning, tone and language. Do not paraphrase, summarize, translate, add content, or make the text more formal than the requested style. Never change the script of a word: a word the recognizer wrote in Cyrillic stays in Cyrillic and a Latin word stays in Latin, except where the language rules below name a specific exception.
+3. Fix punctuation, capitalization and obvious recognition errors. Keep the speaker's own words, meaning and tone. Keep the spoken language unless the context explicitly contains a Translation target. Do not paraphrase, summarize, add content, or make the text more formal than the requested style. Outside translation mode, never change the script of a word: a word the recognizer wrote in Cyrillic stays in Cyrillic and a Latin word stays in Latin, except where the language rules below name a specific exception.
 4. Format spoken structure. Use a numbered or bulleted list when the speaker enumerates items ("first…, second…, third…", or a to-do list), and paragraph breaks for long multi-topic dictations. Spoken punctuation commands become the symbols themselves: "new line", "new paragraph", "comma", "period", "question mark", "exclamation point", "colon", "open quote … close quote".
 5. Write numbers, dates, times, currencies, phone numbers, email addresses and URLs the way people type them in the spoken language; the language rules below give the conventions. Spelled-out addresses become real ones: "john at gmail dot com" → "john@gmail.com".
 6. Personal dictionary: spell every dictionary term exactly as given whenever the speaker says it or something that sounds like it. A line "Term ← misheard" means the recognizer tends to write "misheard" when the speaker says "Term".
@@ -111,7 +111,7 @@ Capitalization. Sentence starts, proper nouns, "I", days, months, languages, nat
     key: "ru",
     name: "Russian",
     script: "Cyrillic",
-    rules: `The transcript is Russian dictation. Keep it Russian: never translate it, and never transliterate a Cyrillic word into Latin letters or a Latin word into Cyrillic.
+    rules: `The transcript is Russian dictation. Unless the context requests a Translation target, keep it Russian: never translate it, and never transliterate a Cyrillic word into Latin letters or a Latin word into Cyrillic.
 
 Fillers. Remove «э», «э-э», «эм», «мм», «ну», «вот», «типа», «как бы», «короче», «в общем», «значит», «это самое», «так сказать», «блин» only when they carry no meaning. Keep them when they do: «вот этот файл» (this file), «типа» meaning "such as", «короче» meaning "shorter", «значит» meaning "therefore", «в общем» summing up.
 
@@ -191,10 +191,14 @@ function isLanguageKey(value: string): value is LanguageKey {
 }
 
 /** Picks the language pack for a normalized tag: "ru", "ru-RU", "ru-Cyrl-RU" → ru; anything else → en. */
-export function resolveLanguage(tag?: string | null): ResolvedLanguage {
+export function resolveLanguage(tag?: string | null, transcript = ""): ResolvedLanguage {
   const primary = tag?.split("-")[0]?.toLowerCase() ?? "";
-  const key: LanguageKey = isLanguageKey(primary) ? primary : "en";
-  return { key, tag: tag ?? null, rules: LANGUAGE_RULES[key] };
+  const automatic = primary === "" || primary === "und";
+  const cyrillic = transcript.match(/\p{Script=Cyrillic}/gu)?.length ?? 0;
+  const letters = transcript.match(/\p{L}/gu)?.length ?? 0;
+  const detected: LanguageKey = letters >= 3 && cyrillic / letters > 0.5 ? "ru" : "en";
+  const key: LanguageKey = automatic ? detected : isLanguageKey(primary) ? primary : "en";
+  return { key, tag: automatic ? null : tag ?? null, rules: LANGUAGE_RULES[key] };
 }
 
 /**
@@ -231,6 +235,16 @@ export function buildUserContext(request: CleanupRequest, language: ResolvedLang
   const lines: string[] = ["<context>"];
   lines.push(`Language: ${language.tag ?? "auto"} (keep the output in the language that was spoken).`);
   lines.push(`Style: ${language.rules.styles[request.style ?? "casual"]}`);
+  if (request.targetLanguage) {
+    let targetName = request.targetLanguage;
+    try {
+      targetName = new Intl.DisplayNames(["en"], { type: "language" }).of(request.targetLanguage) ?? targetName;
+    } catch { /* The tag was already normalized; its code is still a safe, clear fallback. */ }
+    lines.push(
+      `Translation: translate the cleaned transcript into ${targetName} (${request.targetLanguage}). ` +
+        "Preserve its meaning and requested writing style. Output only the translation in the target language.",
+    );
+  }
 
   const dictionary = [...(request.dictionary ?? [])].sort((a, b) => a.term.localeCompare(b.term));
   if (dictionary.length > 0) {

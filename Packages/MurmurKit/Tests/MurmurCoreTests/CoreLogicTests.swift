@@ -195,6 +195,16 @@ struct SharedSettingsTests {
         settings.secondaryLanguage = nil
         #expect(settings.secondaryLanguage == nil)
 
+        #expect(!settings.translationEnabled)
+        settings.translationEnabled = true
+        settings.translationSourceLanguage = "ru_RU"
+        settings.translationTargetLanguage = "tr_TR"
+        settings.recentTranslationLanguages = ["tr_TR", "en_US", "tr-TR"]
+        #expect(settings.translationEnabled)
+        #expect(settings.translationSourceLanguage == "ru-RU")
+        #expect(settings.translationTargetLanguage == "tr-TR")
+        #expect(settings.recentTranslationLanguages == ["tr-TR", "en-US"])
+
         let record = VerifiedEngineRecord(engine: "speech", osVersion: "26.6.1", verifiedAt: Date())
         settings.verifiedEngines = ["ru-RU": record]
         #expect(settings.verifiedEngines["ru-RU"]?.engine == "speech")
@@ -219,15 +229,18 @@ struct SharedSettingsTests {
 
 struct IPCMessageTests {
     @Test func commandLanguageOverrideRoundTripsAndLegacyJSONStillDecodes() throws {
-        let command = KeyboardCommand(requestId: UUID(), kind: .start, createdAt: Date(), languageOverride: "ru-RU")
+        let command = KeyboardCommand(requestId: UUID(), kind: .start, createdAt: Date(), languageOverride: "ru-RU",
+                                      translationTargetLanguage: "tr-TR")
         let data = try JSONEncoder().encode(command)
         #expect(try JSONDecoder().decode(KeyboardCommand.self, from: data).languageOverride == "ru-RU")
+        #expect(try JSONDecoder().decode(KeyboardCommand.self, from: data).translationTargetLanguage == "tr-TR")
 
         let legacy = """
         {"id":"\(UUID().uuidString)","requestId":"\(UUID().uuidString)","kind":"start","createdAt":0}
         """
         let decoded = try JSONDecoder().decode(KeyboardCommand.self, from: Data(legacy.utf8))
         #expect(decoded.languageOverride == nil)
+        #expect(decoded.translationTargetLanguage == nil)
         #expect(decoded.styleOverride == nil)
     }
 

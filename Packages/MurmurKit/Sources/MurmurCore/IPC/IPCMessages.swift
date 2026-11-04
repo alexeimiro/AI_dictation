@@ -15,10 +15,13 @@ public struct KeyboardCommand: Codable, Sendable, Equatable {
     public var styleOverride: StylePreset?
     /// BCP-47 tag chosen in the keyboard's language pill; nil means the primary language.
     public var languageOverride: String?
+    /// BCP-47 output language. Nil keeps the recognized language (ordinary dictation).
+    public var translationTargetLanguage: String?
 
     public init(
         id: UUID = UUID(), requestId: UUID, kind: CommandKind, createdAt: Date,
-        documentIdentifier: UUID? = nil, styleOverride: StylePreset? = nil, languageOverride: String? = nil
+        documentIdentifier: UUID? = nil, styleOverride: StylePreset? = nil, languageOverride: String? = nil,
+        translationTargetLanguage: String? = nil
     ) {
         self.id = id
         self.requestId = requestId
@@ -27,6 +30,7 @@ public struct KeyboardCommand: Codable, Sendable, Equatable {
         self.documentIdentifier = documentIdentifier
         self.styleOverride = styleOverride
         self.languageOverride = languageOverride
+        self.translationTargetLanguage = translationTargetLanguage
     }
 }
 

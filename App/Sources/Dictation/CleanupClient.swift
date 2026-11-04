@@ -37,6 +37,7 @@ final class CleanupClient: Cleaning {
         let dictationId: UUID
         let transcript: String
         let language: String?
+        let targetLanguage: String?
         let style: String
         let dictionary: [Entry]
         let snippets: [Snippet]
@@ -58,6 +59,7 @@ final class CleanupClient: Cleaning {
         dictationId: UUID,
         transcript: String,
         language: String?,
+        targetLanguage: String?,
         style: StylePreset,
         dictionary: [DictionaryTerm],
         snippets: [SnippetDefinition]
@@ -67,6 +69,7 @@ final class CleanupClient: Cleaning {
             dictationId: dictationId,
             transcript: transcript,
             language: language,
+            targetLanguage: targetLanguage,
             style: style.rawValue,
             dictionary: dictionary.prefix(300).map { .init(term: $0.term, misspelling: $0.misspelling) },
             snippets: snippets.prefix(200).map { .init(token: SnippetPlaceholders.token(for: $0), trigger: $0.trigger) })

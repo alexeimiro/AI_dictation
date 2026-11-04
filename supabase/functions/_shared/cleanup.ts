@@ -102,7 +102,7 @@ interface ResponsesReply {
 
 /** One cleanup call. A deadline abort surfaces as a DOMException (see `describeCleanupError`). */
 export async function runCleanup(request: CleanupRequest, options: CleanupOptions): Promise<CleanupOutcome> {
-  const language = resolveLanguage(request.language);
+  const language = resolveLanguage(request.language, request.transcript);
   const started = performance.now();
   const fetcher = options.fetcher ?? fetch;
   const response = await fetcher("https://api.openai.com/v1/responses", {
@@ -147,7 +147,7 @@ export async function runCleanup(request: CleanupRequest, options: CleanupOption
   const text = tidyOutput(
     content.filter((part) => part.type === "output_text").map((part) => part.text ?? "").join(""),
   );
-  const guard = guardOutput(request.transcript, text, language.tag ?? "en");
+  const guard = guardOutput(request.transcript, text, language.tag ?? "en", Boolean(request.targetLanguage));
   if (!guard.ok) {
     return { ...base, text: request.transcript, status: "raw", reason: guard.reason };
   }

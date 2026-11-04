@@ -70,6 +70,7 @@ public final class SharedSettings: @unchecked Sendable {
         case disableAfter, keyboardLayout, keyboardFeedback, readyHaptic, interactionSounds, defaultStyle
         case useBuiltInMic, aiCleanupEnabled, transcriberEngine, liveActivities, transcriptRetention
         case primaryLanguage, secondaryLanguage, verifiedEngines
+        case translationEnabled, translationSourceLanguage, translationTargetLanguage, recentTranslationLanguages
         /// Phase 1 single-language setting, migrated into `primaryLanguage`.
         case dictationLocale
     }
@@ -151,6 +152,38 @@ public final class SharedSettings: @unchecked Sendable {
         set { setString(newValue.map(DictationLanguage.normalize), for: .secondaryLanguage) }
     }
 
+    /// Translation is deliberately independent from the writing style and AI-cleanup switches.
+    public var translationEnabled: Bool {
+        get { bool(.translationEnabled, default: false) }
+        set { defaults.set(newValue, forKey: Key.translationEnabled.rawValue) }
+    }
+
+    /// The source selected from the keyboard. `und` requests cloud language auto-detection.
+    public var translationSourceLanguage: String? {
+        get { defaults.string(forKey: Key.translationSourceLanguage.rawValue) }
+        set { setString(newValue.map(DictationLanguage.normalize), for: .translationSourceLanguage) }
+    }
+
+    /// The language that translated text is inserted in.
+    public var translationTargetLanguage: String? {
+        get { defaults.string(forKey: Key.translationTargetLanguage.rawValue) }
+        set { setString(newValue.map(DictationLanguage.normalize), for: .translationTargetLanguage) }
+    }
+
+    /// Most-recently-used source/target tags, newest first.
+    public var recentTranslationLanguages: [String] {
+        get {
+            guard let data = defaults.data(forKey: Key.recentTranslationLanguages.rawValue) else { return [] }
+            return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+        }
+        set {
+            let tags = Array(newValue.map(DictationLanguage.normalize).uniqued().prefix(6))
+            if let data = try? JSONEncoder().encode(tags) {
+                defaults.set(data, forKey: Key.recentTranslationLanguages.rawValue)
+            }
+        }
+    }
+
     /// Per-language record of the engine that passed validation on this device, keyed by tag.
     public var verifiedEngines: [String: VerifiedEngineRecord] {
         get {
@@ -186,5 +219,12 @@ public final class SharedSettings: @unchecked Sendable {
         } else {
             defaults.removeObject(forKey: key.rawValue)
         }
+    }
+}
+
+private extension Array where Element: Hashable {
+    func uniqued() -> [Element] {
+        var seen: Set<Element> = []
+        return filter { seen.insert($0).inserted }
     }
 }

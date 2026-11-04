@@ -27,21 +27,26 @@ public struct DictationLanguage: Codable, Hashable, Sendable, Identifiable, Cust
     }
 
     /// "RU", "EN": the keyboard's language pill.
-    public var shortCode: String { languageCode.uppercased() }
+    public var shortCode: String { isAutomatic ? "AUTO" : languageCode.uppercased() }
 
     public var isRussian: Bool { languageCode == "ru" }
+    public var isAutomatic: Bool { languageCode == "und" }
 
     /// The language name in the UI language ("Russian").
     public var localizedName: String {
-        Locale.current.localizedString(forLanguageCode: languageCode) ?? tag
+        if isAutomatic { return "Auto-detect" }
+        return Locale.current.localizedString(forLanguageCode: languageCode) ?? tag
     }
 
     /// Language and region ("Russian (Russia)").
     public var localizedFullName: String {
-        Locale.current.localizedString(forIdentifier: tag) ?? tag
+        if isAutomatic { return "Auto-detect" }
+        return Locale.current.localizedString(forIdentifier: tag) ?? tag
     }
 
     public static let englishUS = DictationLanguage(tag: "en-US")
+    /// Cloud recognition chooses the spoken language. The BCP-47 `und` tag means undetermined.
+    public static let automatic = DictationLanguage(tag: "und")
 
     public var description: String { tag }
 }

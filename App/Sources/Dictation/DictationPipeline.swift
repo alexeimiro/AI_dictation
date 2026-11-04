@@ -14,6 +14,8 @@ struct ActiveDictation: Sendable {
     let style: StylePreset?
     /// BCP-47 tag of the language the dictation is recognized in.
     let language: String
+    /// BCP-47 output language, or nil for ordinary dictation.
+    let translationTargetLanguage: String?
     let source: Source
     let startedAt: Date
 }
@@ -30,7 +32,7 @@ struct DictationOutcome: Sendable {
 protocol Cleaning: AnyObject {
     var isConfigured: Bool { get }
     func clean(
-        dictationId: UUID, transcript: String, language: String?, style: StylePreset,
+        dictationId: UUID, transcript: String, language: String?, targetLanguage: String?, style: StylePreset,
         dictionary: [DictionaryTerm], snippets: [SnippetDefinition]
     ) async throws(CleanupClient.Failure) -> CleanupClient.Response
 }
@@ -64,6 +66,7 @@ final class DictationPipeline {
         stoppedAt: ContinuousClock.Instant
     ) async -> DictationOutcome {
         let language = dictation.language
+        let targetLanguage = dictation.translationTargetLanguage
         let style = dictation.style ?? settings.defaultStyle
         let raw: String
         do {
@@ -89,7 +92,8 @@ final class DictationPipeline {
 
         let localText = LocalFormatter(dictionary: dictionary, snippets: snippets, language: language).format(trimmed)
         let cleaned = await runCleanup(
-            dictationId: dictation.requestId, raw: trimmed, language: language, style: style, localText: localText)
+            dictationId: dictation.requestId, raw: trimmed, language: language,
+            targetLanguage: targetLanguage, style: style, localText: localText)
         let metrics = TranscriptMetrics(
             audioSeconds: audioSeconds,
             words: WordCounter.count(cleaned.text),
@@ -98,6 +102,13 @@ final class DictationPipeline {
             ttftMs: cleaned.ttftMs,
             totalMs: Self.milliseconds(since: stoppedAt))
         logger.info("Dictation done: \(metrics.words) words, ASR \(transcriptMs) ms, cleanup \(cleaned.cleanupMs ?? -1) ms")
+        if targetLanguage != nil, cleaned.status != .cleaned {
+            let status: ResultStatus = cleaned.status == .limitReached ? .limitReached : .failed
+            return outcome(
+                dictation, raw: trimmed, text: "", status: status,
+                message: cleaned.message ?? "Couldn't translate that. Check your connection and try again.",
+                errorReason: cleaned.errorReason, style: style, cleanupModel: cleaned.model, metrics: metrics)
+        }
         return outcome(
             dictation, raw: trimmed, text: cleaned.text, status: cleaned.status, message: cleaned.message,
             errorReason: cleaned.errorReason, style: style, cleanupModel: cleaned.model, metrics: metrics)
@@ -111,7 +122,7 @@ final class DictationPipeline {
             .format(transcript.rawText)
         let cleaned = await runCleanup(
             dictationId: transcript.id, raw: transcript.rawText, language: transcript.language,
-            style: transcript.style, localText: localText, force: true)
+            targetLanguage: nil, style: transcript.style, localText: localText, force: true)
         if let failure = cleaned.failure { throw failure }
         var updated = transcript
         updated.cleanedText = cleaned.text
@@ -143,19 +154,27 @@ final class DictationPipeline {
     /// words or fewer, and transcripts already as the speaker meant them, skip the model unless
     /// `force` is set.
     private func runCleanup(
-        dictationId: UUID, raw: String, language: String?, style: StylePreset, localText: String,
+        dictationId: UUID, raw: String, language: String?, targetLanguage: String?,
+        style: StylePreset, localText: String,
         force: Bool = false
     ) async -> CleanupOutcome {
         var outcome = CleanupOutcome(text: localText, status: .raw)
-        guard cleanup.isConfigured,
-              force || (settings.aiCleanupEnabled && WordCounter.count(raw) > 3
-                        && CleanupGate.needsModel(raw, style: style)) else {
+        guard cleanup.isConfigured else {
+            if targetLanguage != nil {
+                outcome.failure = .notConfigured
+                outcome.errorReason = "Translation isn't configured."
+            }
+            return outcome
+        }
+        guard targetLanguage != nil || force || (settings.aiCleanupEnabled && WordCounter.count(raw) > 3
+                                                  && CleanupGate.needsModel(raw, style: style)) else {
             return outcome
         }
         let started = ContinuousClock.now
         do {
             let response = try await cleanup.clean(
-                dictationId: dictationId, transcript: raw, language: language, style: style,
+                dictationId: dictationId, transcript: raw, language: language,
+                targetLanguage: targetLanguage, style: style,
                 dictionary: dictionary, snippets: snippets)
             outcome.cleanupMs = Self.milliseconds(since: started)
             outcome.ttftMs = response.ttftMs
@@ -214,7 +233,7 @@ final class DictationPipeline {
             metrics: DictationMetrics(
                 audioSeconds: metrics.audioSeconds, stopToTranscriptMs: metrics.asrMs, cleanupMs: metrics.cleanupMs,
                 stopToResultMs: metrics.totalMs, words: metrics.words),
-            language: dictation.language)
+            language: dictation.translationTargetLanguage ?? dictation.language)
         let transcript = Transcript(
             id: dictation.requestId,
             createdAt: now,

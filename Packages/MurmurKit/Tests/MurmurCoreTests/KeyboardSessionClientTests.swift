@@ -267,8 +267,10 @@ struct KeyboardSessionClientTests {
         client.activate()
 
         client.languageOverride = "ru-RU"
+        client.translationTargetLanguage = "tr-TR"
         client.micTapped()
         #expect(transport.payloads.readCommand()?.languageOverride == "ru-RU")
+        #expect(transport.payloads.readCommand()?.translationTargetLanguage == "tr-TR")
         #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
     }
 
