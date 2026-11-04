@@ -25,11 +25,6 @@ struct KeyboardToolbar: View {
             center
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            if let memory = model.debugMemory {
-                Text(memory)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
             if !model.showsVoicePad {
                 micButton
             }
@@ -82,7 +77,8 @@ struct KeyboardToolbar: View {
             case .starting:
                 caption("Starting…")
             case .listening:
-                RecognitionIndicator(direction: model.recognitionDirection)
+                RecognitionIndicator(direction: model.recognitionDirection,
+                                     since: model.listeningSince)
             case .idle, .processing:
                 HStack(spacing: 6) {
                     stylePill

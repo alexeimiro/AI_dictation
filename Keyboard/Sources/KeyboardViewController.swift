@@ -1,5 +1,4 @@
 import MurmurCore
-import os
 import SwiftUI
 import UIKit
 
@@ -31,7 +30,6 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     /// The last dictation, while the text before the cursor still ends with it (the pad's Undo).
     private var undoableDictation: String?
     private var layoutSignature = ""
-    private var memoryTimer: Timer?
     private lazy var haptics = UIImpactFeedbackGenerator(style: .light, view: view)
     private lazy var readyHaptics = UINotificationFeedbackGenerator(view: view)
 
@@ -78,7 +76,6 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         updateAutoShift()
         reloadKeys()
         client?.activate()
-        startMemoryReadout()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -90,7 +87,6 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         }
         repeater.stop()
         client?.deactivate()
-        memoryTimer?.invalidate()
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -589,20 +585,4 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         }
     }
 
-    // MARK: Debug
-
-    private func startMemoryReadout() {
-        #if DEBUG
-        memoryTimer?.invalidate()
-        updateMemoryReadout()
-        memoryTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateMemoryReadout() }
-        }
-        #endif
-    }
-
-    /// Memory left before the extension is killed (the simulator doesn't enforce the limit).
-    private func updateMemoryReadout() {
-        model.debugMemory = "\(os_proc_available_memory() / 1_048_576)MB"
-    }
 }

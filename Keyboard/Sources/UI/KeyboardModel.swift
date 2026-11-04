@@ -22,7 +22,6 @@ final class KeyboardModel {
     var showsLanguageSelector = false
     /// Recent mic levels for the waveform, oldest first.
     var levels: [Double] = Array(repeating: 0.06, count: 30)
-    var debugMemory: String?
     /// The voice layout's pad is up; the toolbar drops its mic, since the pad has the big one.
     var showsVoicePad = false
     /// The field's return key title ("return", "send", …), for the pad's return button.
