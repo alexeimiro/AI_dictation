@@ -30,6 +30,17 @@ public enum DisableAfter: String, Codable, Sendable, CaseIterable, Identifiable 
         case .immediately: 0
         }
     }
+
+    /// Whether the microphone comes back after a call or Siri took it, as in Wispr Flow: always
+    /// with Never, with a timed option only after an interruption shorter than it, and never
+    /// with Immediately.
+    public func resumesAfterInterruption(lasting duration: TimeInterval) -> Bool {
+        switch self {
+        case .never: true
+        case .immediately: false
+        case .oneHour, .fifteenMinutes, .fiveMinutes: duration < (idleTimeout ?? 0)
+        }
+    }
 }
 
 public enum KeyboardLayoutPreference: String, Codable, Sendable, CaseIterable {
@@ -68,7 +79,7 @@ public final class SharedSettings: @unchecked Sendable {
 
     private enum Key: String {
         case disableAfter, keyboardLayout, keyboardFeedback, readyHaptic, interactionSounds, defaultStyle
-        case useBuiltInMic, aiCleanupEnabled, transcriberEngine, liveActivities, transcriptRetention
+        case useBuiltInMic, aiCleanupEnabled, transcriberEngine, liveActivities, transcriptRetention, autoReturn
         case primaryLanguage, secondaryLanguage, verifiedEngines
         case translationEnabled, translationSourceLanguage, translationTargetLanguage, recentTranslationLanguages
         /// Phase 1 single-language setting, migrated into `primaryLanguage`.
@@ -124,6 +135,13 @@ public final class SharedSettings: @unchecked Sendable {
     public var liveActivities: Bool {
         get { bool(.liveActivities, default: true) }
         set { defaults.set(newValue, forKey: Key.liveActivities.rawValue) }
+    }
+
+    /// After the keyboard opens the app, send the user back to the app they were typing in.
+    /// App-only; a Debug switch, since it relies on a UIKit detail that can change.
+    public var autoReturn: Bool {
+        get { bool(.autoReturn, default: true) }
+        set { defaults.set(newValue, forKey: Key.autoReturn.rawValue) }
     }
 
     /// Auto-delete transcripts older than this. App-only; applied by the history store.

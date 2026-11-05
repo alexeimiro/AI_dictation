@@ -20,7 +20,7 @@ Build an iOS clone of Wispr Flow, a voice-first keyboard: dictate in any app, an
 These are verified against Apple docs, the 26.5 SDK, and Apple staff forum replies.
 - **No microphone for keyboards:** keyboards have no mic access, and that is unchanged on iOS 27.
 - **Recording start:** recording must *begin* while the containing app is in the foreground.
-- **No return path:** no public API returns the user to the previous app or identifies it (since iOS 26.4).
+- **No return path:** no public API returns the user to the previous app or identifies it (since iOS 26.4; Apple DTS, FB22247647). Like Wispr Flow, the app reads UIKit's `_UIRemoteKeyboards` `currentState.sourceBundleIdentifier` (an implementation detail, ~0.7–1 s after launch) and reopens that app by URL scheme; see Session lifecycle.
 - **Without Full Access**, the keyboard:
   - can only read the App Group container
   - has no network
@@ -37,18 +37,22 @@ Keyboard ext ── Darwin post + command file (one-time token) ──► Murmur
 ```
 ### Session lifecycle (`App/Session/SessionController.swift`)
 1. **Tap the mic.** The keyboard writes `command.json` (`requestId`, kind, style override, `documentIdentifier`) and posts `cmd`. The app acknowledges by moving the `notify` state to `recording(requestId)` within 500 ms.
-2. **No acknowledgement.** The keyboard writes a one-time `launchToken` and opens `murmur://session/start?t=…`.
+2. **No acknowledgement.** The keyboard writes a one-time `launchToken` and a `PendingStart` (request id, field, style/language/translation, `autoStart`) and opens `murmur://session/start?t=…`.
    - It walks the responder chain to the `UIApplication` and calls `open(_:options:completionHandler:)`, which compiles against the 26.5 SDK.
    - The app starts the session only if the token is fresh (under 20 s). Otherwise it asks for confirmation, so a web page can't turn on the mic.
-   - It then shows "Murmur is on — Swipe right along the bottom edge of the screen to go back to your app", with a finger animated over the real home indicator (iOS shows no ◀︎ breadcrumb for keyboard-initiated opens).
-   - When the keyboard reappears with a pending request, it starts recording.
+   - As soon as the mic is on, the app records the requested dictation (`SessionController.start(beginning:)`), as Wispr Flow does, so the user can talk on the way back. In the cloud path the on-device fallback is prepared afterwards, off this critical path.
+   - Once it's recording, `HostReturn` reopens the app the keyboard was used in: it learns its bundle id from UIKit (above) and opens it by a URL scheme from `HostAppCatalog`. Within 3 s of the link, or not at all.
+   - Otherwise it shows "Murmur is on — Swipe right along the bottom edge of the screen to go back to your app", with a finger animated over the real home indicator (iOS shows no ◀︎ breadcrumb for keyboard-initiated opens).
+   - When the keyboard reappears it attaches to that recording (`attachToPendingStart`); its first listening heartbeat tells the app. A recording nobody attaches to within 10 s is discarded. Back in a different field, the keyboard cancels it.
 3. **Hot mic.**
    - **Audio session:** `.playAndRecord`, mode `.default`, options `[.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]`. Without HFP, the mic is the built-in one and AirPods music quality is kept. Also `setAllowHapticsAndSystemSoundsDuringRecording(true)`.
    - **Engine:** the `AVAudioEngine` tap runs throughout, with `UIBackgroundModes: audio`. A gate drops buffers unless a dictation is in progress.
    - **Live Activity:** started at session start (foreground only).
    - **"Disable after":** Never / 1 h / 15 min / 5 min (default) / Immediately. "Immediately" ends the session after the result is delivered, inside `beginBackgroundTask`.
+   - **The countdown** (`IdleStop`) runs, as in Wispr Flow, only while the app is in the background and the keyboard is off screen, from whichever came last. The keyboard reports itself every 5 s while visible and once more when hidden (`KeyboardStatus.hiddenAt`), so typing keeps the session on.
 4. **Resilience.**
-   - **Interruptions:** `.began` pauses. `.ended` with `.shouldResume` reactivates. If that fails with `'!int'` (after phone calls), the state becomes `needsReconnect` and the keyboard shows "Reconnect", which reopens the app.
+   - **Interruptions:** `.began` pauses. `.ended` reactivates, whatever `.shouldResume` says, when the interruption was shorter than "Disable after" (always with Never, never with Immediately), retrying for ~3.5 s. If that still fails with `'!int'` (after phone calls), the state becomes `needsReconnect` and the keyboard shows "Reconnect", which reopens the app.
+   - **Busy app:** a `start` that arrives while the previous dictation is processing is queued and acknowledged as `starting` with its tag, so the keyboard waits instead of opening the app.
    - **Route or `AVAudioEngineConfigurationChange`:** rebuild the tap and `AVAudioConverter`; the session stays up. `mediaServicesWereReset` rebuilds everything.
    - **Keyboard dies while listening:** its heartbeat stops. The app finalizes the dictation into history as `pending`, and a relaunched keyboard offers it if `documentIdentifier` matches.
    - **App dies:** the `seq` value stops moving, and the keyboard shows an error. Audio is spooled to disk, and leftover files are transcribed on next launch.

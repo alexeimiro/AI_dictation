@@ -25,6 +25,9 @@ final class AudioCapture: @unchecked Sendable {
     private(set) var inputFormat: AVAudioFormat?
     private(set) var isRunning = false
 
+    /// Unlike `isRunning`, also false after the engine stopped itself on a configuration change.
+    var isEngineRunning: Bool { engine.isRunning }
+
     /// Called on the audio thread for every buffer while the gate is open.
     func setBufferHandler(_ handler: BufferHandler?) {
         lock.withLock { bufferHandler = handler }
@@ -85,10 +88,13 @@ final class AudioCapture: @unchecked Sendable {
         }
     }
 
-    /// After a route or configuration change the input format can change: rebuild the tap.
+    /// After a route or configuration change the input format can change: rebuild the tap. A
+    /// dictation that began while the rebuild was under way keeps its open gate.
     func restartEngine() throws {
+        let wasOpen = lock.withLock { gateOpen }
         stopEngine()
         try startEngine()
+        if wasOpen { lock.withLock { gateOpen = true } }
     }
 
     // MARK: Gate

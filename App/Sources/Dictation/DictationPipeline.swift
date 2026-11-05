@@ -18,6 +18,9 @@ struct ActiveDictation: Sendable {
     let translationTargetLanguage: String?
     let source: Source
     let startedAt: Date
+    /// When the keyboard first reported following this dictation. Nil while the app records one
+    /// it started on its own after the keyboard opened it (the user is still on the way back).
+    var keyboardAttachedAt: Date?
 }
 
 /// What the session gets back: the IPC result for the keyboard, and the history record. The

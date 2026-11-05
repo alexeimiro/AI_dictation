@@ -66,11 +66,33 @@ final class SessionController {
     @ObservationIgnored private var pendingLanguageReload = false
     @ObservationIgnored private var secondaryTask: Task<Void, Never>?
     @ObservationIgnored private var reconnectTask: Task<Void, Never>?
+    @ObservationIgnored private var fallbackTask: Task<Void, Never>?
+    /// The dictation the keyboard asked for when it opened the app, started once the session is ready.
+    @ObservationIgnored private var requestedStart: PendingStart?
+    /// The last dictation started that way, to start again if the audio path is rebuilt before
+    /// the keyboard is back.
+    @ObservationIgnored private var autoStarted: PendingStart?
+    /// A start that arrived while the previous dictation was still being processed.
+    @ObservationIgnored private var queuedStart: KeyboardCommand?
+    /// Requests the keyboard cancelled, so a start armed or queued for them is dropped.
+    @ObservationIgnored private var cancelledRequests: Set<UUID> = []
+    /// "Disable after" counts from the latest of these and the keyboard leaving the screen.
+    @ObservationIgnored private var idleSince = Date()
+    @ObservationIgnored private var backgroundSince: Date?
+    @ObservationIgnored private var interruptedAt: Date?
+    @ObservationIgnored private var keyboardObservation: IPCObservation?
 
     /// Wispr Flow caps dictations at 5 minutes; we do the same.
     static let maxDictationSeconds: TimeInterval = 300
     /// With "Disable after: Immediately", a session that isn't used still ends after this.
     static let immediateIdleGrace: TimeInterval = 60
+    /// How long a dictation the app started for the keyboard waits for it to come back. As in
+    /// Wispr Flow, the automatic start expires after that.
+    static let keyboardReturnWindow: TimeInterval = 10
+    /// How long a start that arrived while the app was busy stays valid.
+    static let queuedStartLifetime: TimeInterval = 15
+    /// Calls and Siri can hold the audio hardware for a moment after they end.
+    static let reconnectDelays: [Duration] = [.zero, .milliseconds(500), .seconds(1), .seconds(2)]
 
     init(transport: IPCTransport, pipeline: DictationPipeline, assets: SpeechAssetManager, history: any TranscriptSink,
          transcription: (any CloudTranscribing)? = nil) {
@@ -84,6 +106,9 @@ final class SessionController {
         commandObservation = transport.observe(.command) { [weak self] in
             MainActor.assumeIsolated { self?.handleCommand() }
         }
+        keyboardObservation = transport.observe(.keyboardStatus) { [weak self] in
+            MainActor.assumeIsolated { self?.keyboardStatusChanged() }
+        }
         observeAudioNotifications()
         transport.payloads.prune(olderThan: 24 * 3600)
     }
@@ -96,12 +121,13 @@ final class SessionController {
         case .ready, .recording, .processing, .starting: return
         default: break
         }
+        let startedAt = ContinuousClock.now
         phase = .starting
         publisher.set(.starting)
         transport.post(.stateChanged)
         do {
             guard await Self.requestMicrophonePermission() else { throw SessionError.microphoneDenied }
-            try await activateAudioSession()
+            try await activateAudioSession(waitForForeground: true)
             try audio.startEngine()
             guard let micFormat = audio.inputFormat else { throw AudioCapture.CaptureError.noInput }
 
@@ -117,14 +143,19 @@ final class SessionController {
 
             transport.payloads.clearSessionFailure()
             phase = .ready
+            idleSince = Date()
             publisher.set(.ready)
             transport.post(.stateChanged)
             startHeartbeat()
-            scheduleIdleTimeout()
+            scheduleIdleStop()
             if settings.liveActivities { await liveActivity.start() }
-            logger.info("Session started with \(transcriber.displayName, privacy: .public)")
+            logger.info("Session started with \(transcriber.displayName, privacy: .public) in \(DictationPipeline.milliseconds(since: startedAt)) ms")
+            beginQueuedStart()
+            beginRequestedStart()
+            prepareFallbackInBackground()
         } catch {
             logger.error("Session start failed: \(String(describing: error), privacy: .public)")
+            requestedStart = nil
             tearDownAudio()
             let message = Self.userMessage(for: error)
             phase = .failed(message)
@@ -132,6 +163,41 @@ final class SessionController {
             try? transport.payloads.write(sessionFailure: SessionFailure(message: message, createdAt: Date()))
             publisher.set(.error)
             transport.post(.stateChanged)
+        }
+    }
+
+    /// The keyboard opened the app for `request`: turn the microphone on and record that
+    /// dictation straight away, so the user can talk while getting back to their app.
+    func start(beginning request: PendingStart?) async {
+        if let request, request.autoStart == true { requestedStart = request }
+        await recoverForForeground()
+        await start()
+        beginRequestedStart()
+    }
+
+    /// The keyboard opens the app when the session doesn't answer. One that still looks ready
+    /// may have lost its audio in the background; in the foreground it can be rebuilt.
+    private func recoverForForeground() async {
+        guard phase == .needsReconnect || (phase == .ready && !audio.isEngineRunning) else { return }
+        logger.notice("The session didn't answer the keyboard; reconnecting in the foreground")
+        requestReconnect()
+        await reconnectTask?.value
+        if phase == .needsReconnect { stop() }
+    }
+
+    /// Records the dictation the keyboard asked for when it opened the app, once the session is
+    /// ready. Dropped if the keyboard cancelled it (X also removes the pending start) or it's old.
+    private func beginRequestedStart() {
+        guard phase == .ready, let request = requestedStart else { return }
+        requestedStart = nil
+        guard transport.payloads.readPendingStart()?.requestId == request.requestId,
+              !cancelledRequests.contains(request.requestId),
+              Date().timeIntervalSince(request.createdAt) < 90 else { return }
+        if beginDictation(requestId: request.requestId, documentIdentifier: request.documentIdentifier,
+                          style: request.styleOverride, languageOverride: request.languageOverride,
+                          translationTargetLanguage: request.translationTargetLanguage, source: .keyboard) {
+            autoStarted = request
+            logger.info("Recording the keyboard's dictation while the user goes back")
         }
     }
 
@@ -153,9 +219,10 @@ final class SessionController {
         if TranscriberEngine.current == .stub {
             primary = ResolvedLanguage(tag: tag, locale: Locale(identifier: tag), engine: .speech)
         } else if usesCloud {
+            // The installed on-device model (the fallback) is found and prepared once the session
+            // is ready, so the trip to the app doesn't wait for it.
             primary = cloudLanguage(tag)
             onDeviceFallbacks = [:]
-            if let onDevice = await installedOnDeviceLanguage(tag) { onDeviceFallbacks[tag] = onDevice }
         } else {
             startDetail = "Preparing \(name) speech recognition… The first time, this downloads the language model."
             primary = try await assets.ensureReady(
@@ -189,6 +256,25 @@ final class SessionController {
     private func addFallback(_ language: ResolvedLanguage) {
         onDeviceFallbacks[language.tag] = language
         (transcriber as? OpenAITranscriber)?.addFallbackLanguage(language)
+    }
+
+    /// In the cloud, the installed on-device model covers failed requests. Finding and preparing
+    /// it takes a while, so it runs after the session is ready (and after a reconnect, when the
+    /// mic format may have changed); the first dictation may go without it.
+    private func prepareFallbackInBackground() {
+        guard usesCloud, let cloud = transcriber as? OpenAITranscriber else { return }
+        let previous = fallbackTask
+        fallbackTask = Task { [weak self] in
+            await previous?.value
+            guard let self, !Task.isCancelled, self.transcriber === cloud else { return }
+            let tag = primaryTag
+            if onDeviceFallbacks[tag] == nil, let onDevice = await installedOnDeviceLanguage(tag) {
+                addFallback(onDevice)
+            }
+            guard !Task.isCancelled, self.transcriber === cloud else { return }
+            await cloud.prepareFallback()
+            engineName = cloud.displayName
+        }
     }
 
     private static func detail(for event: SpeechAssetManager.InstallEvent, language name: String) -> String? {
@@ -268,17 +354,24 @@ final class SessionController {
         let keep = [tag, settings.secondaryLanguage].compactMap { $0 }
         languages = languages.filter { keep.contains($0.key) }
         prepareSecondaryLanguage()
+        prepareFallbackInBackground()
         await assets.reconcileReservations(keep: keep)
     }
 
     /// Ends the session and releases the microphone.
     func stop() {
         if active != nil { endDictation(commit: true) }
+        requestedStart = nil
+        autoStarted = nil
+        queuedStart = nil
+        cancelledRequests = []
         heartbeatTask?.cancel()
         idleTask?.cancel()
         capTask?.cancel()
         tearDownAudio()
         secondaryTask?.cancel()
+        fallbackTask?.cancel()
+        fallbackTask = nil
         reconnectTask?.cancel()
         reconnectTask = nil
         if let transcriber {
@@ -294,11 +387,20 @@ final class SessionController {
         logger.info("Session stopped")
     }
 
-    /// Called when the app becomes active: recover from interruptions that left us stranded.
+    /// Called when the app becomes active: no "Disable after" countdown while it's on screen, and
+    /// recover from interruptions that left us stranded.
     func appDidBecomeActive() {
+        backgroundSince = nil
+        idleTask?.cancel()
         if phase == .needsReconnect {
             requestReconnect()
         }
+    }
+
+    /// The countdown starts (again) when the app leaves the screen.
+    func appDidEnterBackground() {
+        backgroundSince = Date()
+        scheduleIdleStop()
     }
 
     // MARK: Dictation
@@ -412,7 +514,8 @@ final class SessionController {
             deliver(outcome.result)
             history.record(outcome.transcript)
             becomeReady()
-            if settings.disableAfter == .immediately {
+            // Not while a dictation the keyboard asked for in the meantime has just begun.
+            if settings.disableAfter == .immediately, active == nil {
                 stop()
             }
             endBackgroundWork()
@@ -438,13 +541,16 @@ final class SessionController {
         default: break
         }
         phase = .ready
+        idleSince = Date()
         publisher.set(.ready)
         transport.post(.stateChanged)
         liveActivity.update(.ready, since: nil)
-        scheduleIdleTimeout()
+        scheduleIdleStop()
         if pendingLanguageReload {
             Task { await reloadLanguages() }
         }
+        beginQueuedStart()
+        beginRequestedStart()
     }
 
     // MARK: Keyboard commands
@@ -459,15 +565,93 @@ final class SessionController {
         }
         switch command.kind {
         case .start:
-            beginDictation(requestId: command.requestId, documentIdentifier: command.documentIdentifier,
-                           style: command.styleOverride, languageOverride: command.languageOverride,
-                           translationTargetLanguage: command.translationTargetLanguage,
-                           source: .keyboard)
+            handleStart(command)
         case .stop:
             if active?.requestId == command.requestId { endDictation(commit: true) }
         case .cancel:
+            cancelledRequests.insert(command.requestId)
+            if queuedStart?.requestId == command.requestId {
+                queuedStart = nil
+                republishPhase()
+            }
             if active?.requestId == command.requestId { endDictation(commit: false) }
         }
+    }
+
+    private func handleStart(_ command: KeyboardCommand) {
+        if let active, active.requestId == command.requestId {
+            // The app started it when the keyboard opened it; the keyboard wants its ack.
+            publisher.set(.recording, requestTag: command.requestId.tag16)
+            transport.post(.stateChanged)
+            return
+        }
+        if requestedStart?.requestId == command.requestId { requestedStart = nil }
+        switch phase {
+        case .ready:
+            beginDictation(from: command)
+        case .recording:
+            // From a keyboard that doesn't know about the current dictation: the one that did is
+            // gone. Drop it if nobody ever attached to it, otherwise save it, then start this one.
+            guard let active, active.source == .keyboard else { break }
+            if active.keyboardAttachedAt == nil {
+                expireUnattachedDictation()
+                beginDictation(from: command)
+            } else {
+                endDictation(commit: true)
+                queue(command)
+            }
+        case .processing, .starting:
+            queue(command)
+        default:
+            logger.notice("Start ignored in phase \(String(describing: self.phase), privacy: .public)")
+        }
+    }
+
+    /// Begins `command` once the previous dictation is done. Publishing `starting` with its tag
+    /// tells the keyboard it was accepted, so it waits instead of opening the app.
+    private func queue(_ command: KeyboardCommand) {
+        queuedStart = command
+        publisher.set(.starting, requestTag: command.requestId.tag16)
+        transport.post(.stateChanged)
+    }
+
+    private func beginQueuedStart() {
+        guard phase == .ready, let command = queuedStart else { return }
+        queuedStart = nil
+        guard !cancelledRequests.contains(command.requestId),
+              Date().timeIntervalSince(command.createdAt) < Self.queuedStartLifetime else { return }
+        beginDictation(from: command)
+    }
+
+    /// After a queued start was cancelled, the published state is the session's own again.
+    private func republishPhase() {
+        switch phase {
+        case .processing(let id): publisher.set(.processing, requestTag: id.tag16)
+        case .starting: publisher.set(.starting)
+        case .ready: publisher.set(.ready)
+        default: return
+        }
+        transport.post(.stateChanged)
+    }
+
+    @discardableResult
+    private func beginDictation(from command: KeyboardCommand) -> Bool {
+        beginDictation(requestId: command.requestId, documentIdentifier: command.documentIdentifier,
+                       style: command.styleOverride, languageOverride: command.languageOverride,
+                       translationTargetLanguage: command.translationTargetLanguage, source: .keyboard)
+    }
+
+    /// The app started this dictation for the keyboard, which never came back for it. It's
+    /// dropped, not saved, since nobody confirmed it (Wispr Flow lets it expire too). A keyboard
+    /// attaching at this very moment finds a `cancelled` result instead of waiting for one.
+    private func expireUnattachedDictation() {
+        guard let dictation = active, dictation.keyboardAttachedAt == nil else { return }
+        transport.payloads.clearPendingStart(dictation.requestId)
+        try? transport.payloads.write(result: DictationResult(
+            requestId: dictation.requestId, documentIdentifier: dictation.documentIdentifier, text: "",
+            status: .cancelled, createdAt: Date(), language: dictation.language), updatesLatest: false)
+        autoStarted = nil
+        endDictation(commit: false)
     }
 
     // MARK: Timers
@@ -486,12 +670,21 @@ final class SessionController {
     private func heartbeat() {
         switch phase {
         case .recording(let requestId):
-            // If the keyboard was killed mid-dictation, finish it so it lands in history.
-            guard let dictation = active, dictation.source == .keyboard,
-                  Date().timeIntervalSince(dictation.startedAt) > 5 else { return }
+            guard let dictation = active, dictation.source == .keyboard else { return }
             let status = transport.payloads.readKeyboardStatus()
             let heartbeat = status?.listeningRequestId == requestId ? status?.listeningHeartbeatAt : nil
-            if Date().timeIntervalSince(heartbeat ?? dictation.startedAt) > 4 {
+            guard let attachedAt = dictation.keyboardAttachedAt else {
+                // Started before the keyboard was back (after it opened the app), or just now.
+                if let heartbeat {
+                    active?.keyboardAttachedAt = heartbeat
+                } else if Date().timeIntervalSince(dictation.startedAt) > Self.keyboardReturnWindow {
+                    logger.notice("The keyboard didn't come back for the dictation; dropping it")
+                    expireUnattachedDictation()
+                }
+                return
+            }
+            // If the keyboard was killed mid-dictation, finish it so it lands in history.
+            if Date().timeIntervalSince(heartbeat ?? attachedAt) > 4 {
                 logger.notice("Keyboard heartbeat lost; finishing dictation")
                 endDictation(commit: true)
             }
@@ -502,18 +695,34 @@ final class SessionController {
         }
     }
 
-    private func scheduleIdleTimeout() {
+    /// "Disable after", counted like Wispr Flow's: only while the app is in the background and the
+    /// keyboard is off screen (`IdleStop`), so typing on the keyboard keeps the session on.
+    private func scheduleIdleStop() {
         idleTask?.cancel()
-        guard let timeout = settings.disableAfter.idleTimeout else { return }
+        guard let deadline = idleStopDate() else { return }
+        idleTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(max(0, deadline.timeIntervalSinceNow)))
+            guard let self, !Task.isCancelled else { return }
+            // The keyboard may have been on screen meanwhile, which moves the deadline.
+            guard let deadline = idleStopDate(), deadline <= Date() else { return scheduleIdleStop() }
+            logger.info("Idle timeout reached")
+            stop()
+        }
+    }
+
+    private func idleStopDate() -> Date? {
+        guard phase == .ready || phase == .needsReconnect, let timeout = settings.disableAfter.idleTimeout else {
+            return nil
+        }
         // "Immediately" stops right after a delivered result; a session that is never used, or
         // whose dictation was cancelled, still gets a short grace period instead of staying on.
-        let delay = timeout > 0 ? timeout : Self.immediateIdleGrace
-        idleTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(delay))
-            guard let self, !Task.isCancelled, self.phase == .ready else { return }
-            self.logger.info("Idle timeout reached")
-            self.stop()
-        }
+        return IdleStop.date(timeout: timeout > 0 ? timeout : Self.immediateIdleGrace, idleSince: idleSince,
+                             backgroundSince: backgroundSince, keyboard: transport.payloads.readKeyboardStatus())
+    }
+
+    /// The keyboard appeared or went away: the countdown restarts from there.
+    private func keyboardStatusChanged() {
+        if phase == .ready || phase == .needsReconnect { scheduleIdleStop() }
     }
 
     // MARK: Interruptions and route changes
@@ -554,17 +763,32 @@ final class SessionController {
         switch type {
         case .began:
             logger.notice("Audio interrupted")
-            if active != nil { endDictation(commit: true) }
+            interruptedAt = Date()
+            // Nothing waiting may start on a microphone that's gone.
+            requestedStart = nil
+            queuedStart = nil
+            if let active {
+                if active.source == .keyboard, active.keyboardAttachedAt == nil {
+                    expireUnattachedDictation()
+                } else {
+                    endDictation(commit: true)
+                }
+            }
             phase = .needsReconnect
+            idleSince = Date()
             publisher.set(.needsReconnect)
             transport.post(.stateChanged)
+            scheduleIdleStop()
         case .ended:
-            if options.contains(.shouldResume) {
+            // Like Wispr Flow: resume after a call or Siri unless it outlasted "Disable after",
+            // whatever `shouldResume` says. If it can't, the keyboard offers Reconnect.
+            let lasted = interruptedAt.map { Date().timeIntervalSince($0) } ?? 0
+            interruptedAt = nil
+            logger.notice("Interruption ended after \(Int(lasted)) s (shouldResume: \(options.contains(.shouldResume)))")
+            if settings.disableAfter.resumesAfterInterruption(lasting: lasted) {
                 requestReconnect()
             } else {
-                // The system says not to resume (another app took the audio); the keyboard
-                // offers Reconnect, which reopens the app and reconnects from `appDidBecomeActive`.
-                logger.notice("Interruption ended without shouldResume")
+                stop()
             }
         default:
             break
@@ -585,7 +809,14 @@ final class SessionController {
     private func rebuildAudioPath(reason: String) {
         guard isLive else { return }
         logger.notice("Rebuilding audio path after \(reason, privacy: .public)")
-        if active != nil { endDictation(commit: true) }
+        if let active {
+            // Recorded on its own, before the keyboard is back: start it again once the audio
+            // works rather than end it a moment after it began (and deliver nothing).
+            let restart = active.keyboardAttachedAt == nil && autoStarted?.requestId == active.requestId
+                ? autoStarted : nil
+            endDictation(commit: restart == nil)
+            requestedStart = restart
+        }
         requestReconnect()
     }
 
@@ -615,22 +846,31 @@ final class SessionController {
             await start()
             return
         }
-        do {
-            try await activateAudioSession()
-            try audio.restartEngine()
-            if let format = audio.inputFormat,
-               let language = transcriber.currentLanguage ?? languages[primaryTag] {
-                try await transcriber.prepare(micFormat: format, language: language)
+        for delay in Self.reconnectDelays {
+            if delay > .zero { try? await Task.sleep(for: delay) }
+            // Stopped meanwhile: by the user, the idle timer or a media services reset.
+            guard self.transcriber === transcriber else { return }
+            do {
+                // In the background there's no foreground to wait for; trying at once keeps the
+                // app from being suspended with its audio stopped.
+                try await activateAudioSession(waitForForeground: UIApplication.shared.applicationState == .inactive)
+                try audio.restartEngine()
+                if let format = audio.inputFormat,
+                   let language = transcriber.currentLanguage ?? languages[primaryTag] {
+                    try await transcriber.prepare(micFormat: format, language: language)
+                }
+                becomeReady(afterReconnect: true)
+                prepareFallbackInBackground()
+                logger.info("Audio reconnected")
+                return
+            } catch {
+                // Typically '!int' when reactivating from the background right after a call.
+                logger.error("Reconnect failed: \(error.localizedDescription, privacy: .public)")
             }
-            becomeReady(afterReconnect: true)
-            logger.info("Audio reconnected")
-        } catch {
-            // Typically '!int' when reactivating from the background after a call.
-            logger.error("Reconnect failed: \(error.localizedDescription, privacy: .public)")
-            phase = .needsReconnect
-            publisher.set(.needsReconnect)
-            transport.post(.stateChanged)
         }
+        phase = .needsReconnect
+        publisher.set(.needsReconnect)
+        transport.post(.stateChanged)
     }
 
     // MARK: Helpers
@@ -638,10 +878,10 @@ final class SessionController {
     /// Recording can only begin while the app is active. Right after the microphone permission
     /// alert, or while the app is still opening from the keyboard's link, it is briefly
     /// inactive and activation fails ("Session activation failed"), so wait, then retry once.
-    private func activateAudioSession() async throws {
+    private func activateAudioSession(waitForForeground: Bool) async throws {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: .seconds(3))
-        while UIApplication.shared.applicationState != .active, clock.now < deadline {
+        while waitForForeground, UIApplication.shared.applicationState != .active, clock.now < deadline {
             try? await Task.sleep(for: .milliseconds(50))
         }
         do {

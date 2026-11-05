@@ -1,8 +1,9 @@
 import MurmurUI
 import SwiftUI
 
-/// Shown after the keyboard opens the app to start a session. Since iOS 26.4 there is no way to
-/// return to the previous app programmatically, so we teach the swipe-back gesture.
+/// Shown after the keyboard opens the app to start a session. Murmur first tries to send the user
+/// back by itself (`HostReturn`); iOS has no API for that, so when it can't, this teaches the
+/// swipe-back gesture.
 struct SwipeBackView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -31,8 +32,9 @@ struct SwipeBackView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.paper)
         .overlay(alignment: .bottom) {
-            // Only once the mic is on: recording can't start after leaving the app.
-            if model.session.isLive {
+            // Only once the mic is on (recording can't start after leaving the app), and not
+            // while Murmur is about to take the user back itself.
+            if model.session.isLive, !model.hostReturn.isPending {
                 SwipeHint()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                     .ignoresSafeArea(edges: .bottom)
@@ -67,16 +69,29 @@ struct SwipeBackView: View {
         default:
             VStack(spacing: 18) {
                 SerifTitle("Murmur is on", accent: "on", size: 52)
-                Text("Swipe right along the bottom edge of the screen to go back to your app")
-                    .font(.ui(19))
-                    .foregroundStyle(Palette.text)
-                    .multilineTextAlignment(.center)
-                Text("Keyboards can't use the microphone, so Murmur keeps it on for your next dictations.")
-                    .font(.ui(15))
-                    .foregroundStyle(Palette.textSecondary)
-                    .multilineTextAlignment(.center)
+                if model.hostReturn.isPending {
+                    Text("Taking you back to your app…")
+                        .font(.ui(19))
+                        .foregroundStyle(Palette.text)
+                        .multilineTextAlignment(.center)
+                } else {
+                    Text("Swipe right along the bottom edge of the screen to go back to your app")
+                        .font(.ui(19))
+                        .foregroundStyle(Palette.text)
+                        .multilineTextAlignment(.center)
+                    Text(isListening
+                         ? "Murmur is already listening, so you can start talking. Your words will appear in your app."
+                         : "Keyboards can't use the microphone, so Murmur keeps it on for your next dictations.")
+                        .font(.ui(15))
+                        .foregroundStyle(Palette.textSecondary)
+                        .multilineTextAlignment(.center)
+                }
             }
         }
+    }
+
+    private var isListening: Bool {
+        if case .recording = model.session.phase { true } else { false }
     }
 }
 

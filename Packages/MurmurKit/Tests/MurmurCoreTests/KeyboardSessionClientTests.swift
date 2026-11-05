@@ -22,6 +22,9 @@ private final class FakeApp {
     let transport: IPCTransport
     var sequence: UInt32 = 1
     var acknowledges = true
+    /// Finishing a previous dictation: a start is queued and acknowledged as `starting`.
+    var busy = false
+    private(set) var queued: UUID?
     private var observation: IPCObservation?
 
     init(transport: IPCTransport) {
@@ -51,9 +54,24 @@ private final class FakeApp {
         transport.post(.resultReady)
     }
 
+    /// The app's side of the bounce: once it has the microphone, it records the pending request.
+    func autoStart() -> UUID? {
+        guard let pending = transport.payloads.readPendingStart(), pending.autoStart == true else { return nil }
+        publish(.recording, tag: pending.requestId.tag16)
+        return pending.requestId
+    }
+
+    func finishBusy() {
+        busy = false
+        if let queued { publish(.recording, tag: queued.tag16) }
+    }
+
     private func handleCommand() {
         guard acknowledges, let command = transport.payloads.readCommand() else { return }
         switch command.kind {
+        case .start where busy:
+            queued = command.requestId
+            publish(.starting, tag: command.requestId.tag16)
         case .start: publish(.recording, tag: command.requestId.tag16)
         case .stop: publish(.processing, tag: command.requestId.tag16)
         case .cancel: publish(.ready)
@@ -311,5 +329,219 @@ struct KeyboardSessionClientTests {
         client.micTapped()
         #expect(client.phase == .needsFullAccess)
         #expect(host.openedURLs.isEmpty)
+    }
+
+    // MARK: The bounce
+
+    @Test func theBounceCarriesTheDictationsOptions() throws {
+        let transport = InMemoryIPCTransport()
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport)
+        client.host = host
+        client.activate()
+
+        client.styleOverride = .formal
+        client.languageOverride = "ru-RU"
+        client.translationTargetLanguage = "en-US"
+        client.micTapped()
+        let pending = try #require(transport.payloads.readPendingStart())
+        #expect(pending.autoStart == true)
+        #expect(pending.documentIdentifier == host.currentDocumentIdentifier)
+        #expect(pending.styleOverride == .formal)
+        #expect(pending.languageOverride == "ru-RU")
+        #expect(pending.translationTargetLanguage == "en-US")
+    }
+
+    @Test func attachesToTheDictationTheAppStartedDuringTheBounce() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport)
+        client.host = host
+        client.activate()
+
+        client.micTapped()
+        guard case .openingApp(let requestId) = client.phase else {
+            Issue.record("expected .openingApp, got \(client.phase)")
+            return
+        }
+        client.deactivate() // the app comes to the front
+        #expect(client.phase == .openingApp(requestId), "the bounce itself mustn't cancel anything")
+        #expect(try #require(app.autoStart()) == requestId)
+
+        client.activate() // back in the app the user came from
+        guard case .listening(requestId, _) = client.phase else {
+            Issue.record("expected .listening, got \(client.phase)")
+            return
+        }
+        #expect(transport.payloads.readPendingStart() == nil)
+        #expect(transport.payloads.readCommand() == nil, "the app started it; no start command")
+        #expect(transport.payloads.readKeyboardStatus()?.listeningRequestId == requestId,
+                "the app learns at once that the keyboard is back")
+    }
+
+    @Test func aKeyboardRelaunchedWhileAwayAttachesToo() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let first = KeyboardSessionClient(transport: transport)
+        first.host = host
+        first.activate()
+        first.micTapped()
+        first.deactivate()
+        let requestId = try #require(app.autoStart())
+
+        // iOS killed the extension while the user was in Murmur; a fresh one starts out idle.
+        let client = KeyboardSessionClient(transport: transport)
+        client.host = host
+        client.activate()
+        guard case .listening(requestId, _) = client.phase else {
+            Issue.record("expected .listening, got \(client.phase)")
+            return
+        }
+    }
+
+    @Test func comingBackToAnotherFieldCancelsTheDictation() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport)
+        client.host = host
+        client.activate()
+        client.micTapped()
+        client.deactivate()
+        let requestId = try #require(app.autoStart())
+
+        host.currentDocumentIdentifier = UUID()
+        client.activate()
+        #expect(client.phase == .idle)
+        let command = try #require(transport.payloads.readCommand())
+        #expect(command.kind == .cancel)
+        #expect(command.requestId == requestId)
+    }
+
+    @Test func cancellingWhileOpeningTheAppStopsTheRecordingThere() throws {
+        let transport = InMemoryIPCTransport()
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport)
+        client.host = host
+        client.activate()
+        client.micTapped()
+        guard case .openingApp(let requestId) = client.phase else { return }
+
+        client.cancelTapped()
+        #expect(client.phase == .idle)
+        #expect(transport.payloads.readPendingStart() == nil)
+        let command = try #require(transport.payloads.readCommand())
+        #expect(command.kind == .cancel)
+        #expect(command.requestId == requestId)
+        #expect(transport.payloads.isClaimed(requestId))
+    }
+
+    @Test func aDictationTheAppDroppedLeavesTheKeyboardIdle() async {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport)
+        client.host = host
+        client.activate()
+        client.micTapped()
+        client.deactivate()
+
+        // The keyboard didn't come back in time: the app discarded the recording.
+        transport.payloads.clearPendingStart()
+        app.publish(.ready)
+        client.activate()
+        #expect(client.phase == .idle)
+        #expect(host.openedURLs.count == 1)
+    }
+
+    // MARK: A busy app
+
+    @Test func aBusyAppQueuesTheStartInsteadOfBeingOpened() async {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport, ackTimeout: .milliseconds(150), busyTimeout: .seconds(5))
+        client.host = host
+        app.publish(.processing)
+        client.activate()
+
+        app.busy = true
+        client.micTapped()
+        try? await Task.sleep(for: .milliseconds(400))
+        #expect(host.openedURLs.isEmpty)
+        if case .starting = client.phase {} else { Issue.record("expected .starting, got \(client.phase)") }
+
+        app.finishBusy()
+        #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
+        #expect(host.openedURLs.isEmpty)
+    }
+
+    @Test func leavingWhileTheStartIsQueuedCancelsIt() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport, ackTimeout: .milliseconds(100), busyTimeout: .seconds(5))
+        client.host = host
+        app.publish(.processing)
+        client.activate()
+
+        app.busy = true
+        client.micTapped()
+        guard case .starting(let requestId) = client.phase else { return }
+        client.deactivate()
+        #expect(client.phase == .idle)
+        let command = try #require(transport.payloads.readCommand())
+        #expect(command.kind == .cancel)
+        #expect(command.requestId == requestId)
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(host.openedURLs.isEmpty)
+    }
+
+    @Test func aStartQueuedForTooLongGivesUpWithoutOpeningTheApp() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport, ackTimeout: .milliseconds(100),
+                                           busyTimeout: .milliseconds(300))
+        client.host = host
+        app.publish(.processing)
+        client.activate()
+
+        app.busy = true
+        client.micTapped()
+        #expect(await waitUntil { if case .notice = client.phase { true } else { false } })
+        #expect(host.openedURLs.isEmpty)
+        #expect(try #require(transport.payloads.readCommand()).kind == .cancel)
+    }
+
+    // MARK: Visibility
+
+    @Test func theAppHearsWhenTheKeyboardComesAndGoes() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport)
+        client.host = host
+        app.publish(.ready)
+
+        client.activate()
+        let shown = try #require(transport.payloads.readKeyboardStatus())
+        #expect(shown.hiddenAt == nil)
+        #expect(transport.postedEvents.contains(.keyboardStatus))
+
+        client.micTapped()
+        #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
+        guard case .listening(let requestId, _) = client.phase else { return }
+        client.activate() // any status write while listening keeps the listening fields
+        #expect(transport.payloads.readKeyboardStatus()?.listeningRequestId == requestId)
+
+        client.deactivate()
+        let hidden = try #require(transport.payloads.readKeyboardStatus())
+        #expect(hidden.hiddenAt != nil)
+        #expect(hidden.inactiveSince == hidden.hiddenAt)
+        #expect(hidden.listeningRequestId == nil)
+        #expect(transport.postedEvents.filter { $0 == .keyboardStatus }.count == 3)
     }
 }

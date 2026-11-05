@@ -11,9 +11,10 @@ plan for matching the complete 42-screen reference onboarding is in
 ## How it works
 
 A custom keyboard can't use the microphone, so the app does the recording. The first dictation
-opens the app briefly. It starts a background audio session and shows a Live Activity. You then
-swipe back to your app, and later dictations reuse that session until it times out
-("Disable after").
+opens the app briefly: it starts a background audio session, shows a Live Activity, starts
+recording, and sends you back to the app you were typing in (or, for apps it can't reopen, asks
+you to swipe back). Later dictations reuse that session until it times out ("Disable after"),
+which only counts while the keyboard is off screen.
 
 ```
 Keyboard ext ──command file + Darwin notify──► App session (hot mic) ──► transcribe fn (OpenAI)
@@ -156,7 +157,8 @@ To use the backend from the app, set `SUPABASE_HOST` and `SUPABASE_ANON_KEY` in
 3. In Murmur › Settings › Languages pick the primary language (Russian downloads its model the
    first time) and, optionally, a secondary one for the keyboard's language switch.
 4. Open Notes, switch to the Murmur keyboard (globe key) and tap the mic.
-5. Murmur opens once. Swipe right along the bottom edge to go back, then speak and tap ✓.
+5. Murmur opens once and takes you back to Notes (in an app it can't reopen, swipe right along
+   the bottom edge). It's already listening: speak and tap ✓.
 6. Home lists every dictation by day: tap to copy, swipe for Retry / Regenerate / Delete, open a
    row for the raw transcript and timings. Settings › Debug shows median / p95 latencies and the
    engine in use; the keyboard toolbar shows the extension's remaining memory in Debug builds.

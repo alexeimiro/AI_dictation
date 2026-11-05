@@ -24,6 +24,7 @@ final class SettingsModel {
     var transcriberEngine: TranscriberEngine {
         didSet { settings.transcriberEngine = transcriberEngine == .auto ? nil : transcriberEngine.rawValue }
     }
+    var autoReturn: Bool { didSet { settings.autoReturn = autoReturn } }
 
     @ObservationIgnored private let settings: SharedSettings
     @ObservationIgnored var onRetentionChange: (() -> Void)?
@@ -41,5 +42,6 @@ final class SettingsModel {
         liveActivities = settings.liveActivities
         transcriptRetention = settings.transcriptRetention
         transcriberEngine = TranscriberEngine.current
+        autoReturn = settings.autoReturn
     }
 }

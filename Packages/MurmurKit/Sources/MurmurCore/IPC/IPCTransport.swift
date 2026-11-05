@@ -52,9 +52,11 @@ public final class IPCPayloadStore: @unchecked Sendable {
 
     // MARK: Results (app → keyboard)
 
-    public func write(result: DictationResult) throws {
+    /// `updatesLatest: false` leaves `latest-result.json` alone, so an answer only the waiting
+    /// keyboard needs (a dictation that was dropped) doesn't hide the last real one.
+    public func write(result: DictationResult, updatesLatest: Bool = true) throws {
         try JSONFile.write(result, to: resultsDirectory.appendingPathComponent("\(result.requestId.uuidString).json"))
-        try JSONFile.write(result, to: latestResultURL)
+        if updatesLatest { try JSONFile.write(result, to: latestResultURL) }
     }
 
     public func readResult(_ requestId: UUID) -> DictationResult? {
@@ -115,6 +117,12 @@ public final class IPCPayloadStore: @unchecked Sendable {
     }
 
     public func clearPendingStart() {
+        JSONFile.remove(pendingStartURL)
+    }
+
+    /// Clears the pending start only while it is still `requestId`'s, so a newer tap survives.
+    public func clearPendingStart(_ requestId: UUID) {
+        guard readPendingStart()?.requestId == requestId else { return }
         JSONFile.remove(pendingStartURL)
     }
 

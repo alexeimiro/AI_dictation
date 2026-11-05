@@ -113,16 +113,27 @@ public struct SessionFailure: Codable, Sendable, Equatable {
 /// keyboard cannot write to the App Group at all.
 public struct KeyboardStatus: Codable, Sendable, Equatable {
     public var fullAccessAt: Date?
+    /// Refreshed every `KeyboardSessionClient.visibilityInterval` while the keyboard is on screen.
     public var lastSeenAt: Date
+    /// When the keyboard went off screen. Older than `lastSeenAt` (or nil) while it's on screen.
+    public var hiddenAt: Date?
     public var listeningRequestId: UUID?
     public var listeningHeartbeatAt: Date?
 
-    public init(fullAccessAt: Date?, lastSeenAt: Date, listeningRequestId: UUID? = nil,
+    public init(fullAccessAt: Date?, lastSeenAt: Date, hiddenAt: Date? = nil, listeningRequestId: UUID? = nil,
                 listeningHeartbeatAt: Date? = nil) {
         self.fullAccessAt = fullAccessAt
         self.lastSeenAt = lastSeenAt
+        self.hiddenAt = hiddenAt
         self.listeningRequestId = listeningRequestId
         self.listeningHeartbeatAt = listeningHeartbeatAt
+    }
+
+    /// When the keyboard stopped being on screen: when it said so, or shortly after its last
+    /// heartbeat if it was suspended or killed without saying so.
+    public var inactiveSince: Date {
+        if let hiddenAt, hiddenAt >= lastSeenAt { return hiddenAt }
+        return lastSeenAt.addingTimeInterval(IdleStop.keyboardGrace)
     }
 }
 
@@ -140,17 +151,30 @@ public struct LaunchToken: Codable, Sendable, Equatable {
     }
 }
 
-/// A dictation the keyboard wants to start automatically once the session is up (after the
-/// bounce to the app and back).
+/// The dictation the keyboard asked for when it opened the app. With `autoStart`, the app starts
+/// recording it as soon as it has the microphone, so the user can talk while getting back to
+/// their app, and the keyboard attaches to it when it reappears. Without it (a keyboard from
+/// before), the keyboard sends the start itself once the session is ready.
 public struct PendingStart: Codable, Sendable, Equatable {
     public var requestId: UUID
     public var documentIdentifier: UUID?
     public var createdAt: Date
+    public var autoStart: Bool?
+    /// The options a `start` command would carry; the app needs them to start on its own.
+    public var styleOverride: StylePreset?
+    public var languageOverride: String?
+    public var translationTargetLanguage: String?
 
-    public init(requestId: UUID, documentIdentifier: UUID?, createdAt: Date) {
+    public init(requestId: UUID, documentIdentifier: UUID?, createdAt: Date, autoStart: Bool? = nil,
+                styleOverride: StylePreset? = nil, languageOverride: String? = nil,
+                translationTargetLanguage: String? = nil) {
         self.requestId = requestId
         self.documentIdentifier = documentIdentifier
         self.createdAt = createdAt
+        self.autoStart = autoStart
+        self.styleOverride = styleOverride
+        self.languageOverride = languageOverride
+        self.translationTargetLanguage = translationTargetLanguage
     }
 }
 

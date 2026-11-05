@@ -27,9 +27,15 @@ public enum DictationOutcome: Equatable, Sendable {
 /// `InMemoryIPCTransport`.
 ///
 /// Flow: mic tap → write `start` command → wait ≤500 ms for the app to report `recording` with
-/// our request tag → otherwise open the app (one-time token) and auto-start when we reappear.
+/// our request tag → otherwise open the app (one-time token). The app starts recording that
+/// dictation as soon as it has the microphone and, like Wispr Flow, sends the user back; the
+/// keyboard attaches to the recording when it reappears.
 @MainActor
 public final class KeyboardSessionClient {
+    /// How often the keyboard tells the app it's still on screen, which keeps the session from
+    /// timing out while it's in use (see `IdleStop`).
+    public static let visibilityInterval: Duration = .seconds(5)
+
     public enum Phase: Equatable, Sendable {
         case idle
         case needsFullAccess
@@ -60,12 +66,15 @@ public final class KeyboardSessionClient {
     private let transport: IPCTransport
     private let clock: () -> Date
     private let ackTimeout: Duration
+    /// How long a start the app queued (it was finishing the previous dictation) may wait.
+    private let busyTimeout: Duration
     private let resultTimeout: Duration
     private let staleAfter: TimeInterval
     private var observations: [IPCObservation] = []
     private var ackTask: Task<Void, Never>?
     private var listenTask: Task<Void, Never>?
     private var resultTask: Task<Void, Never>?
+    private var visibilityTask: Task<Void, Never>?
     private var activeDocumentIdentifier: UUID?
     private var lastSequence: UInt32 = 0
     private var lastSequenceChange = Date.distantPast
@@ -76,12 +85,14 @@ public final class KeyboardSessionClient {
         transport: IPCTransport,
         clock: @escaping () -> Date = Date.init,
         ackTimeout: Duration = .milliseconds(500),
+        busyTimeout: Duration = .seconds(15),
         resultTimeout: Duration = .seconds(20),
         staleAfter: TimeInterval = 2.5
     ) {
         self.transport = transport
         self.clock = clock
         self.ackTimeout = ackTimeout
+        self.busyTimeout = busyTimeout
         self.resultTimeout = resultTimeout
         self.staleAfter = staleAfter
     }
@@ -102,21 +113,35 @@ public final class KeyboardSessionClient {
             ]
         }
         writeKeyboardStatus()
+        transport.post(.keyboardStatus)
+        startVisibilityHeartbeat()
         refresh()
         checkForResult()
     }
 
     /// Call from `viewWillDisappear`. A dictation in progress is stopped so it lands in history.
+    /// While opening the app nothing is cancelled: the bounce is why the keyboard disappeared.
     public func deactivate() {
-        if case .listening(let id, _) = phase {
+        switch phase {
+        case .listening(let id, _):
             send(.stop, requestId: id)
             phase = .processing(id)
+        case .starting(let id):
+            // Gone before the app answered (or while it was busy): don't record for a field
+            // nobody is looking at, and don't come back stuck waiting.
+            send(.cancel, requestId: id)
+            phase = .idle
+        default:
+            break
         }
         observations.forEach { $0.cancel() }
         observations = []
         ackTask?.cancel()
         listenTask?.cancel()
         resultTask?.cancel()
+        visibilityTask?.cancel()
+        writeKeyboardStatus(hidden: true)
+        transport.post(.keyboardStatus)
     }
 
     // MARK: User actions
@@ -159,7 +184,10 @@ public final class KeyboardSessionClient {
             transport.payloads.claim(id)
             cancelTasks()
             setPhase(.idle)
-        case .openingApp:
+        case .openingApp(let id):
+            // The app may already be recording it: it starts as soon as it has the microphone.
+            send(.cancel, requestId: id)
+            transport.payloads.claim(id)
             transport.payloads.clearPendingStart()
             setPhase(.idle)
         default:
@@ -207,19 +235,33 @@ public final class KeyboardSessionClient {
         setPhase(.starting(requestId))
         ackTask?.cancel()
         let timeout = ackTimeout
+        let busyTimeout = busyTimeout
         ackTask = Task { [weak self] in
             let clock = ContinuousClock()
-            let deadline = clock.now.advanced(by: timeout)
+            let sentAt = clock.now
+            var deadline = sentAt.advanced(by: timeout)
             while clock.now < deadline {
                 try? await Task.sleep(for: .milliseconds(40))
                 guard let self, !Task.isCancelled else { return }
                 if self.checkAck(requestId) { return }
+                // Accepted, but the app is finishing the previous dictation first. It's running,
+                // so opening it wouldn't help.
+                if self.isQueued(requestId) { deadline = sentAt.advanced(by: busyTimeout) }
             }
-            guard let self, !Task.isCancelled else { return }
-            if case .starting(requestId) = self.phase {
+            guard let self, !Task.isCancelled, case .starting(requestId) = self.phase else { return }
+            if self.isQueued(requestId) {
+                self.send(.cancel, requestId: requestId)
+                self.setPhase(.notice("Murmur is still finishing your last dictation. Try again in a moment."))
+            } else {
                 self.openApp(for: requestId)
             }
         }
+    }
+
+    /// The app published `starting` with our tag: it took the start and begins it when it's free.
+    private func isQueued(_ requestId: UUID) -> Bool {
+        let state = transport.currentState()
+        return state.status == .starting && state.requestTag == requestId.tag16
     }
 
     @discardableResult
@@ -241,7 +283,9 @@ public final class KeyboardSessionClient {
         do {
             try transport.payloads.write(launchToken: token)
             try transport.payloads.write(pendingStart: PendingStart(
-                requestId: requestId, documentIdentifier: activeDocumentIdentifier, createdAt: now))
+                requestId: requestId, documentIdentifier: activeDocumentIdentifier, createdAt: now, autoStart: true,
+                styleOverride: styleOverride, languageOverride: languageOverride,
+                translationTargetLanguage: translationTargetLanguage))
         } catch {
             // Writing to the App Group fails without Full Access.
             setPhase(.needsFullAccess)
@@ -251,25 +295,50 @@ public final class KeyboardSessionClient {
         host?.openContainingApp(Brand.sessionStartURL(token: token.token))
     }
 
-    /// After the bounce: once the app reports `ready`, start the dictation the user asked for.
-    private func resumePendingStartIfNeeded() {
-        guard let pending = transport.payloads.readPendingStart() else { return }
+    /// After the bounce. The app records the dictation as soon as it has the microphone, so join
+    /// that recording; an app that hasn't started it (an older build, or one that's still busy)
+    /// gets the start command once it's ready. The request is read from disk, so this also works
+    /// for a keyboard that was relaunched while the user was away.
+    private func attachToPendingStart() {
+        guard let pending = transport.payloads.readPendingStart() else {
+            // The app dropped it: the keyboard took too long to come back.
+            if case .openingApp = phase { setPhase(.idle) }
+            return
+        }
         let age = clock().timeIntervalSince(pending.createdAt)
         guard age < 90 else {
             transport.payloads.clearPendingStart()
             if case .openingApp = phase { setPhase(.idle) }
             return
         }
-        guard transport.currentState().status == .ready else { return }
+        let state = transport.currentState()
+        let ours = state.requestTag == pending.requestId.tag16
+        switch state.status {
+        case .ready: break
+        case .recording where ours, .processing where ours: break
+        default: return // still starting: wait for the next state change
+        }
         transport.payloads.clearPendingStart()
         if case .listening = phase { return }
         if let expected = pending.documentIdentifier, let current = host?.currentDocumentIdentifier,
            expected != current {
+            // Back in a different field: don't record into it.
+            if ours { send(.cancel, requestId: pending.requestId) }
             setPhase(.idle)
             return
         }
         activeDocumentIdentifier = pending.documentIdentifier ?? host?.currentDocumentIdentifier
-        sendStart(pending.requestId)
+        switch state.status {
+        case .recording:
+            setPhase(.listening(pending.requestId, since: clock()))
+            startListeningLoop(pending.requestId)
+        case .processing:
+            setPhase(.processing(pending.requestId))
+            waitForResult(pending.requestId)
+            checkForResult()
+        default:
+            sendStart(pending.requestId)
+        }
     }
 
     // MARK: Listening
@@ -278,6 +347,9 @@ public final class KeyboardSessionClient {
         listenTask?.cancel()
         lastSequence = transport.currentState().sequence
         lastSequenceChange = clock()
+        // Right away: it tells the app the keyboard is following this dictation, which matters
+        // when the app started it on its own and is waiting for the keyboard to come back.
+        writeKeyboardStatus()
         listenTask = Task { [weak self] in
             var tick = 0
             while !Task.isCancelled {
@@ -286,7 +358,7 @@ public final class KeyboardSessionClient {
                 guard case .listening(requestId, _) = self.phase else { return }
                 self.pollListening(requestId)
                 tick += 1
-                if tick % 20 == 0 { self.writeKeyboardStatus(listening: requestId) }
+                if tick % 20 == 0 { self.writeKeyboardStatus() }
             }
         }
     }
@@ -366,7 +438,7 @@ public final class KeyboardSessionClient {
             if state.status == .needsReconnect, case .idle = phase {
                 setPhase(.needsReconnect)
             } else {
-                resumePendingStartIfNeeded()
+                attachToPendingStart()
             }
         case .needsReconnect:
             if state.status == .ready { setPhase(.idle) }
@@ -475,14 +547,30 @@ public final class KeyboardSessionClient {
         }
     }
 
-    private func writeKeyboardStatus(listening requestId: UUID? = nil) {
+    /// The listening fields come from the phase, so the visibility heartbeat never clears them
+    /// (the app would end the dictation, thinking the keyboard was gone).
+    private func writeKeyboardStatus(hidden: Bool = false) {
         guard let host else { return }
         let now = clock()
+        let listening: UUID? = if case .listening(let id, _) = phase { id } else { nil }
         let status = KeyboardStatus(
-            fullAccessAt: host.hasFullAccess ? now : nil, lastSeenAt: now,
-            listeningRequestId: requestId, listeningHeartbeatAt: requestId == nil ? nil : now)
+            fullAccessAt: host.hasFullAccess ? now : nil, lastSeenAt: now, hiddenAt: hidden ? now : nil,
+            listeningRequestId: listening, listeningHeartbeatAt: listening == nil ? nil : now)
         // Fails silently without Full Access, which is expected.
         try? transport.payloads.write(keyboardStatus: status)
+    }
+
+    /// While the keyboard is on screen the app keeps the session on, however long the user types.
+    private func startVisibilityHeartbeat() {
+        visibilityTask?.cancel()
+        let interval = Self.visibilityInterval
+        visibilityTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard let self, !Task.isCancelled else { return }
+                self.writeKeyboardStatus()
+            }
+        }
     }
 
     private func cancelTasks() {

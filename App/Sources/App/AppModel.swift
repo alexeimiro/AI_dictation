@@ -23,6 +23,9 @@ final class AppModel {
 
     /// "Murmur is on — swipe back" after the keyboard opened us.
     var showSwipeBack = false
+    /// Takes the user back to the app the keyboard opened us from. Created at launch, so the
+    /// first word from UIKit about that app isn't missed.
+    let hostReturn = HostReturn()
     /// A start link arrived without a valid one-time token (e.g. from a web page).
     var confirmUntrustedStart = false
     let router = Router()
@@ -207,8 +210,8 @@ final class AppModel {
                 // the missing step instead.
                 guard setup.microphone == .granted else { return }
             }
-            if let token, transport.payloads.consumeLaunchToken(token, maxAge: 20, now: Date()) != nil {
-                startSessionFromKeyboard(showSwipeBack: openedByAnotherApp)
+            if let token, let launch = transport.payloads.consumeLaunchToken(token, maxAge: 20, now: Date()) {
+                startSessionFromKeyboard(showSwipeBack: openedByAnotherApp, request: launch.requestId)
             } else {
                 confirmUntrustedStart = true
             }
@@ -228,12 +231,21 @@ final class AppModel {
         }
     }
 
-    /// The keyboard opened us to start a session. When it was used in another app, show
-    /// "swipe back"; when it was used inside Murmur itself there's nowhere to go back to, so just
-    /// start the session (the keyboard starts recording once the session is ready).
-    func startSessionFromKeyboard(showSwipeBack: Bool = true) {
+    /// The keyboard opened us to start a session. The dictation it asked for (`request`, proven by
+    /// the one-time token) records as soon as the microphone is on. When the keyboard was used in
+    /// another app, Murmur sends the user back there, or shows "swipe back" if it can't; when it
+    /// was used inside Murmur itself there's nowhere to go back to.
+    func startSessionFromKeyboard(showSwipeBack: Bool = true, request: UUID? = nil) {
         self.showSwipeBack = showSwipeBack
-        Task { await session.start() }
+        let linkAt = Date()
+        let pending = transport.payloads.readPendingStart().flatMap { $0.requestId == request ? $0 : nil }
+        Task {
+            await session.start(beginning: pending)
+            guard showSwipeBack, let request else { return }
+            await hostReturn.returnToHost(requestId: request, linkAt: linkAt, session: session) { [weak self] in
+                self?.showSwipeBack == true
+            }
+        }
     }
 
     /// True unless the app had already been active for a while when the link arrived, which
@@ -255,6 +267,7 @@ final class AppModel {
         case .background:
             activeSince = nil
             showSwipeBack = false
+            session.appDidEnterBackground()
         case .inactive:
             activeSince = nil
         default:

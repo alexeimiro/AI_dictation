@@ -26,6 +26,10 @@ final class OpenAITranscriber: Transcriber, @unchecked Sendable {
         commonFormat: .pcmFormatFloat32, sampleRate: OpenAITranscriber.sampleRate, channels: 1, interleaved: false)!
     private var language: ResolvedLanguage?
     private var converter: AVAudioConverter?
+    private var micFormat: AVAudioFormat?
+    /// Bumped by every `prepare`, so a fallback preparation for an older mic format that finishes
+    /// late doesn't mark the fallback ready.
+    private var generation = 0
     private var samples: [Float] = []
     private var capturing = false
     /// On-device languages the fallback can recognize, by tag.
@@ -58,22 +62,33 @@ final class OpenAITranscriber: Transcriber, @unchecked Sendable {
 
     // MARK: Transcriber
 
+    /// Only what the cloud needs, so the session is ready quickly; the on-device fallback is
+    /// prepared separately (`prepareFallback`).
     func prepare(micFormat: AVAudioFormat, language: ResolvedLanguage) async throws {
         guard let converter = AVAudioConverter(from: micFormat, to: targetFormat) else {
             throw CloudTranscriptionError.unavailable("Unsupported microphone format")
         }
-        let onDevice = lock.withLock { () -> ResolvedLanguage? in
+        lock.withLock {
             self.converter = converter
             self.language = language
-            return fallbackLanguages[language.tag]
+            self.micFormat = micFormat
+            generation += 1
+            fallbackPrepared = false
         }
-        guard let fallback, let onDevice else { return }
+    }
+
+    /// Prepares the installed on-device model for the current language. It takes a while, so the
+    /// session calls it once it's ready; dictations before that go without a fallback.
+    func prepareFallback() async {
+        let (micFormat, onDevice, generation, prepared) = lock.withLock {
+            (self.micFormat, language.flatMap { fallbackLanguages[$0.tag] }, self.generation, fallbackPrepared)
+        }
+        guard !prepared, let fallback, let micFormat, let onDevice else { return }
         do {
             try await fallback.prepare(micFormat: micFormat, language: onDevice)
-            lock.withLock { fallbackPrepared = true }
+            lock.withLock { if self.generation == generation { fallbackPrepared = true } }
         } catch {
             logger.notice("On-device fallback unavailable: \(error.localizedDescription, privacy: .public)")
-            lock.withLock { fallbackPrepared = false }
         }
     }
 

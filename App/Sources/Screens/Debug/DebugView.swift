@@ -26,6 +26,15 @@ struct DebugView: View {
                 Text("Recognizer changes apply the next time the session starts.")
             }
             Section {
+                Toggle("Return to the app automatically", isOn: $settings.autoReturn)
+                    .tint(Palette.toggleGreen)
+                LabeledContent("Last time", value: model.hostReturn.lastOutcome ?? "—")
+            } header: {
+                Text("After the keyboard opens Murmur")
+            } footer: {
+                Text("Murmur learns which app you were typing in from a part of iOS that isn't public, and reopens it. Turn this off to always swipe back yourself.")
+            }
+            Section {
                 TextField("Tap here, switch to the Murmur keyboard, and dictate", text: $testText, axis: .vertical)
                     .lineLimit(3...8)
                 if !testText.isEmpty {

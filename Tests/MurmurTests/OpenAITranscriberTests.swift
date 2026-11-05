@@ -124,6 +124,7 @@ struct OpenAITranscriberTests {
         let onDevice = FakeOnDevice()
         let transcriber = OpenAITranscriber(client: cloud, fallback: onDevice, fallbackLanguages: ["ru-RU": russian])
         try await transcriber.prepare(micFormat: micFormat, language: russian)
+        await transcriber.prepareFallback()
         #expect(onDevice.preparedTag == "ru-RU")
         transcriber.beginUtterance()
         feed(transcriber, seconds: 1)
@@ -131,11 +132,35 @@ struct OpenAITranscriberTests {
         #expect(try await transcriber.finishUtterance() == "Recognized on the iPhone.")
     }
 
+    @Test func theSessionDoesNotWaitForTheFallback() async throws {
+        let cloud = FakeCloud()
+        cloud.result = .failure(.unavailable("offline"))
+        let onDevice = FakeOnDevice()
+        let transcriber = OpenAITranscriber(client: cloud, fallback: onDevice, fallbackLanguages: ["ru-RU": russian])
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        #expect(onDevice.preparedTag == nil)
+
+        // A dictation before the fallback is ready has none.
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        await #expect(throws: CloudTranscriptionError.self) { try await transcriber.finishUtterance() }
+
+        await transcriber.prepareFallback()
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        #expect(try await transcriber.finishUtterance() == "Recognized on the iPhone.")
+
+        // A reconnect (new mic format) needs it prepared again.
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        #expect(transcriber.displayName == "OpenAI")
+    }
+
     @Test func afterAConnectionFailureTheFallbackIsUsedDirectly() async throws {
         let cloud = FakeCloud()
         cloud.result = .failure(.unavailable("The request timed out."))
         let transcriber = OpenAITranscriber(client: cloud, fallback: FakeOnDevice(), fallbackLanguages: ["ru-RU": russian])
         try await transcriber.prepare(micFormat: micFormat, language: russian)
+        await transcriber.prepareFallback()
         for _ in 0..<2 {
             transcriber.beginUtterance()
             feed(transcriber, seconds: 1)
@@ -149,6 +174,7 @@ struct OpenAITranscriberTests {
         let onDevice = FakeOnDevice()
         let transcriber = OpenAITranscriber(client: FakeCloud(), fallback: onDevice, fallbackLanguages: ["ru-RU": russian])
         try await transcriber.prepare(micFormat: micFormat, language: russian)
+        await transcriber.prepareFallback()
         transcriber.beginUtterance()
         feed(transcriber, seconds: 1)
         #expect(try await transcriber.finishUtterance() == "Hello from OpenAI.")
@@ -163,6 +189,7 @@ struct OpenAITranscriberTests {
         let english = ResolvedLanguage(tag: "en-US", locale: Locale(identifier: "en-US"), engine: .speech)
         let transcriber = OpenAITranscriber(client: cloud, fallback: onDevice, fallbackLanguages: ["en-US": english])
         try await transcriber.prepare(micFormat: micFormat, language: russian)
+        await transcriber.prepareFallback()
         #expect(onDevice.preparedTag == nil)
         transcriber.beginUtterance()
         feed(transcriber, seconds: 1)
