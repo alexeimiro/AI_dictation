@@ -108,11 +108,11 @@ Requires Docker, the Supabase CLI and Deno (`brew install supabase/tap/supabase 
 ```sh
 supabase start                       # local Postgres, Auth, Edge Runtime; applies supabase/migrations
 supabase test db                     # pgTAP: RLS, quota, rate limits (supabase/tests)
-deno test --allow-env supabase/functions/          # offline cleanup tests: prompt blocks, guards, validation (English + Russian)
+deno test --allow-env supabase/functions/          # offline cleanup tests: prompt blocks, guards, validation (English, Russian, translation)
 supabase functions serve             # serve functions locally; loads supabase/functions/.env (put OPENAI_API_KEY there)
 scripts/smoke_functions.sh           # HTTP checks: auth, 401/400/402, an English and a Russian cleanup, auth helpers, delete-account
 
-# Live model checks (cost money): English and Russian goldens plus a Russian latency / token-size probe.
+# Live model checks (cost money): English, Russian and translation goldens plus a Russian latency / token-size probe.
 RUN_GOLDEN=1 OPENAI_API_KEY=... deno test --allow-env --allow-net supabase/functions/cleanup/golden_test.ts
 ```
 
@@ -132,6 +132,17 @@ per language). Requests are sent with `store: false`. Environment knobs (`supaba
 | `TRANSCRIBE_MODEL` | `gpt-transcribe` | OpenAI's transcription model. Older models (`gpt-4o-transcribe`, shut down 2027-02-26) get the language and terms as `language` / `prompt`. |
 | `TRANSCRIBE_DEADLINE_MS` | `20000` | Bound on the OpenAI call; keep it below the app's 25 s request timeout. |
 | `TRANSCRIBE_DISABLED` | unset | `1` answers 503 before any database or model call (kill switch). |
+
+**Translation.** With the keyboard's *Translate as you speak* on, the request carries a
+`targetLanguage` and `cleanup` translates instead: its own system prompt (translation rules with
+cross-language examples, then the language pair, style, dictionary and snippets; cache key
+`murmur-translate`), never the cleanup rules and language packs, which all say to keep the spoken
+language. A reply still in the spoken language comes back `raw` with `reason: "untranslated"`, and
+every reply echoes `targetLanguage`. The app inserts a translation only when that echo is there, so a
+`cleanup` function deployed before translation, which ignores the target and cleans up in the
+spoken language, shows "Translation isn't available right now" instead of inserting the wrong
+language. Redeploy the function together with an app build that translates:
+`supabase functions deploy cleanup`.
 
 Anonymous (trial) users are limited to 10 cleanups and 10 transcriptions per minute and 6 000-character
 transcripts. On the free plan, once the week's words are used up, `transcribe` answers 402 too.

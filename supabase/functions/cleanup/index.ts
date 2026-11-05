@@ -1,7 +1,10 @@
 // POST /functions/v1/cleanup
 // Turns a transcript into the text the user meant to type, using an OpenAI model.
-// Body: CleanupRequest (see _shared/types.ts). Responses:
-//   200 { text, status: "cleaned" | "raw", words, model, ttftMs, totalMs, remaining }
+// Body: CleanupRequest (see _shared/types.ts). With `targetLanguage` set it translates instead.
+// Responses:
+//   200 { text, status: "cleaned" | "raw", reason, targetLanguage, words, model, ttftMs, totalMs, remaining }
+//       `reason` says why a reply is "raw" (refusal, guard such as "untranslated"); `targetLanguage`
+//       echoes the language a translation was written in, null for a cleanup.
 //   400 bad_request · 401 unauthorized · 402 limit_reached · 429 rate_limited
 //   502/503 cleanup_unavailable → the app inserts its locally formatted transcript instead.
 // Env: OPENAI_API_KEY (required), CLEANUP_MODEL (default gpt-6-astra), CLEANUP_EFFORT (reasoning
@@ -69,6 +72,8 @@ Deno.serve(async (request) => {
     return json({
       text: "",
       status: "raw",
+      reason: "empty",
+      targetLanguage: body.targetLanguage ?? null,
       words: 0,
       model: null,
       ttftMs: null,
@@ -115,6 +120,8 @@ Deno.serve(async (request) => {
     return json({
       text: outcome.text,
       status: outcome.status,
+      reason: outcome.reason ?? null,
+      targetLanguage: body.targetLanguage ?? null,
       words,
       model: outcome.model,
       ttftMs: outcome.ttftMs,

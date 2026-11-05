@@ -19,7 +19,11 @@ export interface CleanupRequest {
    * client did not say ("auto"). Only this sanitized value ever reaches the prompt.
    */
   language?: string;
-  /** Normalized BCP-47 output language. Omitted for ordinary same-language dictation. */
+  /**
+   * Normalized BCP-47 output language ("Translate as you speak"). Omitted for ordinary
+   * same-language dictation. The reply echoes it, so the app can tell a translation apart from a
+   * cleanup by a server that ignored it.
+   */
   targetLanguage?: string;
   style?: Style;
   dictionary?: DictionaryEntry[];
@@ -132,7 +136,9 @@ export function parseCleanupRequest(body: unknown): Parsed<CleanupRequest> {
       dictationId: raw.dictationId,
       transcript: raw.transcript,
       language: language.tag,
-      targetLanguage: targetLanguage.tag,
+      // "und" can name an auto-detected source, never an output language: such a request is
+      // cleaned up, and the reply's missing targetLanguage tells the app it wasn't translated.
+      targetLanguage: targetLanguage.tag?.split("-")[0] === "und" ? undefined : targetLanguage.tag,
       style: raw.style as Style | undefined,
       dictionary,
       snippets,

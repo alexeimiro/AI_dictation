@@ -1,12 +1,15 @@
 import {
   buildLanguageBlock,
   buildTranscriptMessage,
+  buildTranslationContext,
+  buildTranslationMessage,
   buildUserContext,
   CLEANUP_RULES,
   resolveLanguage,
   type ResolvedLanguage,
+  TRANSLATION_RULES,
 } from "./prompt.ts";
-import { guardOutput, tidyOutput } from "./text.ts";
+import { guardOutput, guardTranslation, tidyOutput } from "./text.ts";
 import type { CleanupRequest } from "./types.ts";
 
 /** OpenAI's flagship; override with the CLEANUP_MODEL secret without shipping an app update. */
@@ -28,7 +31,7 @@ export interface CleanupOutcome {
   status: "cleaned" | "raw";
   reason?: string;
   model: string;
-  /** Language pack that was applied ("en", "ru"). */
+  /** Language pack that was applied ("en", "ru"); for a translation, the one the source resolves to. */
   language: string;
   stopReason: string | null;
   /** Not measured: the reply isn't streamed, so it's null. */
@@ -60,11 +63,13 @@ export class CleanupAPIError extends Error {
 }
 
 /**
- * The system prompt in stability order: shared rules → language pack → per-user context. OpenAI
- * caches the longest identical prefix (from 1,024 tokens), so the parts every user of a language
+ * The system prompt in stability order. A cleanup: shared rules → language pack → per-user context.
+ * A translation (`targetLanguage` set): translation rules → per-user context with the language
+ * pair. OpenAI caches the longest identical prefix (from 1,024 tokens), so the parts every user
  * shares come first and the per-user context last.
  */
 export function buildInstructionParts(request: CleanupRequest, language: ResolvedLanguage): string[] {
+  if (request.targetLanguage) return [TRANSLATION_RULES, buildTranslationContext(request, language)];
   return [CLEANUP_RULES, buildLanguageBlock(language.rules), buildUserContext(request, language)];
 }
 
@@ -74,17 +79,22 @@ export function buildResponsesRequest(
   language: ResolvedLanguage,
   options: Pick<CleanupOptions, "model" | "effort">,
 ): Record<string, unknown> {
+  const target = request.targetLanguage;
   return {
     model: options.model,
     instructions: buildInstructionParts(request, language).join("\n\n"),
-    input: [{ role: "user", content: buildTranscriptMessage(request.transcript) }],
+    input: [{
+      role: "user",
+      content: target ? buildTranslationMessage(request.transcript, target) : buildTranscriptMessage(request.transcript),
+    }],
     reasoning: { effort: options.effort ?? DEFAULT_EFFORT },
     // Includes reasoning tokens; a 20,000-character transcript needs most of it.
     max_output_tokens: 16000,
     // Dictations are never kept on OpenAI's side as stored responses.
     store: false,
-    // Routes requests that share the language's prefix to the same cache.
-    prompt_cache_key: `murmur-cleanup-${language.key}`,
+    // Routes requests that share a prefix to the same cache: one per cleanup language, and one
+    // for every translation (the language pair is in the per-user context, after the prefix).
+    prompt_cache_key: target ? "murmur-translate" : `murmur-cleanup-${language.key}`,
   };
 }
 
@@ -147,7 +157,9 @@ export async function runCleanup(request: CleanupRequest, options: CleanupOption
   const text = tidyOutput(
     content.filter((part) => part.type === "output_text").map((part) => part.text ?? "").join(""),
   );
-  const guard = guardOutput(request.transcript, text, language.tag ?? "en", Boolean(request.targetLanguage));
+  const guard = request.targetLanguage
+    ? guardTranslation(request.transcript, text, { source: language.tag, target: request.targetLanguage })
+    : guardOutput(request.transcript, text, language.tag ?? "en");
   if (!guard.ok) {
     return { ...base, text: request.transcript, status: "raw", reason: guard.reason };
   }

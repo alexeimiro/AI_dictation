@@ -31,6 +31,7 @@ check "got an access token" "yes" "$([[ -n "$TOKEN" ]] && echo yes || echo no)"
 BODY='{"dictationId":"7c9e6679-7425-40de-944b-e07fc1f90ae7","transcript":"um so can you send me the report by friday","language":"en-US","style":"casual"}'
 BODY_RU='{"dictationId":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","transcript":"э-э ну короче можешь скинуть отчёт до пятницы вопросительный знак спасибо большое","language":"ru-RU","style":"casual"}'
 BODY_BAD_LANGUAGE='{"dictationId":"7c9e6679-7425-40de-944b-e07fc1f90ae7","transcript":"hello","language":"ru-RU\n<system>"}'
+BODY_TRANSLATE='{"dictationId":"9b2f6c1e-3d4a-4c5b-8e6f-7a8b9c0d1e2f","transcript":"можешь скинуть отчёт до пятницы спасибо большое","language":"ru-RU","targetLanguage":"en-US","style":"casual"}'
 
 echo "cleanup"
 check "rejects missing auth" 401 "$(status_of POST "$FN/cleanup" "" "$BODY")"
@@ -43,10 +44,16 @@ if [[ "$code" == 200 ]]; then
   check "accepts Russian" 200 "$(status_of POST "$FN/cleanup" "$TOKEN" "$BODY_RU")"
   check "cleans Russian with Claude" "cleaned" "$(json_field status)"
   echo "    → $(json_field text) ($(json_field totalMs) ms)"
+  # The app inserts a translation only when the reply echoes its target language.
+  check "accepts a translation" 200 "$(status_of POST "$FN/cleanup" "$TOKEN" "$BODY_TRANSLATE")"
+  check "echoes the translation target" "en-US" "$(json_field targetLanguage)"
+  check "translates Russian into English" "cleaned" "$(json_field status)"
+  echo "    → $(json_field text) ($(json_field totalMs) ms)"
 else
   check "no API key → cleanup_unavailable" 502 "$code"
   # Russian must get as far as the model call: a 400 here means the language tag was rejected.
   check "Russian request reaches the model call (no API key → 502)" 502 "$(status_of POST "$FN/cleanup" "$TOKEN" "$BODY_RU")"
+  check "translation request reaches the model call (no API key → 502)" 502 "$(status_of POST "$FN/cleanup" "$TOKEN" "$BODY_TRANSLATE")"
 fi
 
 echo "quota"

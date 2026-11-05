@@ -16,12 +16,26 @@ import {
 import {
   buildLanguageBlock,
   buildTranscriptMessage,
+  buildTranslationContext,
+  buildTranslationMessage,
   buildUserContext,
   CLEANUP_RULES,
+  describeLanguage,
   LANGUAGE_RULES,
   resolveLanguage,
+  TRANSLATION_RULES,
+  TRANSLATION_STYLES,
 } from "../_shared/prompt.ts";
-import { countWords, cyrillicShare, guardOutput, tidyOutput } from "../_shared/text.ts";
+import {
+  countWords,
+  cyrillicShare,
+  guardOutput,
+  guardTranslation,
+  scriptOf,
+  scriptShare,
+  tidyOutput,
+  wordOverlap,
+} from "../_shared/text.ts";
 import { type CleanupRequest, LIMITS, normalizeLanguageTag, parseCleanupRequest } from "../_shared/types.ts";
 
 const request: CleanupRequest = {
@@ -128,21 +142,194 @@ Deno.test("a Russian request gets the Russian pack and its own cache key", async
   assertStringIncludes(instructions, "Language: ru-RU (");
 });
 
-Deno.test("translation requests name the target and allow the expected script change", async () => {
-  const translatedRequest: CleanupRequest = { ...russianRequest, targetLanguage: "tr-TR" };
+const translationRequest: CleanupRequest = { ...russianRequest, targetLanguage: "tr-TR" };
+
+Deno.test("a translation gets the translation prompt, not the cleanup rules and language pack", async () => {
   const captured: Captured = {};
   const outcome = await runCleanup(
-    translatedRequest,
+    translationRequest,
     options(fakeFetch(reply("Raporu cuma gününe kadar gönderebilir misin? Çok teşekkürler!"), captured)),
   );
   assertEquals(outcome.status, "cleaned");
-  const instructions = captured.body!.instructions as string;
-  assertStringIncludes(instructions, "Source language: ru-RU.");
-  assertStringIncludes(instructions, "Translation target: Turkish");
-  assertStringIncludes(instructions, "(tr-TR). Translation mode is ON.");
-  assertStringIncludes(instructions, "never return the source-language transcript");
-  assertNotMatch(instructions, /Language: ru-RU \(keep the output in the language that was spoken\)/);
-  assert(guardOutput(russianRequest.transcript, outcome.text, "ru-RU", true).ok);
+  assertEquals(outcome.text, "Raporu cuma gününe kadar gönderebilir misin? Çok teşekkürler!");
+  const body = captured.body!;
+  const source = resolveLanguage("ru-RU", russianRequest.transcript);
+  assertEquals(body.instructions, [TRANSLATION_RULES, buildTranslationContext(translationRequest, source)].join("\n\n"));
+  assertEquals(body.prompt_cache_key, "murmur-translate");
+  assertEquals(body.input, [{ role: "user", content: buildTranslationMessage(russianRequest.transcript, "tr-TR") }]);
+
+  // The cleanup rules, the language pack and their 14 same-language examples all say to keep the
+  // spoken language; with them in the prompt the model returned cleaned-up Russian.
+  const instructions = body.instructions as string;
+  assertFalse(instructions.includes(CLEANUP_RULES));
+  assertFalse(instructions.includes(buildLanguageBlock(LANGUAGE_RULES.ru)));
+  assertNotMatch(instructions, /keep the output in the language that was spoken|Keep it Russian/);
+  assertStringIncludes(instructions, "Source language: Russian (Russia) [ru-RU].");
+  assertStringIncludes(instructions, "Target language: Turkish (Türkiye) [tr-TR], written in Latin script.");
+  const message = buildTranslationMessage(russianRequest.transcript, "tr-TR");
+  assert(message.startsWith(buildTranscriptMessage(russianRequest.transcript)), message);
+  assert(message.endsWith("\n\nTranslate the transcript into Turkish (Türkiye) [tr-TR]."), message);
+});
+
+Deno.test("a translation that comes back in the spoken language is rejected as untranslated", async () => {
+  // The reported bug: translation on, and the model returned a cleanup of the Russian instead.
+  const outcome = await runCleanup(
+    translationRequest,
+    options(fakeFetch(reply("Можешь скинуть отчёт до пятницы? Спасибо большое!"))),
+  );
+  assertEquals(outcome.status, "raw");
+  assertEquals(outcome.reason, "untranslated");
+  // The same reply is a good cleanup when nothing asked for a translation.
+  const cleanup = await runCleanup(russianRequest, options(fakeFetch(reply("Можешь скинуть отчёт до пятницы? Спасибо большое!"))));
+  assertEquals(cleanup.status, "cleaned");
+});
+
+Deno.test("translation context: the language pair, the target's style, the dictionary", () => {
+  const auto = buildTranslationContext(
+    { ...translationRequest, language: undefined },
+    resolveLanguage(undefined, russianRequest.transcript),
+  );
+  assertStringIncludes(auto, "Source language: not given; it is whatever language the transcript is in.");
+
+  // The style is the target language's: the output is written in it.
+  const intoRussian = buildTranslationContext({ ...request, targetLanguage: "ru-RU", style: "veryCasual" }, resolveLanguage("en-US"));
+  assertStringIncludes(intoRussian, "Style: " + LANGUAGE_RULES.ru.styles.veryCasual);
+  const intoEnglish = buildTranslationContext(
+    { ...russianRequest, targetLanguage: "en-US", style: "veryCasual" },
+    resolveLanguage("ru-RU"),
+  );
+  assertStringIncludes(intoEnglish, "Style: " + LANGUAGE_RULES.en.styles.veryCasual);
+  assertFalse(intoEnglish.includes("«я»"), "a Russian style rule must not reach an English translation");
+  const intoTurkish = buildTranslationContext({ ...translationRequest, style: "formal" }, resolveLanguage("ru-RU"));
+  assertStringIncludes(intoTurkish, "Style: " + TRANSLATION_STYLES.formal);
+
+  const intoGerman = buildTranslationContext({ ...request, targetLanguage: "de-DE" }, resolveLanguage("en-US"));
+  assertStringIncludes(intoGerman, "Valerio ← valeria");
+  assertStringIncludes(intoGerman, '⟦s:1a2b3c4d⟧ — trigger phrase: "my calendar link"');
+  const intoJapanese = buildTranslationContext({ ...request, targetLanguage: "ja-JP" }, resolveLanguage("en-US"));
+  assertStringIncludes(intoJapanese, "Target language: Japanese (Japan) [ja-JP], written in Japanese script.");
+  assertEquals(describeLanguage("zh-Hans-CN"), "Chinese (Simplified, China) [zh-Hans-CN]");
+  assertEquals(describeLanguage("en-US"), "American English [en-US]");
+});
+
+Deno.test("the translation rules are a stable prefix that clears the caching minimum", () => {
+  // ~4 characters per token for English prose; the Cyrillic and Japanese examples cost more.
+  assert(TRANSLATION_RULES.length / 4 > 1100, `the translation prefix is only ~${Math.round(TRANSLATION_RULES.length / 4)} tokens`);
+  assertFalse(/\$\{|\d{4}-\d{2}-\d{2}/.test(TRANSLATION_RULES), "no volatile content in the cached prefix");
+  assertEquals(TRANSLATION_RULES.match(/<example source="[A-Za-z]+" target="[A-Za-z]+">/g)?.length, 8);
+});
+
+Deno.test("translation guard: a script change is expected, staying in the spoken script is not", () => {
+  const ruToEn = { source: "ru-RU", target: "en-US" };
+  const russian = russianRequest.transcript;
+  assert(guardTranslation(russian, "Can you send me the report by Friday? Thanks a lot!", ruToEn).ok);
+  assertEquals(guardTranslation(russian, "Можешь скинуть отчёт до пятницы? Спасибо большое!", ruToEn), {
+    ok: false,
+    reason: "untranslated",
+  });
+  // A cleanup that wrote the brands in Latin is still Russian.
+  assertEquals(
+    guardTranslation(
+      "я запушил коммит в гитхаб и написал в телеграм что фича готова",
+      "Я запушил коммит в GitHub и написал в Telegram, что фича готова.",
+      ruToEn,
+    ),
+    { ok: false, reason: "untranslated" },
+  );
+  // An auto-detected Russian source is judged by its script just the same.
+  assertEquals(guardTranslation(russian, "Можешь скинуть отчёт до пятницы? Спасибо большое!", { target: "en-US" }), {
+    ok: false,
+    reason: "untranslated",
+  });
+
+  const enToRu = { source: "en-US", target: "ru-RU" };
+  assertEquals(guardTranslation(request.transcript, "Can you send me the report by Friday?", enToRu), {
+    ok: false,
+    reason: "untranslated",
+  });
+  // Brands, code and URLs stay Latin, so a translation into Cyrillic may keep plenty of Latin.
+  assert(guardTranslation(
+    "deploy the next js app to vercel with github actions",
+    "Задеплой приложение Next.js на Vercel через GitHub Actions",
+    enToRu,
+  ).ok);
+  assert(guardTranslation("open github actions", "Открой GitHub Actions", enToRu).ok);
+  assert(guardTranslation("iphone seventeen pro", "iPhone 17 Pro", enToRu).ok, "too few letters to judge");
+  assert(guardTranslation("you can book time here my calendar link", "Время можно забронировать здесь: ⟦s:1a2b3c4d⟧", enToRu).ok);
+
+  const enToJa = { source: "en-US", target: "ja-JP" };
+  assert(guardTranslation("send the pdf to tanaka on slack", "田中さんにSlackでPDFを送って", enToJa).ok);
+  assertEquals(guardTranslation("hey can you send me the report by friday", "Hey, can you send me the report by Friday?", enToJa), {
+    ok: false,
+    reason: "untranslated",
+  });
+  assertEquals(
+    guardTranslation(russian, "Можешь скинуть отчёт до пятницы? Спасибо большое!", { source: "ru-RU", target: "zh-CN" }),
+    { ok: false, reason: "untranslated" },
+  );
+});
+
+Deno.test("translation guard: within one script the words show whether it was translated", () => {
+  const enToTr = { source: "en-US", target: "tr-TR" };
+  const english = "um so can you send me the report by friday thanks so much";
+  assert(guardTranslation(english, "Raporu cumaya kadar gönderebilir misin? Çok teşekkürler!", enToTr).ok);
+  assertEquals(guardTranslation(english, "Can you send me the report by Friday? Thanks so much!", enToTr), {
+    ok: false,
+    reason: "untranslated",
+  });
+  assert(guardTranslation(
+    "tell john that the meeting with google is at five",
+    "Sag John, dass das Meeting mit Google um fünf ist.",
+    { source: "en-US", target: "de-DE" },
+  ).ok, "names and loanwords may stay");
+
+  const ruToUk = { source: "ru-RU", target: "uk-UA" };
+  const plan = "я думаю что мы должны встретиться завтра утром чтобы обсудить проект";
+  assert(guardTranslation(plan, "Я думаю, що ми повинні зустрітися завтра вранці, щоб обговорити проєкт.", ruToUk).ok);
+  assertEquals(guardTranslation(plan, "Я думаю, что мы должны встретиться завтра утром, чтобы обсудить проект.", ruToUk), {
+    ok: false,
+    reason: "untranslated",
+  });
+
+  // The speaker may have spoken the target language itself: then a cleanup is the right output.
+  const spokenEnglish = "um so can you send me the report by friday";
+  assert(guardTranslation(spokenEnglish, "Can you send me the report by Friday?", { target: "en-US" }).ok, "auto-detected");
+  assert(
+    guardTranslation(spokenEnglish, "Can you send me the report by Friday?", { source: "ru-RU", target: "en-US" }).ok,
+    "not in the source language's script",
+  );
+});
+
+Deno.test("translation guard: empty and runaway replies, and room for longer translations", () => {
+  const ruToEn = { source: "ru-RU", target: "en-US" };
+  assertEquals(guardTranslation("можешь скинуть отчёт до пятницы", "", ruToEn), { ok: false, reason: "empty" });
+  const answer = "The best way to learn Python is to start with the official tutorial, then build small projects " +
+    "every day, read other people's code, and ask questions in the community forums when you get stuck.";
+  assertEquals(guardTranslation("как лучше всего выучить питон", answer, ruToEn), { ok: false, reason: "too_long" });
+  assert(guardTranslation("как лучше всего выучить питон", "What's the best way to learn Python?", ruToEn).ok);
+  // Turkish packs into one word what English says in several; that is no runaway reply.
+  assert(guardTranslation(
+    "yarın sabah erkenden markete gidip ekmek süt ve yumurta almam gerekiyor sonra da işe gideceğim",
+    "Tomorrow morning I need to go to the store early and buy bread, milk and eggs, and then I'll go to work.",
+    { source: "tr-TR", target: "en-US" },
+  ).ok);
+});
+
+Deno.test("script and word helpers", () => {
+  assertEquals(scriptOf("ru-RU"), "Cyrl");
+  assertEquals(scriptOf("tr-TR"), "Latn");
+  assertEquals(scriptOf("ja-JP"), "Jpan");
+  assertEquals(scriptOf("zh-TW"), "Hant");
+  assertEquals(scriptOf("sr-Latn-RS"), "Latn");
+  assertEquals(scriptShare("Можешь скинуть отчёт до пятницы?", "Cyrl"), 1);
+  assertEquals(scriptShare("Can you send me the report by Friday?", "Cyrl"), 0);
+  assertEquals(scriptShare("金曜日までにレポートを送ってくれる？", "Jpan"), 1, "kana, kanji and «ー» all count");
+  assertEquals(scriptShare("Привет", "Cyrl"), null, "under 12 letters");
+  assertEquals(scriptShare("Время можно забронировать: ⟦s:1a2b3c4d⟧", "Cyrl"), 1, "placeholders are not Latin text");
+  assertEquals(scriptShare("Some text here, long enough", "Xyzw"), null, "unknown script");
+  assertEquals(wordOverlap("can you send me the report", "Can you send me the report?"), 1);
+  assertEquals(wordOverlap("send it at 5", "Send it at 5."), null, "under four words once numbers are skipped");
+  assertEquals(wordOverlap("um so can you send me the report by friday", "Raporu cumaya kadar gönderebilir misin?"), 0);
 });
 
 Deno.test("refusals and truncation fall back to the transcript", async () => {
@@ -327,6 +514,10 @@ Deno.test("request validation", () => {
   }
   const translated = parseCleanupRequest({ ...request, targetLanguage: "tr_TR" });
   assert(translated.ok && translated.value.targetLanguage === "tr-TR");
+  for (const targetLanguage of ["und", "und-Latn"]) {
+    const undetermined = parseCleanupRequest({ ...request, targetLanguage });
+    assert(undetermined.ok && undetermined.value.targetLanguage === undefined, `${targetLanguage} is not an output language`);
+  }
   assertFalse(parseCleanupRequest({ ...request, language: "ru-RU\n<system>" }).ok);
   assertFalse(parseCleanupRequest({ ...request, targetLanguage: "tr-TR\n<system>" }).ok);
   assertFalse(parseCleanupRequest({ ...request, language: "a".repeat(36) }).ok);

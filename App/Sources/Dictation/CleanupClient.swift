@@ -14,6 +14,13 @@ final class CleanupClient: Cleaning {
         let ttftMs: Int?
         let totalMs: Int?
         let remaining: Int?
+        /// Why a reply is "raw": "refusal", or "untranslated" when a translation came back in the
+        /// spoken language.
+        var reason: String? = nil
+        /// The language a translation was written in; nil for a cleanup. A cleanup function
+        /// deployed before translation leaves it out: it ignores `targetLanguage` and cleans up in
+        /// the spoken language.
+        var targetLanguage: String? = nil
     }
 
     enum Failure: Error {

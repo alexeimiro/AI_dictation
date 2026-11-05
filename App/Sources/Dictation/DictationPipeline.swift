@@ -179,9 +179,18 @@ final class DictationPipeline {
             outcome.cleanupMs = Self.milliseconds(since: started)
             outcome.ttftMs = response.ttftMs
             outcome.model = response.model
-            if response.status == "cleaned" {
+            if let targetLanguage, !Self.isTranslation(response, into: targetLanguage) {
+                // A cleanup in the spoken language must never be inserted as the translation.
+                outcome.errorReason = "The cleanup service didn't translate. Deploy the latest cleanup function."
+                outcome.message = "Translation isn't available right now. Please try again later."
+            } else if response.status == "cleaned" {
                 outcome.text = SnippetPlaceholders.substitute(in: response.text, snippets: snippets)
                 outcome.status = .cleaned
+            } else if targetLanguage != nil {
+                outcome.errorReason = response.reason == "untranslated"
+                    ? "The translation came back in the spoken language."
+                    : "The translation was unusable (\(response.reason ?? "no reason given"))."
+                outcome.message = "Couldn't translate that. Please try again."
             } else {
                 outcome.errorReason = "The cleanup returned the transcript unchanged."
             }
@@ -197,6 +206,14 @@ final class DictationPipeline {
             logger.notice("Cleanup unavailable, using local formatting: \(String(describing: error), privacy: .public)")
         }
         return outcome
+    }
+
+    /// A reply is a translation only when the server says which language it wrote. A cleanup
+    /// function deployed before translation ignores `targetLanguage` and answers with a cleanup in
+    /// the spoken language, marked "cleaned" like any other.
+    private static func isTranslation(_ response: CleanupClient.Response, into target: String) -> Bool {
+        guard let written = response.targetLanguage else { return false }
+        return DictationLanguage(tag: written).languageCode == DictationLanguage(tag: target).languageCode
     }
 
     /// What the keyboard shows when no text came back.
