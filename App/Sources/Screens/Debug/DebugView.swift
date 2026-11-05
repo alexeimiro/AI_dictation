@@ -28,7 +28,8 @@ struct DebugView: View {
             Section {
                 Toggle("Return to the app automatically", isOn: $settings.autoReturn)
                     .tint(Palette.toggleGreen)
-                LabeledContent("Last time", value: model.hostReturn.lastOutcome ?? "—")
+                LabeledContent("Last time", value: model.hostReturn.lastOutcome
+                    ?? (model.hostReturn.isAvailable ? "—" : "Not available on this iOS"))
             } header: {
                 Text("After the keyboard opens Murmur")
             } footer: {

@@ -26,6 +26,9 @@ final class HostReturn {
     @ObservationIgnored private let observer = KeyboardHostObserver()
     @ObservationIgnored private let logger = Logger(subsystem: "Murmur", category: "Return")
 
+    /// False once an iOS update removes what the observer reads; then it's always swipe-back.
+    var isAvailable: Bool { observer.isAttached }
+
     /// Once dictation `requestId` is recording, reopens the app the keyboard was used in. Gives up
     /// when `shouldContinue` turns false (the user closed the swipe-back screen) or the app left
     /// the screen.
@@ -102,6 +105,7 @@ private final class KeyboardHostObserver: NSObject, @unchecked Sendable {
     private let remoteKeyboards: NSObject?
 
     var log: KeyboardHostLog { lock.withLock { _log } }
+    var isAttached: Bool { remoteKeyboards != nil }
 
     override init() {
         remoteKeyboards = Self.sharedRemoteKeyboards()

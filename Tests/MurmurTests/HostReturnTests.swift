@@ -5,6 +5,13 @@ import Testing
 struct HostReturnTests {
     private let linkAt = Date(timeIntervalSince1970: 1_800_000_000)
 
+    /// A canary: when an iOS update removes what auto-return reads, this fails before users
+    /// quietly lose it (they'd get the swipe-back screen every time).
+    @MainActor
+    @Test func uikitStillHasWhatAutoReturnReads() {
+        #expect(HostReturn().isAvailable)
+    }
+
     @Test func knownAppsReopenByTheirScheme() {
         #expect(HostAppCatalog.entry(forBundleID: "net.whatsapp.WhatsApp")?.url.absoluteString == "whatsapp://")
         #expect(HostAppCatalog.entry(forBundleID: "com.apple.mobilenotes")?.name == "Notes")
