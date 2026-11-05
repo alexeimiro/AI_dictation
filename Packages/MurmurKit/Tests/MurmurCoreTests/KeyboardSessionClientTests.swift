@@ -176,6 +176,34 @@ struct KeyboardSessionClientTests {
         #expect(host.outcomes == [.ready], "inserting a held result is the user's own tap")
     }
 
+    @Test func matchingLatestResultIsInsertedWhenRequestFileIsUnavailable() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport)
+        client.host = host
+        app.publish(.ready)
+        client.activate()
+
+        client.micTapped()
+        guard case .starting(let requestId) = client.phase else { return }
+        #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
+        client.stopTapped()
+
+        let result = DictationResult(
+            requestId: requestId, documentIdentifier: host.currentDocumentIdentifier,
+            text: "Recovered immediately.", status: .cleaned, createdAt: Date())
+        try transport.payloads.write(result: result)
+        try FileManager.default.removeItem(at: transport.payloads.container
+            .directory("results").appendingPathComponent("\(requestId.uuidString).json"))
+        transport.post(.resultReady)
+
+        #expect(await waitUntil { host.inserted.count == 1 })
+        #expect(host.inserted.map(\.text) == ["Recovered immediately."])
+        #expect(client.pendingResult == nil)
+        #expect(host.outcomes == [.ready])
+    }
+
     @Test func emptyResultIsAProblemAndCancellingIsSilent() async throws {
         let transport = InMemoryIPCTransport()
         let app = FakeApp(transport: transport)

@@ -404,6 +404,15 @@ public final class KeyboardSessionClient {
                 deliver(result)
                 return
             }
+            // The app also saves every completed dictation as the latest result. If the
+            // request-specific file is briefly unavailable (for example after the extension was
+            // suspended), recover the matching saved result immediately instead of making the
+            // user wait or tap "Insert last dictation". The ID check prevents an older dictation
+            // from being inserted for the current recording.
+            if let latest = transport.payloads.latestResult(), latest.requestId == id {
+                deliver(latest)
+                return
+            }
         default:
             break
         }
