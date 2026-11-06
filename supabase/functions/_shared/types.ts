@@ -1,4 +1,4 @@
-export type Style = "formal" | "casual" | "veryCasual" | "excited";
+export type Style = "formal" | "casual" | "veryCasual" | "excited" | "verbatim";
 
 export interface DictionaryEntry {
   term: string;
@@ -32,7 +32,7 @@ export interface CleanupRequest {
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 
-const STYLES: Style[] = ["formal", "casual", "veryCasual", "excited"];
+const STYLES: Style[] = ["formal", "casual", "veryCasual", "excited", "verbatim"];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = /^⟦s:[0-9a-f]{8}⟧$/;
 /** Characters a client may send as a language tag. Anything else is a 400, never prompt text. */

@@ -468,6 +468,25 @@ Deno.test("Russian styles replace English ones", () => {
   assertStringIncludes(english, LANGUAGE_RULES.en.styles.veryCasual);
 });
 
+Deno.test("word for word style keeps the speaker's words and translates literally", () => {
+  const parsed = parseCleanupRequest({ ...request, style: "verbatim" });
+  assert(parsed.ok && parsed.value.style === "verbatim");
+
+  const english = buildUserContext({ ...request, style: "verbatim" }, resolveLanguage("en-US"));
+  assertStringIncludes(english, "Style: " + LANGUAGE_RULES.en.styles.verbatim);
+  assertStringIncludes(english, "including self-corrections");
+  const russian = buildUserContext({ ...russianRequest, style: "verbatim" }, resolveLanguage("ru-RU"));
+  assertStringIncludes(russian, "Style: " + LANGUAGE_RULES.ru.styles.verbatim);
+
+  const intoEnglish = buildTranslationContext(
+    { ...russianRequest, targetLanguage: "en-US", style: "verbatim" },
+    resolveLanguage("ru-RU"),
+  );
+  assertStringIncludes(intoEnglish, "translate literally");
+  const intoTurkish = buildTranslationContext({ ...translationRequest, style: "verbatim" }, resolveLanguage("ru-RU"));
+  assertStringIncludes(intoTurkish, "Style: " + TRANSLATION_STYLES.verbatim);
+});
+
 Deno.test("the context writes only the sanitized tag", () => {
   const parsed = parseCleanupRequest({ ...russianRequest, language: "ru-RU-u-ca-gregory" });
   assert(parsed.ok);

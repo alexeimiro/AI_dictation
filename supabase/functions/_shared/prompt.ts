@@ -105,6 +105,8 @@ Capitalization. Sentence starts, proper nouns, "I", days, months, languages, nat
       veryCasual:
         'Very casual: all lowercase except proper nouns and "I", minimal punctuation, no trailing period.',
       excited: "Excited: standard capitalization and an upbeat tone, with exclamation marks where natural.",
+      verbatim:
+        "Word for word: this style overrides the rules above wherever they would change the wording. Keep every word the speaker said, in the order they said it, including self-corrections, hedges and repetitions; remove only pure sound fillers (um, uh, er, hmm). Do not paraphrase, reorder, shorten, polish or improve anything. Only add standard capitalization and punctuation, turn spoken punctuation commands into symbols, and fix clear recognition errors. When translating, translate literally, word for word and clause for clause, keeping the speaker's sentence structure and word order wherever the grammar allows; do not rephrase, smooth out, summarize or swap in idioms, and translate self-corrections as spoken.",
     },
   },
   ru: {
@@ -173,6 +175,8 @@ Lists. «во-первых… во-вторых… в-третьих», «пер
         "Very casual: all lowercase except proper nouns and Latin acronyms (Russian has no capital-I rule: «я» stays lowercase), minimal punctuation, no trailing period.",
       excited:
         "Excited: standard capitalization and an upbeat tone, with exclamation marks where natural — one «!» at a time, never «!!!».",
+      verbatim:
+        "Word for word: this style overrides the rules above wherever they would change the wording. Keep every word the speaker said, in the order they said it, including self-corrections, hedges and repetitions, and words such as «ну», «типа», «короче», «вот»; remove only pure sound fillers («э», «э-э», «эм», «мм»). Do not paraphrase, reorder, shorten, polish or improve anything. Only add standard capitalization and punctuation, turn spoken punctuation commands into symbols, and fix clear recognition errors. When translating, translate literally, word for word and clause for clause, keeping the speaker's sentence structure and word order wherever the grammar allows; do not rephrase, smooth out, summarize or swap in idioms, and translate self-corrections as spoken.",
     },
   },
 } satisfies Record<string, LanguageRules>;
@@ -336,6 +340,8 @@ export const TRANSLATION_STYLES: Record<Style, string> = {
   casual: "Casual: standard capitalization, lighter punctuation (a single short sentence may end without a period).",
   veryCasual: "Very casual: lowercase except where the target language requires capitals, minimal punctuation, no trailing period.",
   excited: "Excited: standard capitalization and an upbeat tone, with exclamation marks where natural.",
+  verbatim:
+    "Word for word: this style overrides the rules above wherever they would change the wording. Translate literally, word for word and clause for clause, keeping the speaker's sentence structure and word order wherever the target language's grammar allows. Keep every word that carries meaning, including self-corrections, hedges and repetitions; drop only pure sound fillers (um, uh, «э», «мм»). Do not rephrase, smooth out, summarize, polish or swap in idioms.",
 };
 
 /** "Turkish (Türkiye) [tr-TR]". The tag is already normalized, so it is a safe fallback name. */

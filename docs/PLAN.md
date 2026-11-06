@@ -228,7 +228,7 @@ supabase/   config.toml, migrations/, functions/{cleanup,auth-lookup,signup-stat
 - **Snippets:**
   - Fields: Snippet (under 60 characters) and Expansion.
   - Errors: "Please enter a snippet", "Snippet too long", "Snippet already exists".
-- **Style:** "Your default style": Formal. / Casual / very casual / Excited!, with a per-dictation pill on the keyboard. Since iOS 26.4 there's no per-app context.
+- **Style:** "Your default style": Formal. / Casual / very casual / Excited! / Word for word (exact words, literal translation), with a per-dictation pill on the keyboard. Since iOS 26.4 there's no per-app context.
 - **Scratchpad:**
   - Notes by date, empty state "Create a note".
   - In-app mic: the app is in the foreground, so it records directly.

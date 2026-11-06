@@ -160,6 +160,11 @@ struct CleanupGateTests {
         #expect(CleanupGate.needsModel("can you send me the report by friday", style: .casual))
     }
 
+    @Test func wordForWordSkipsTheModelUnlessACueNeedsIt() {
+        #expect(!CleanupGate.needsModel("Can you send me the report by Friday?", style: .verbatim))
+        #expect(CleanupGate.needsModel("Send it today comma please.", style: .verbatim))
+    }
+
     @Test func cuesAreWholeWords() {
         #expect(!CleanupGate.needsModel("Check the dashboard and the dotted line.", style: .casual))
         #expect(!CleanupGate.needsModel("Стоит купить сорочку.", style: .casual))

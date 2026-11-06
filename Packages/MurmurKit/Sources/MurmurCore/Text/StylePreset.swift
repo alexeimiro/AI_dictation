@@ -6,6 +6,8 @@ public enum StylePreset: String, Codable, Sendable, CaseIterable, Identifiable {
     case casual
     case veryCasual
     case excited
+    /// Keeps the speaker's exact words; translations are literal, never rephrased.
+    case verbatim
 
     public var id: String { rawValue }
 
@@ -15,6 +17,7 @@ public enum StylePreset: String, Codable, Sendable, CaseIterable, Identifiable {
         case .casual: "Casual"
         case .veryCasual: "very casual"
         case .excited: "Excited!"
+        case .verbatim: "Word for word"
         }
     }
 
@@ -24,6 +27,7 @@ public enum StylePreset: String, Codable, Sendable, CaseIterable, Identifiable {
         case .casual: "Caps + less punctuation"
         case .veryCasual: "No caps + less punctuation"
         case .excited: "More exclamations"
+        case .verbatim: "Your exact words, no rephrasing"
         }
     }
 
@@ -38,6 +42,8 @@ public enum StylePreset: String, Codable, Sendable, CaseIterable, Identifiable {
             "Very casual: all lowercase except proper nouns and \"I\", minimal punctuation, no trailing period."
         case .excited:
             "Excited: standard capitalization, upbeat tone with exclamation marks where natural."
+        case .verbatim:
+            "Word for word: keep every word the speaker said, in order, including self-corrections; remove only sound fillers (um, uh). No paraphrasing; translations are literal."
         }
     }
 }
