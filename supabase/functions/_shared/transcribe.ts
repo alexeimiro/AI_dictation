@@ -62,10 +62,14 @@ export function parseTranscribeRequest(body: unknown): Parsed<TranscribeRequest>
   };
 }
 
-/** "ru-RU" → "ru"; OpenAI takes ISO-639-1 language codes. */
+/** Apple tags whose language OpenAI knows under another ISO-639-1 code. */
+const ISO_ALIASES: Record<string, string> = { nb: "no", nn: "no", fil: "tl", iw: "he", in: "id" };
+
+/** "ru-RU" → "ru"; OpenAI takes ISO-639-1 language codes ("nb-NO" → "no", "fil-PH" → "tl"). */
 export function isoLanguage(tag: string | undefined | null): string | null {
   if (!tag) return null;
-  const code = tag.split("-")[0].toLowerCase();
+  const primary = tag.split("-")[0].toLowerCase();
+  const code = ISO_ALIASES[primary] ?? primary;
   return /^[a-z]{2}$/.test(code) ? code : null;
 }
 

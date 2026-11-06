@@ -52,6 +52,8 @@ Deno.test("language is optional and odd tags fall back to detection", () => {
   assertEquals(parsed.value.language, null);
   assertEquals(isoLanguage("en-US"), "en");
   assertEquals(isoLanguage("yue-Hant"), null);
+  assertEquals(isoLanguage("nb-NO"), "no");
+  assertEquals(isoLanguage("fil-PH"), "tl");
   assertEquals(isoLanguage(undefined), null);
 });
 

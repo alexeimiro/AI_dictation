@@ -92,12 +92,12 @@ final class KeyboardModel {
 
     var languageChoices: [DictationLanguage] {
         let preferred = [primaryLanguage] + (secondaryLanguage.map { [$0] } ?? [])
-            + recentLanguages + Self.commonLanguages
+            + recentLanguages + Self.menuLanguages
         return [DictationLanguage.automatic] + preferred.uniqued(by: \DictationLanguage.languageCode)
     }
 
     var targetLanguageChoices: [DictationLanguage] {
-        (recentLanguages + Self.commonLanguages + [primaryLanguage])
+        (recentLanguages + [primaryLanguage] + Self.menuLanguages)
             .filter { !$0.isAutomatic && $0.languageCode != effectiveLanguage.languageCode }
             .uniqued(by: \DictationLanguage.languageCode)
     }
@@ -120,12 +120,22 @@ final class KeyboardModel {
         return "Speak \(effectiveLanguage.localizedName) → Type in \(targetLanguage.localizedName)"
     }
 
-    /// A compact, useful target list. Recognition can use these through the cloud even when an
-    /// on-device speech model is not installed.
+    /// Every language OpenAI's speech-to-text and GPT translation support (the Whisper language
+    /// list). Recognition reaches them through the cloud even when no on-device speech model is
+    /// installed. English stays first: it is the fallback target. Menus show `menuLanguages`.
     static let commonLanguages: [DictationLanguage] = [
-        "en-US", "ru-RU", "tr-TR", "de-DE", "es-ES", "fr-FR", "it-IT", "pt-BR",
-        "pl-PL", "uk-UA", "zh-CN", "ja-JP", "ko-KR", "ar-SA", "hi-IN",
+        "en-US", "af-ZA", "ar-SA", "hy-AM", "az-AZ", "be-BY", "bs-BA", "bg-BG", "ca-ES", "zh-CN",
+        "hr-HR", "cs-CZ", "da-DK", "nl-NL", "et-EE", "fi-FI", "fr-FR", "gl-ES", "de-DE", "el-GR",
+        "he-IL", "hi-IN", "hu-HU", "is-IS", "id-ID", "it-IT", "ja-JP", "kn-IN", "kk-KZ", "ko-KR",
+        "lv-LV", "lt-LT", "mk-MK", "ms-MY", "mr-IN", "mi-NZ", "ne-NP", "nb-NO", "fa-IR", "pl-PL",
+        "pt-BR", "ro-RO", "ru-RU", "sr-RS", "sk-SK", "sl-SI", "es-ES", "sw-KE", "sv-SE", "tl-PH",
+        "ta-IN", "th-TH", "tr-TR", "uk-UA", "ur-PK", "vi-VN", "cy-GB",
     ].map(DictationLanguage.init(tag:))
+
+    /// `commonLanguages` in alphabetical order of their names in the UI language.
+    static let menuLanguages: [DictationLanguage] = commonLanguages.sorted {
+        $0.localizedName.localizedStandardCompare($1.localizedName) == .orderedAscending
+    }
 
     func update(from client: KeyboardSessionClient) {
         phase = client.phase
