@@ -275,6 +275,7 @@ extension StylePreset {
         case .casual: "Caps + Less punctuation"
         case .veryCasual: "no caps, less punctuation"
         case .excited: "More exclamations!"
+        case .verbatim: "Your exact words, no rephrasing"
         }
     }
 }
