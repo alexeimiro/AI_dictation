@@ -13,6 +13,8 @@ final class AppModel {
     let assets: SpeechAssetManager
     let languages: LanguageSettingsModel
     let history: HistoryStore
+    /// Each dictation's timings, for the Debug screen.
+    let timingsLog: TimingsLog
     let settings = SettingsModel()
     let pipeline: DictationPipeline
     let onboarding: OnboardingStore
@@ -28,12 +30,19 @@ final class AppModel {
     let hostReturn = HostReturn()
     /// A start link arrived without a valid one-time token (e.g. from a web page).
     var confirmUntrustedStart = false
+    /// The account the backend signs in with, for the signed-out card and the sign-in sheet; nil
+    /// without a backend.
+    let account: AccountModel?
+    /// The "Sign in again" sheet while it's up, and where it opened. RootView presents it, so it
+    /// also opens during onboarding; the swipe-back screen and the start dialog close it first.
+    var signInSheet: SignInAgainView.Start?
     let router = Router()
     /// `-route <name>` and `-fixtures` launch arguments (screenshot runs).
     let launchOptions: LaunchOptions
     var launchRoute: LaunchRoute? { launchOptions.route }
     /// When the app last became active; nil while inactive or in the background.
     @ObservationIgnored private var activeSince: Date?
+    private let backend: Backend?
 
     init(arguments: [String] = ProcessInfo.processInfo.arguments) {
         let container = SharedContainer.appGroup() ?? .temporary()
@@ -45,8 +54,12 @@ final class AppModel {
         self.history = history
         if launchOptions.useFixtures { HistoryFixtures.seed(history) }
         if launchOptions.onboardingStep == .complete { OnboardingFixtures.seedCompletedHistory(history) }
-        let backend = Backend.fromInfoPlist()
-        let cleanup = CleanupClient(backend: backend)
+        let backend = Self.makeBackend(launchOptions: launchOptions)
+        self.backend = backend
+        account = backend?.account
+        signInSheet = launchOptions.accountSheet
+        let functions = backend.map { EdgeFunctionClient(backend: $0) }
+        let cleanup = CleanupClient(functions: functions)
         let pipeline = DictationPipeline(cleanup: cleanup)
         self.pipeline = pipeline
         let assets = SpeechAssetManager()
@@ -54,13 +67,16 @@ final class AppModel {
         let practiceBuffer = PracticeTranscriptBuffer(
             history: history, fileURL: launchOptions.usesOnboardingFixtures ? nil : PracticeTranscriptBuffer.defaultFileURL)
         self.practiceBuffer = practiceBuffer
+        let timingsLog = TimingsLog()
+        self.timingsLog = timingsLog
         let session = SessionController(transport: transport, pipeline: pipeline, assets: assets, history: practiceBuffer,
-                                        transcription: TranscriptionClient(backend: backend))
+                                        transcription: TranscriptionClient(functions: functions), timingsLog: timingsLog)
         self.session = session
         self.languages = LanguageSettingsModel(assets: assets, session: session)
         self.setup = SetupStatus(payloads: transport.payloads)
         if launchOptions.usesOnboardingFixtures {
-            onboardingServices = .fixtures(offer: OnboardingFixtures.offer(variant: launchOptions.onboardingVariant))
+            onboardingServices = .fixtures(
+                offer: OnboardingFixtures.offer(variant: launchOptions.onboardingVariant), account: account)
             practice = ScriptedPracticeClient(
                 state: OnboardingFixtures.practiceState(step: launchOptions.onboardingStep,
                                                         variant: launchOptions.onboardingVariant))
@@ -86,6 +102,14 @@ final class AppModel {
         }
         history.applyRetention()
         recoverInterruptedDictations()
+    }
+
+    /// The configured backend; in screenshot runs with `-account-state` (DEBUG), one faking it.
+    private static func makeBackend(launchOptions: LaunchOptions) -> Backend? {
+        #if DEBUG
+        if let state = launchOptions.accountState { return Backend.faking(state) }
+        #endif
+        return Backend.fromInfoPlist()
     }
 
     /// The persisted checkpoint, or a throwaway one for screenshot routes and UI tests.
@@ -190,8 +214,25 @@ final class AppModel {
             case .limitReached: return "Dictation limit reached"
             case .rateLimited: return "Too many requests; try again in a minute"
             case .unavailable(let reason): return "Cleanup unavailable: \(reason)"
+            case .signedOut: return "You're signed out. Sign in again on Home"
             }
         }
+    }
+
+    /// "Continue without an account" on the sign-in sheet.
+    func continueAsGuest() {
+        backend?.continueAsGuest()
+    }
+
+    /// How the current access token is signed (Debug); nil without a backend or a session.
+    var tokenSigning: String? {
+        backend?.tokenSigning
+    }
+
+    /// Deletes every transcript, and the timings logged with them.
+    func deleteAllHistory() {
+        history.deleteAll()
+        timingsLog.clear()
     }
 
     /// Offers a transcript to the keyboard as "Insert last dictation".
@@ -213,11 +254,15 @@ final class AppModel {
             if let token, let launch = transport.payloads.consumeLaunchToken(token, maxAge: 20, now: Date()) {
                 startSessionFromKeyboard(showSwipeBack: openedByAnotherApp, request: launch.requestId)
             } else {
+                // The dialog can't open over the sign-in sheet: RootView holds it until that's gone.
+                signInSheet = nil
                 confirmUntrustedStart = true
             }
         case .openSettings:
             showSwipeBack = false
             guard onboarding.isComplete else { return }
+            // Settings would open under it, out of sight.
+            signInSheet = nil
             router.popToRoot()
             router.open(.settings)
         case .authCallback(let url):
@@ -236,6 +281,9 @@ final class AppModel {
     /// another app, Murmur sends the user back there, or shows "swipe back" if it can't; when it
     /// was used inside Murmur itself there's nowhere to go back to.
     func startSessionFromKeyboard(showSwipeBack: Bool = true, request: UUID? = nil) {
+        // Swipe-back can't open over the sign-in sheet: RootView holds it until that's gone. Used
+        // inside Murmur, the keyboard may be typing into the sheet, so it stays.
+        if showSwipeBack { signInSheet = nil }
         self.showSwipeBack = showSwipeBack
         let linkAt = Date()
         let pending = transport.payloads.readPendingStart().flatMap { $0.requestId == request ? $0 : nil }
@@ -260,6 +308,7 @@ final class AppModel {
         case .active:
             if activeSince == nil { activeSince = Date() }
             setup.refresh()
+            settings.reloadDefaultStyle()
             refreshNotificationPermission()
             session.appDidBecomeActive()
             history.applyRetention()
@@ -320,6 +369,13 @@ enum LaunchRoute: String {
 /// - `-permission-fixtures <list>` fixes the setup state, e.g. `keyboard,fullAccess,mic=granted`
 /// - `-onboarding-fixtures` runs the whole journey on fake services with its own checkpoint
 /// - `-onboarding-reset` starts the journey over
+///
+/// The account (screenshots and UI tests, DEBUG builds only; release builds ignore these):
+/// - `-account-state signedOut|guest` fakes it, with `-account-email <address>` and
+///   `-account-provider apple|google|email` if given. Signed in has no screen of its own: it's
+///   Home and Settings without the account's card and section.
+/// - `-account-sheet [email|guest]` opens the sign-in sheet, at the email step or asking about
+///   continuing as a guest
 struct LaunchOptions: Equatable {
     var route: LaunchRoute?
     var useFixtures = false
@@ -328,6 +384,8 @@ struct LaunchOptions: Equatable {
     var permissionFixtures: PermissionSnapshot?
     var onboardingFixtures = false
     var resetOnboarding = false
+    var accountState: AccountModel.State?
+    var accountSheet: SignInAgainView.Start?
 
     init(arguments: [String]) {
         route = LaunchRoute(arguments: arguments)
@@ -337,7 +395,28 @@ struct LaunchOptions: Equatable {
         permissionFixtures = Self.value(after: "-permission-fixtures", in: arguments).map(PermissionSnapshot.init(fixture:))
         onboardingFixtures = arguments.contains("-onboarding-fixtures")
         resetOnboarding = arguments.contains("-onboarding-reset")
+        #if DEBUG
+        accountState = Self.accountFixture(in: arguments)
+        if arguments.contains("-account-sheet") {
+            accountSheet = Self.value(after: "-account-sheet", in: arguments).flatMap(SignInAgainView.Start.init(rawValue:))
+                ?? .options
+        }
+        #endif
     }
+
+    #if DEBUG
+    private static func accountFixture(in arguments: [String]) -> AccountModel.State? {
+        let account = AccountModel.Account(
+            userID: UUID(uuidString: "00000000-0000-4000-8000-000000000001")!,
+            email: value(after: "-account-email", in: arguments),
+            provider: value(after: "-account-provider", in: arguments))
+        return switch value(after: "-account-state", in: arguments) {
+        case "signedOut": .signedOut(account)
+        case "guest": .guest(account)
+        default: nil
+        }
+    }
+    #endif
 
     /// A screenshot route into onboarding: nothing persists and nothing prompts.
     var isOnboardingScreenshot: Bool { onboardingStep != nil }

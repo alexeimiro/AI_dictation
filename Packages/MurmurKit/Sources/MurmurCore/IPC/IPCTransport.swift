@@ -83,6 +83,13 @@ public final class IPCPayloadStore: @unchecked Sendable {
         FileManager.default.fileExists(atPath: claimsDirectory.appendingPathComponent(requestId.uuidString).path)
     }
 
+    /// When `requestId` was claimed: its marker's modification date, which `prune` goes by too.
+    /// Nil while unclaimed.
+    public func claimDate(_ requestId: UUID) -> Date? {
+        let marker = claimsDirectory.appendingPathComponent(requestId.uuidString)
+        return (try? marker.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+    }
+
     // MARK: Keyboard status
 
     public func write(keyboardStatus: KeyboardStatus) throws {

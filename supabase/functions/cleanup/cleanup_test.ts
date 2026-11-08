@@ -13,6 +13,7 @@ import {
   describeCleanupError,
   runCleanup,
 } from "../_shared/cleanup.ts";
+import { cleanupConfig, translationConfig } from "../_shared/config.ts";
 import {
   buildLanguageBlock,
   buildTranscriptMessage,
@@ -123,9 +124,21 @@ Deno.test("returns the cleaned text, language and usage", async () => {
   assertEquals(outcome.language, "en");
   assertEquals(outcome.model, "gpt-6-astra-2026-09-01");
   assertEquals(outcome.stopReason, "completed");
-  assertEquals(outcome.usage, { input: 1950, output: 12, cacheRead: 1900, cacheCreation: 0 });
+  assertEquals(outcome.usage, { input: 1950, output: 12, cacheRead: 1900, cacheWrite: 0 });
   assertEquals(outcome.cacheReadTokens, 1900);
   assertEquals(outcome.ttftMs, null);
+});
+
+Deno.test("cache writes are read from the usage, and are 0 when it doesn't report them", async () => {
+  const usage = { input_tokens: 1950, output_tokens: 12 };
+  const written = reply("Can you send me the report by Friday?", {
+    usage: { ...usage, input_tokens_details: { cached_tokens: 0, cache_write_tokens: 1920 } },
+  });
+  const unreported = reply("Can you send me the report by Friday?", { usage });
+  const outcome = await runCleanup(request, options(fakeFetch(written)));
+  assertEquals(outcome.usage, { input: 1950, output: 12, cacheRead: 0, cacheWrite: 1920 });
+  const fallback = await runCleanup(request, options(fakeFetch(unreported)));
+  assertEquals(fallback.usage, { input: 1950, output: 12, cacheRead: 0, cacheWrite: 0 });
 });
 
 Deno.test("a Russian request gets the Russian pack and its own cache key", async () => {
@@ -395,6 +408,25 @@ Deno.test("the effort and model follow the options", () => {
   assertEquals(body.model, "gpt-6.1-terra");
   assertEquals(body.reasoning, { effort: "none" });
   assertEquals(buildResponsesRequest(request, resolveLanguage("en-US"), { model: "m" }).reasoning, { effort: "low" });
+});
+
+Deno.test("TRANSLATE_* change translations only; unset, translations keep today's cleanup settings", async () => {
+  // What the hosted project sets today, then the same with a translation model on top.
+  const today = new Map([["CLEANUP_MODEL", "gpt-6.1-terra"], ["CLEANUP_EFFORT", "none"], ["CLEANUP_DEADLINE_MS", "8000"]]);
+  assertEquals(translationConfig(today), cleanupConfig(today));
+  assertEquals(translationConfig(new Map()), cleanupConfig(new Map()), "and with nothing set at all");
+  const luna = new Map([...today, ["TRANSLATE_MODEL", "gpt-6-luna"]]);
+  assertEquals(cleanupConfig(luna), { model: "gpt-6.1-terra", effort: "none", deadlineMs: 8000 });
+  assertEquals(translationConfig(luna), { model: "gpt-6-luna", effort: "none", deadlineMs: 8000 });
+
+  // `cleanup` runs a request with the translation settings when it has a target, as index.ts picks them.
+  const translated: Captured = {};
+  const cleanedUp: Captured = {};
+  const translation = reply("Raporu cuma gününe kadar gönderebilir misin? Çok teşekkürler!");
+  await runCleanup(translationRequest, { ...translationConfig(luna), apiKey: "k", signal, fetcher: fakeFetch(translation, translated) });
+  await runCleanup(russianRequest, { ...cleanupConfig(luna), apiKey: "k", signal, fetcher: fakeFetch(cleaned, cleanedUp) });
+  assertEquals([translated.body!.model, translated.body!.reasoning], ["gpt-6-luna", { effort: "none" }]);
+  assertEquals([cleanedUp.body!.model, cleanedUp.body!.reasoning], ["gpt-6.1-terra", { effort: "none" }]);
 });
 
 Deno.test({

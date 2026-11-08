@@ -3,7 +3,8 @@ import MurmurUI
 import SwiftData
 import SwiftUI
 
-/// Home: the session switch, the keyboard setup checklist until it's done, and the history by day.
+/// Home: the signed-out card while the account's session is lost, the session switch, the keyboard
+/// setup checklist until it's done, and the history by day.
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Query(sort: \TranscriptRecord.createdAt, order: .reverse) private var records: [TranscriptRecord]
@@ -11,6 +12,11 @@ struct HomeView: View {
 
     var body: some View {
         List {
+            if let account = model.account, account.isSignedOut {
+                Section {
+                    SignedOutCard(phrase: account.phrase) { model.signInSheet = .options }
+                }
+            }
             Section {
                 SessionCard()
             }
@@ -214,6 +220,39 @@ struct SessionCard: View {
         case .failed, .needsReconnect: Palette.danger
         case .off: Palette.lockGray
         }
+    }
+}
+
+/// The account's session was lost without the user asking: cloud dictation waits until they sign
+/// in again (or continue as a guest, on the sheet).
+struct SignedOutCard: View {
+    /// How the copy names the remembered account (`AccountModel.Account.phrase`).
+    let phrase: String?
+    let signIn: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("You're signed out")
+                .font(.ui(15, .semibold))
+                .foregroundStyle(Palette.text)
+            Text(detail)
+                .font(.ui(14))
+                .foregroundStyle(Palette.textSecondary)
+            Button("Sign in", action: signIn)
+                .font(.ui(15, .medium))
+                .foregroundStyle(Palette.ink)
+        }
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .buttonStyle(.borderless)
+        // One element for VoiceOver; activating it signs in.
+        .accessibilityElement(children: .combine)
+        .accessibilityAction(.default, signIn)
+    }
+
+    private var detail: String {
+        guard let phrase else { return "Sign in again to keep cloud dictation and your plan." }
+        return "Sign in again \(phrase) to keep cloud dictation and your plan."
     }
 }
 

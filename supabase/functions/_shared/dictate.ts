@@ -1,0 +1,652 @@
+// The `dictate` function's handler; the contract is in dictate/index.ts. Audio mode transcribes and
+// translates on one worker, text mode translates a transcript the app already has, and warm mode
+// opens the connections a dictation needs while the user is still speaking. Everything the handler
+// talks to is injected (`DictateDeps`), so the tests drive it offline.
+import { type CleanupOutcome, describeCleanupError, runCleanup } from "./cleanup.ts";
+import type { DictateConfig } from "./config.ts";
+import { type Caller, clientInfo, corsHeaders, json } from "./http.ts";
+import type { Preflight } from "./preflight.ts";
+import { countWords } from "./text.ts";
+import { beginRequest, Phases, type RequestStart, type ServerTimings } from "./timing.ts";
+import {
+  cleanKeywords,
+  isoLanguage,
+  OpenAIError,
+  TRANSCRIBE_LIMITS,
+  type TranscribeRequest,
+  type TranscriptionResult,
+  transcribeWithOpenAI,
+} from "./transcribe.ts";
+import {
+  type CleanupRequest,
+  LIMITS,
+  normalizeLanguageTag,
+  type Parsed,
+  parseCleanupRequest,
+  UUID_PATTERN,
+} from "./types.ts";
+
+/** A translation request: `cleanup`'s body, with the target it must have here. */
+export type TranslationRequest = CleanupRequest & { targetLanguage: string };
+
+/** Audio mode: the translation as `cleanup` takes it (its transcript still to come) and the transcription as `transcribe` takes it. */
+export interface AudioBody {
+  mode: "audio";
+  translation: TranslationRequest;
+  transcription: TranscribeRequest;
+}
+
+/** Text mode: a translation, with the app's labels for its speculative calls, which are only logged. */
+export interface TextBody {
+  mode: "text";
+  translation: TranslationRequest;
+  speculative: boolean;
+  attempt: number | null;
+}
+
+export type DictateBody = AudioBody | TextBody;
+
+export interface DictateDeps {
+  config: DictateConfig;
+  /** OPENAI_API_KEY. Without it, a request that passes the checks gets 503 and a warm-up skips OpenAI. */
+  apiKey: string | undefined;
+  /** The caller of the bearer token, or null (401). */
+  authenticate(request: Request): Promise<Caller | null>;
+  /** `dictation_preflight` for this dictation; throws when the RPC fails (503). */
+  preflight(caller: Caller, dictationId: string, perMinute: number): Promise<Preflight>;
+  /** Warm mode's read-only `quota_status`. */
+  readQuota(caller: Caller, signal: AbortSignal): Promise<void>;
+  /** `record_usage`, handed to `background`. */
+  recordUsage(caller: Caller, dictationId: string, words: number): PromiseLike<unknown>;
+  /** Runs work after the reply is sent. */
+  background(work: PromiseLike<unknown>): void;
+  /** Replaces `fetch` for the OpenAI calls. */
+  fetcher?: typeof fetch;
+  /** The handler's clock in ms (`performance.now`): the phases, the audio budget and the warm memo. */
+  now?: () => number;
+  /**
+   * The signal of an OpenAI call bounded by `ms`. By default it also fires when the phone gives
+   * up on the request, so the spend stops with it. Tests pass signals that never fire.
+   */
+  signal?(ms: number, request: Request): AbortSignal;
+  /** Counts the request against the worker (`beginRequest`). */
+  worker?: () => RequestStart;
+  /** Where a request's one JSON log line goes (console.log). */
+  log?: (line: string) => void;
+}
+
+/**
+ * The whole body, audio included. Raw bytes keep the audio within `transcribe`'s 16 MB; a bigger
+ * body is refused from its Content-Length before any of it is read, or cut off once it passes the
+ * limit when it has none.
+ */
+const MAX_BODY_BYTES = TRANSCRIBE_LIMITS.maxAudioBytes;
+/** Audio mode skips the translation when less than this is left of its budget. */
+const MIN_TRANSLATION_MS = 1000;
+/** Each warm-up fetch is bounded by this, below the app's 5 s warm-up timeout. */
+const WARM_FETCH_MS = 3000;
+/** A warm-up round trip stays warm this long for the isolate, so the next warm-ups skip it. */
+const WARM_MEMO_MS = 60_000;
+
+/** The reply to each reason the preflight refuses a call for. */
+const REFUSALS: Record<NonNullable<Preflight["reason"]>, number> = {
+  too_many_attempts: 429,
+  rate_limited: 429,
+  limit_reached: 402,
+};
+
+type Settled<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+/** A promise that never rejects, so work can start early and be judged later. */
+function settle<T>(work: Promise<T>): Promise<Settled<T>> {
+  return work.then((value) => ({ ok: true, value }), (error) => ({ ok: false, error }));
+}
+
+/**
+ * Audio mode's "metadata" part: { dictationId, format: "m4a" | "wav", language: BCP-47 | null,
+ * keywords?, targetLanguage, style?, dictionary?, snippets? }. `cleanup`'s and `transcribe`'s own
+ * validators check it; `audio` is the "audio" part's bytes.
+ */
+export function parseDictateMetadata(raw: unknown, audio: Uint8Array<ArrayBuffer>): Parsed<AudioBody> {
+  if (typeof raw !== "object" || raw === null) return { ok: false, error: "metadata must be a JSON object" };
+  const fields = raw as Record<string, unknown>;
+  // The transcript comes from the audio; everything else is checked as `cleanup` checks it.
+  const parsed = parseCleanupRequest({ ...fields, transcript: "" });
+  if (!parsed.ok) return parsed;
+  const translation = withTarget(parsed.value);
+  if (!translation) return { ok: false, error: "targetLanguage is required" };
+  if (fields.format !== "m4a" && fields.format !== "wav") return { ok: false, error: "format must be m4a or wav" };
+  if (audio.length === 0) return { ok: false, error: "audio is empty" };
+  if (audio.length > TRANSCRIBE_LIMITS.maxAudioBytes) return { ok: false, error: "audio too large" };
+  return {
+    ok: true,
+    value: {
+      mode: "audio",
+      translation,
+      transcription: {
+        dictationId: translation.dictationId,
+        audio,
+        format: fields.format,
+        // What `parseTranscribeRequest` makes of the same tag: ISO-639-1, or null to detect it.
+        language: isoLanguage(translation.language),
+        keywords: cleanKeywords(fields.keywords),
+      },
+    },
+  };
+}
+
+/** Text mode's JSON body: a `cleanup` request with a targetLanguage, plus speculative? and attempt?. */
+export function parseDictateText(raw: unknown): Parsed<TextBody> {
+  const parsed = parseCleanupRequest(raw);
+  if (!parsed.ok) return parsed;
+  const translation = withTarget(parsed.value);
+  if (!translation) return { ok: false, error: "targetLanguage is required" };
+  const fields = raw as Record<string, unknown>;
+  const speculative = fields.speculative ?? false;
+  if (typeof speculative !== "boolean") return { ok: false, error: "speculative must be a boolean" };
+  const attempt = fields.attempt ?? null;
+  if (attempt !== null && !isPositiveInteger(attempt)) return { ok: false, error: "attempt must be a positive integer" };
+  return { ok: true, value: { mode: "text", translation, speculative, attempt } };
+}
+
+/** The request with its target language, or null without one ("und" is none: see `parseCleanupRequest`). */
+function withTarget(request: CleanupRequest): TranslationRequest | null {
+  const { targetLanguage } = request;
+  return targetLanguage ? { ...request, targetLanguage } : null;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1;
+}
+
+/** The mode a Content-Type selects, or null for any other type. */
+function modeOf(contentType: string | null): DictateBody["mode"] | null {
+  const type = contentType?.split(";")[0].trim().toLowerCase();
+  return type === "multipart/form-data" ? "audio" : type === "application/json" ? "text" : null;
+}
+
+class BodyTooLarge extends RangeError {}
+
+/** The request body behind a byte limit: past MAX_BODY_BYTES its stream errors with BodyTooLarge. */
+function limitedBody(request: Request): Response {
+  let received = 0;
+  const body = request.body?.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        received += chunk.byteLength;
+        if (received > MAX_BODY_BYTES) controller.error(new BodyTooLarge("body too large"));
+        else controller.enqueue(chunk);
+      },
+    }),
+  );
+  return new Response(body ?? null, { headers: { "content-type": request.headers.get("content-type") ?? "" } });
+}
+
+/** Reads and checks an audio- or text-mode body. It never throws: anything wrong is a 400's detail. */
+async function readBody(request: Request, mode: DictateBody["mode"]): Promise<Parsed<DictateBody>> {
+  const body = limitedBody(request);
+  try {
+    if (mode === "text") return parseDictateText(await body.json());
+    const form = await body.formData();
+    const metadata = form.get("metadata");
+    const audio = form.get("audio");
+    if (metadata === null) return { ok: false, error: "metadata part is missing" };
+    if (audio === null) return { ok: false, error: "audio part is missing" };
+    if (typeof audio === "string") return { ok: false, error: "audio must be a file part" };
+    let raw: unknown;
+    try {
+      // A part without a filename arrives as a string, one with a filename as a file.
+      raw = JSON.parse(typeof metadata === "string" ? metadata : await metadata.text());
+    } catch {
+      return { ok: false, error: "metadata must be JSON" };
+    }
+    return parseDictateMetadata(raw, new Uint8Array(await audio.arrayBuffer()));
+  } catch (error) {
+    if (error instanceof BodyTooLarge) return { ok: false, error: "body too large" };
+    return {
+      ok: false,
+      error: mode === "text" ? "body must be a JSON object" : "body must be multipart/form-data with metadata and audio parts",
+    };
+  }
+}
+
+/** The first language the transcription heard, sanitized like a client tag before it reaches the prompt. */
+function detectedLanguage(languages: string[]): string | undefined {
+  const tag = normalizeLanguageTag(languages[0]);
+  return tag.ok ? tag.tag : undefined;
+}
+
+/** The longest transcript a caller may have translated, as `cleanup` allows it. */
+function transcriptLimit(caller: Caller): number {
+  return caller.isAnonymous ? LIMITS.anonymousTranscriptChars : LIMITS.transcriptChars;
+}
+
+function isAbort(error: unknown): boolean {
+  return error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError");
+}
+
+function errorName(error: unknown): string {
+  return error instanceof Error ? error.name : String(error);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Log label for a failed transcription, like `describeCleanupError`'s for the model call. */
+function describeTranscriptionError(error: unknown, request: Request): string {
+  if (request.signal.aborted) return "client disconnected";
+  if (isAbort(error)) return "transcription deadline";
+  if (error instanceof OpenAIError) return error.status === 429 ? "openai rate limited" : `openai error ${error.status}`;
+  if (error instanceof TypeError) return "openai connection";
+  return "transcription failed";
+}
+
+/** Why an audio-mode translation is unavailable, for the reply. */
+function unavailableReason(error: unknown): "deadline" | "openai_connection" | "openai_error" {
+  if (isAbort(error)) return "deadline";
+  if (error instanceof TypeError) return "openai_connection";
+  return "openai_error";
+}
+
+function badRequest(detail: string): Response {
+  return json({ error: "bad_request", detail }, 400);
+}
+
+/** A failure on the server's side, which the app treats like an outage: 503. */
+function unavailable(): Response {
+  return json({ error: "dictate_unavailable" }, 503);
+}
+
+/** A request that passed every check: what its reply and log line are built from. */
+interface Dictation {
+  request: Request;
+  worker: RequestStart;
+  phases: Phases;
+  /** The handler's start, on its clock. */
+  startedAt: number;
+  caller: Caller;
+  body: DictateBody;
+  preflight: Preflight;
+  /** What the model is asked. In audio mode it gets the transcript, and the detected source if automatic. */
+  translation: CleanupRequest;
+  /** Audio mode, once transcribed. */
+  heard?: TranscriptionResult;
+}
+
+/** What a dictation's translation came to. */
+interface Translated {
+  status: "cleaned" | "raw" | "unavailable";
+  reason: string | null;
+  /** The text to insert; "" unless cleaned. */
+  text: string;
+  /** The words recorded against the quota, or null when nothing is recorded. */
+  usage: number | null;
+  /** The model's answer, when it gave one. */
+  outcome: CleanupOutcome | null;
+}
+
+/** An empty transcript: nothing to translate and nothing to count, as in `cleanup`. */
+const EMPTY: Translated = { status: "raw", reason: "empty", text: "", usage: null, outcome: null };
+
+function unavailableResult(reason: string): Translated {
+  return { status: "unavailable", reason, text: "", usage: null, outcome: null };
+}
+
+/** A translation's answer, or the transcript it kept as "raw" when the model's output was unusable. */
+function translated(outcome: CleanupOutcome, target: string): Translated {
+  return {
+    status: outcome.status,
+    reason: outcome.reason ?? null,
+    text: outcome.status === "cleaned" ? outcome.text : "",
+    // What `cleanup` counts: the translation, or the transcript it fell back to.
+    usage: countWords(outcome.text, target),
+    outcome,
+  };
+}
+
+export function createDictateHandler(deps: DictateDeps): (request: Request) => Promise<Response> {
+  const { config, apiKey } = deps;
+  const now = deps.now ?? (() => performance.now());
+  const fetcher = deps.fetcher ?? fetch;
+  const begin = deps.worker ?? (() => beginRequest());
+  const log = deps.log ?? ((line: string) => console.log(line));
+  const signal = deps.signal ??
+    ((ms: number, request: Request) => AbortSignal.any([request.signal, AbortSignal.timeout(ms)]));
+  /** When this isolate last made each warm-up round trip. */
+  const warmedAt = { openai: -Infinity, database: -Infinity };
+
+  const perMinute = (caller: Caller) => caller.isAnonymous ? config.anonymousPerMinute : config.perMinute;
+
+  /**
+   * Everything before OpenAI. The token and the preflight are checked from the headers while the
+   * body is still uploading, and the request is admitted only once all three are through.
+   */
+  async function admit(
+    request: Request,
+    phases: Phases,
+    auth: Promise<Settled<Caller | null>>,
+  ): Promise<Response | Pick<Dictation, "caller" | "body" | "preflight">> {
+    const dictationId = request.headers.get("x-murmur-dictation")?.trim() ?? "";
+    const mode = modeOf(request.headers.get("content-type"));
+    const headerError = !UUID_PATTERN.test(dictationId)
+      ? "x-murmur-dictation must be the dictation's UUID"
+      : !mode
+      ? "content-type must be multipart/form-data (audio) or application/json (text)"
+      : Number(request.headers.get("content-length")) > MAX_BODY_BYTES
+      ? "body too large"
+      : null;
+
+    // Null when there is no caller, which gets its 401 first.
+    const preflight = headerError ? null : settle(auth.then((result) =>
+      result.ok && result.value
+        ? phases.mark("preflightMs", deps.preflight(result.value, dictationId, perMinute(result.value)))
+        : null
+    ));
+    const body = headerError || !mode ? null : phases.mark("bodyMs", readBody(request, mode));
+
+    const caller = await auth;
+    if (!caller.ok) {
+      console.error("authentication failed", errorName(caller.error));
+      return unavailable();
+    }
+    if (!caller.value) return json({ error: "unauthorized" }, 401);
+    if (headerError || !body || !preflight) return badRequest(headerError ?? "bad request");
+
+    const parsed = await body;
+    if (!parsed.ok) return badRequest(parsed.error);
+    const { translation } = parsed.value;
+    if (translation.dictationId.toLowerCase() !== dictationId.toLowerCase()) {
+      return badRequest("dictationId must match x-murmur-dictation");
+    }
+    if (parsed.value.mode === "text" && translation.transcript.length > transcriptLimit(caller.value)) {
+      return badRequest("transcript too long");
+    }
+
+    // Fail closed, as `cleanup` does: without the checks nothing is spent.
+    const checked = await preflight;
+    if (!checked.ok) {
+      console.error("preflight failed", errorMessage(checked.error));
+      return unavailable();
+    }
+    if (!checked.value) return json({ error: "unauthorized" }, 401);
+    const { allowed, reason } = checked.value;
+    if (!allowed) {
+      if (reason && Object.hasOwn(REFUSALS, reason)) return json({ error: reason }, REFUSALS[reason]);
+      console.error("preflight refused without a known reason", reason);
+      return unavailable();
+    }
+    return { caller: caller.value, body: parsed.value, preflight: checked.value };
+  }
+
+  function noKey(): Response {
+    // Like an outage: the app falls back on the device (audio) or fails the translation (text).
+    console.error("OPENAI_API_KEY is not set");
+    return unavailable();
+  }
+
+  /** The one JSON log line of an admitted request. Never any text: only its shape and timings. */
+  function writeLog(
+    d: Dictation,
+    status: string,
+    reason: string | null,
+    timings: ServerTimings,
+    extra: Record<string, unknown> = {},
+  ): void {
+    const { body, translation, heard, preflight, caller } = d;
+    log(JSON.stringify({
+      event: "dictate",
+      mode: body.mode,
+      status,
+      reason,
+      model: config.translation.model,
+      effort: config.translation.effort,
+      transcribeModel: body.mode === "audio" ? config.transcribe.model : null,
+      languageTag: body.translation.language ?? null,
+      sourceTag: translation.language ?? null,
+      targetLanguageTag: body.translation.targetLanguage,
+      detected: heard?.languages ?? null,
+      style: body.translation.style ?? "casual",
+      speculative: body.mode === "text" && body.speculative,
+      // The server's count of this dictation's calls, and the app's own number for a text call.
+      attempt: preflight.attempt,
+      clientAttempt: body.mode === "text" ? body.attempt : null,
+      isAnonymous: caller.isAnonymous,
+      format: body.mode === "audio" ? body.transcription.format : null,
+      bytes: body.mode === "audio" ? body.transcription.audio.length : null,
+      keywords: body.mode === "audio" ? body.transcription.keywords.length : null,
+      inChars: body.mode === "text" || heard ? translation.transcript.length : null,
+      ...extra,
+      ...d.worker,
+      client: clientInfo(d.request),
+      timings,
+    }));
+  }
+
+  /** The 200 reply, `cleanup`'s fields plus the transcription's. Records the usage and writes the log line. */
+  function reply(d: Dictation, result: Translated, extra: Record<string, unknown> = {}): Response {
+    const { body, caller, preflight, heard, translation } = d;
+    const { outcome } = result;
+    if (result.usage !== null) {
+      deps.background(deps.recordUsage(caller, body.translation.dictationId, result.usage));
+    }
+    const words = result.usage ?? 0;
+    const timings = d.phases.toJSON();
+    writeLog(d, result.status, result.reason, timings, {
+      ...extra,
+      replyModel: outcome?.model ?? null,
+      language: outcome?.language ?? null,
+      stopReason: outcome?.stopReason ?? null,
+      ttftMs: outcome?.ttftMs ?? null,
+      totalMs: outcome?.totalMs ?? null,
+      inWords: countWords(translation.transcript, translation.language),
+      outWords: words,
+      inputTokens: outcome?.usage.input ?? null,
+      outputTokens: outcome?.usage.output ?? null,
+      cachedTokens: outcome?.usage.cacheRead ?? null,
+      cacheWriteTokens: outcome?.usage.cacheWrite ?? null,
+    });
+    return json({
+      transcript: heard?.text ?? null,
+      languages: heard?.languages ?? [],
+      transcribeModel: heard ? config.transcribe.model : null,
+      text: result.text,
+      status: result.status,
+      reason: result.reason,
+      targetLanguage: body.translation.targetLanguage,
+      words,
+      model: outcome?.model ?? null,
+      ttftMs: outcome?.ttftMs ?? null,
+      // As in `cleanup`: the model call alone; `timings` splits the whole request.
+      totalMs: outcome?.totalMs ?? 0,
+      remaining: preflight.remaining === null ? null : Math.max(0, preflight.remaining - words),
+      timings,
+    });
+  }
+
+  /** Audio mode: transcribe, then translate in what is left of the 26 s budget (the app waits 30 s). */
+  async function dictateAudio(d: Dictation & { body: AudioBody }): Promise<Response> {
+    if (!apiKey) return noKey();
+    const { request, phases, body } = d;
+    const transcribe = config.transcribe;
+    phases.ready();
+    try {
+      d.heard = await phases.mark(
+        "transcribeMs",
+        transcribeWithOpenAI(body.transcription, {
+          apiKey,
+          model: transcribe.model,
+          deadlineMs: transcribe.deadlineMs,
+          signal: signal(transcribe.deadlineMs, request),
+          fetcher,
+        }),
+      );
+    } catch (error) {
+      const label = describeTranscriptionError(error, request);
+      console.error(label);
+      writeLog(d, "transcription_unavailable", label, phases.toJSON());
+      return json({ error: "transcription_unavailable" }, 502);
+    }
+
+    // With an automatic source, the language the transcription heard first is the source: the
+    // prompt names it, and the guard checks the output against it.
+    const transcript = d.heard.text;
+    d.translation = {
+      ...body.translation,
+      transcript,
+      language: body.translation.language ?? detectedLanguage(d.heard.languages),
+    };
+    if (countWords(transcript, d.translation.language) === 0) return reply(d, EMPTY);
+    if (transcript.length > transcriptLimit(d.caller)) {
+      // Longer than `cleanup` would translate for this caller; the app keeps the transcript.
+      const usage = countWords(transcript, body.translation.targetLanguage);
+      return reply(d, { status: "raw", reason: "transcript_too_long", text: "", usage, outcome: null });
+    }
+
+    const budgetMs = Math.min(config.translation.deadlineMs, config.deadlineMs - (now() - d.startedAt));
+    if (budgetMs < MIN_TRANSLATION_MS) return reply(d, unavailableResult("deadline"), { budgetMs });
+    try {
+      const outcome = await phases.mark(
+        "modelMs",
+        runCleanup(d.translation, {
+          ...config.translation,
+          deadlineMs: budgetMs,
+          apiKey,
+          signal: signal(budgetMs, request),
+          fetcher,
+        }),
+      );
+      return reply(d, translated(outcome, body.translation.targetLanguage), { budgetMs });
+    } catch (error) {
+      // The transcript is kept, so the app can retry the translation alone; nothing is counted.
+      const label = describeCleanupError(error);
+      console.error(label, errorName(error));
+      return reply(d, unavailableResult(unavailableReason(error)), { budgetMs, error: label });
+    }
+  }
+
+  /** Text mode: one translation within the translation deadline (9 s; the app waits 11 s). */
+  async function dictateText(d: Dictation & { body: TextBody }): Promise<Response> {
+    const { request, phases, translation, body } = d;
+    if (countWords(translation.transcript, translation.language) === 0) return reply(d, EMPTY);
+    if (!apiKey) return noKey();
+    const settings = config.translation;
+    phases.ready();
+    try {
+      const outcome = await phases.mark(
+        "modelMs",
+        runCleanup(translation, { ...settings, apiKey, signal: signal(settings.deadlineMs, request), fetcher }),
+      );
+      return reply(d, translated(outcome, body.translation.targetLanguage));
+    } catch (error) {
+      const label = describeCleanupError(error);
+      if (label === "cleanup failed") console.error(label, errorName(error));
+      else console.error(label, errorMessage(error));
+      writeLog(d, "translation_unavailable", label, phases.toJSON());
+      return json({ error: "translation_unavailable" }, 502);
+    }
+  }
+
+  /** Warm mode: the token, then OpenAI and the database, each skipped while this isolate is warm. */
+  async function warm(
+    request: Request,
+    worker: RequestStart,
+    phases: Phases,
+    auth: Promise<Settled<Caller | null>>,
+  ): Promise<Response> {
+    const caller = await auth;
+    if (!caller.ok) {
+      console.error("authentication failed", errorName(caller.error));
+      return unavailable();
+    }
+    if (!caller.value) return json({ error: "unauthorized" }, 401);
+    const user = caller.value;
+
+    const [openai, database] = await Promise.all([
+      // Free: it opens TLS and HTTP/2 to OpenAI in the isolate's pool, and a misconfigured
+      // translation model shows in the log before a dictation needs it.
+      warmUp("openai", apiKey ? () => pingOpenAI(request, apiKey) : null),
+      // Read only: it opens the isolate's connection to the database API. No writes.
+      warmUp("database", () => pingDatabase(request, user)),
+    ]);
+    const { authMs, totalMs } = phases.toJSON();
+    const timings = {
+      authMs,
+      ...(openai.ms === undefined ? {} : { openaiMs: openai.ms }),
+      ...(database.ms === undefined ? {} : { dbMs: database.ms }),
+      totalMs,
+    };
+    log(JSON.stringify({
+      event: "dictate_warm",
+      openai: openai.state,
+      database: database.state,
+      isAnonymous: user.isAnonymous,
+      ...worker,
+      client: clientInfo(request),
+      timings,
+    }));
+    const { cold, region, workerAgeMs, executionId } = worker;
+    return json({ warm: true, cold, region, workerAgeMs, executionId, timings });
+  }
+
+  /** Makes a warm-up round trip unless the isolate made it within the last minute, and times it. */
+  async function warmUp(
+    key: keyof typeof warmedAt,
+    work: (() => Promise<boolean>) | null,
+  ): Promise<{ state: "ok" | "failed" | "memoized" | "no_key"; ms?: number }> {
+    if (!work) return { state: "no_key" };
+    if (now() - warmedAt[key] < WARM_MEMO_MS) return { state: "memoized" };
+    warmedAt[key] = now();
+    const started = now();
+    const ok = await work();
+    // A round trip that didn't get through is tried again by the next warm-up.
+    if (!ok) warmedAt[key] = -Infinity;
+    return { state: ok ? "ok" : "failed", ms: Math.round(now() - started) };
+  }
+
+  async function pingOpenAI(request: Request, key: string): Promise<boolean> {
+    const model = config.translation.model;
+    try {
+      const response = await fetcher(`https://api.openai.com/v1/models/${encodeURIComponent(model)}`, {
+        headers: { Authorization: `Bearer ${key}` },
+        signal: signal(WARM_FETCH_MS, request),
+      });
+      // Read to the end, so the connection goes back to the pool.
+      await response.arrayBuffer();
+      if (!response.ok) console.error(`warm-up: OpenAI answered ${response.status} for the translation model ${model}`);
+      return true;
+    } catch (error) {
+      console.error("warm-up: OpenAI unreachable", errorName(error));
+      return false;
+    }
+  }
+
+  async function pingDatabase(request: Request, caller: Caller): Promise<boolean> {
+    try {
+      await deps.readQuota(caller, signal(WARM_FETCH_MS, request));
+      return true;
+    } catch (error) {
+      console.error("warm-up: quota_status failed", errorMessage(error));
+      return false;
+    }
+  }
+
+  return async (request) => {
+    const worker = begin();
+    const phases = new Phases(worker, now);
+    const startedAt = now();
+    if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+    if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
+    if (config.disabled) return json({ error: "dictate_disabled" }, 404);
+
+    // Every mode starts with the token, from the headers alone.
+    const auth = settle(phases.mark("authMs", deps.authenticate(request)));
+    if (request.headers.get("x-murmur-warm") === "1") return await warm(request, worker, phases, auth);
+
+    const admitted = await admit(request, phases, auth);
+    if (admitted instanceof Response) return admitted;
+    const { body } = admitted;
+    const base = { request, worker, phases, startedAt, ...admitted, translation: body.translation };
+    return body.mode === "audio" ? await dictateAudio({ ...base, body }) : await dictateText({ ...base, body });
+  };
+}

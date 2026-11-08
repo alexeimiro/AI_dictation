@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertFalse, assertRejects } from "jsr:@std/assert@1";
+import { assert, assertEquals, assertFalse, assertRejects, assertStrictEquals } from "jsr:@std/assert@1";
 import {
   cleanKeywords,
   isoLanguage,
@@ -107,6 +107,20 @@ Deno.test("surfaces OpenAI errors without the response body", async () => {
   );
   assertEquals(error.status, 400);
   assertFalse(error.message.includes("secret detail"));
+});
+
+Deno.test("a caller's signal replaces the deadline timer", async () => {
+  const sent: (AbortSignal | null | undefined)[] = [];
+  const fetcher = ((_url: string, init: RequestInit) => {
+    sent.push(init.signal);
+    return Promise.resolve(Response.json({ text: "Привет.", languages: [{ code: "ru" }] }));
+  }) as unknown as typeof fetch;
+  const signal = new AbortController().signal;
+  await transcribeWithOpenAI(request, { apiKey: "k", model: "gpt-transcribe", deadlineMs: 1000, signal, fetcher });
+  await transcribeWithOpenAI(request, { apiKey: "k", model: "gpt-transcribe", deadlineMs: 1000, fetcher });
+  // Identity, not equality: two signals that haven't fired compare as equal objects.
+  assertStrictEquals(sent[0], signal);
+  assert(sent[1] instanceof AbortSignal && sent[1] !== signal, "without one, the deadline arms its own");
 });
 
 Deno.test("the server key prefers the new secret keys", async () => {

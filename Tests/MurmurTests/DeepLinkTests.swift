@@ -34,6 +34,30 @@ struct DeepLinkTests {
         #expect(!LaunchOptions(arguments: ["Murmur"]).useFixtures)
     }
 
+    /// Screenshot runs fake the account and open the sign-in sheet (DEBUG builds only).
+    @Test func parsesAccountLaunchOptions() {
+        let options = LaunchOptions(arguments: [
+            "Murmur", "-route", "home", "-account-state", "signedOut", "-account-email", "olga@example.com",
+            "-account-sheet", "-fixtures",
+        ])
+        guard case .signedOut(let account) = options.accountState else {
+            Issue.record("Expected a signed-out account, got \(String(describing: options.accountState))")
+            return
+        }
+        #expect(account.email == "olga@example.com")
+        #expect(options.accountSheet == .options)
+        #expect(options.useFixtures)
+        #expect(LaunchOptions(arguments: ["Murmur", "-account-sheet", "email"]).accountSheet == .email)
+        #expect(LaunchOptions(arguments: ["Murmur", "-account-sheet", "guest"]).accountSheet == .confirmGuest)
+        #expect(LaunchOptions(arguments: ["Murmur", "-account-state", "guest"]).accountState?.account.email == nil)
+        let apple = LaunchOptions(arguments: ["Murmur", "-account-state", "guest", "-account-provider", "apple"])
+        #expect(apple.accountState?.account.provider == "apple")
+        #expect(LaunchOptions(arguments: ["Murmur", "-account-state", "nope"]).accountState == nil)
+        // A signed-in account can't be faked without a session, which Auth would end at launch.
+        #expect(LaunchOptions(arguments: ["Murmur", "-account-state", "signedIn"]).accountState == nil)
+        #expect(LaunchOptions(arguments: ["Murmur"]).accountSheet == nil)
+    }
+
     @Test @MainActor func initialPathOpensNestedScreens() {
         #expect(Router.initialPath(for: .languages) == [.settings, .languages])
         #expect(Router.initialPath(for: .debug) == [.settings, .debug])

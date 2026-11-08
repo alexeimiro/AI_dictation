@@ -1,4 +1,5 @@
 import MurmurCore
+import os
 import SwiftUI
 import UIKit
 
@@ -30,6 +31,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     /// The last dictation, while the text before the cursor still ends with it (the pad's Undo).
     private var undoableDictation: String?
     private var layoutSignature = ""
+    private var memoryTimer: Timer?
     private lazy var haptics = UIImpactFeedbackGenerator(style: .light, view: view)
     private lazy var readyHaptics = UINotificationFeedbackGenerator(view: view)
 
@@ -62,7 +64,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         super.viewWillAppear(animated)
         updateKeyboardAppearance()
         model.hasFullAccess = hasFullAccess
-        model.defaultStyle = settings.defaultStyle
+        model.style = settings.defaultStyle
+        client?.styleOverride = model.style
         model.announcesReady = hasFullAccess && settings.readyHaptic
         loadLanguages()
         loadTranslationSettings()
@@ -76,6 +79,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         updateAutoShift()
         reloadKeys()
         client?.activate()
+        startMemoryReadout()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -87,6 +91,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         }
         repeater.stop()
         client?.deactivate()
+        memoryTimer?.invalidate()
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -234,8 +239,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
                 HostAppOpener.open(Brand.settingsURL, from: self)
             },
             setStyle: { [weak self] style in
-                self?.model.styleOverride = style
-                self?.client?.styleOverride = style
+                guard let self else { return }
+                // The pill sets the Default style, like the app's Settings, so it outlives this keyboard.
+                settings.defaultStyle = style
+                model.style = style
+                client?.styleOverride = style
             },
             setLanguage: { [weak self] language in
                 self?.selectSourceLanguage(language)
@@ -585,4 +593,38 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         }
     }
 
+    // MARK: Debug
+
+    private func startMemoryReadout() {
+        #if DEBUG
+        memoryTimer?.invalidate()
+        updateMemoryReadout()
+        memoryTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateMemoryReadout() }
+        }
+        #endif
+    }
+
+    #if DEBUG
+    /// The footprint and what is left before the extension is killed, in MB, e.g. "21.4/27MB"
+    /// (the simulator doesn't enforce the limit). The peak goes to the app's Debug screen.
+    private func updateMemoryReadout() {
+        let footprint = Self.physicalFootprint()
+        if footprint > settings.debugKeyboardPeakFootprint { settings.debugKeyboardPeakFootprint = footprint }
+        let used = String(format: "%.1f", Double(footprint) / 1_048_576)
+        model.debugMemory = "\(used)/\(os_proc_available_memory() / 1_048_576)MB"
+    }
+
+    /// What iOS counts against the extension's memory limit (`phys_footprint`).
+    private static func physicalFootprint() -> Int {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let status = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+            }
+        }
+        return status == KERN_SUCCESS ? Int(info.phys_footprint) : 0
+    }
+    #endif
 }

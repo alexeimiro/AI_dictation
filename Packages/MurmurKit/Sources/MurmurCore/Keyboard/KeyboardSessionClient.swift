@@ -54,7 +54,8 @@ public final class KeyboardSessionClient {
     public private(set) var level: Double = 0
     /// A finished dictation that couldn't be inserted automatically (other field, or late).
     public private(set) var pendingResult: DictationResult?
-    /// Style override chosen in the keyboard's style pill, sent with the next dictation.
+    /// The style in the keyboard's style pill, sent with each dictation; nil leaves it to the app's
+    /// Default style.
     public var styleOverride: StylePreset?
     /// BCP-47 tag chosen in the keyboard's language pill; nil means the primary language.
     public var languageOverride: String?

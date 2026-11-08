@@ -25,6 +25,11 @@ struct KeyboardToolbar: View {
             center
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            if let memory = model.debugMemory {
+                Text(memory)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
             if !model.showsVoicePad {
                 micButton
             }
@@ -118,9 +123,9 @@ struct KeyboardToolbar: View {
         Menu {
             ForEach(StylePreset.allCases) { style in
                 Button {
-                    model.actions.setStyle(style == model.defaultStyle ? nil : style)
+                    model.actions.setStyle(style)
                 } label: {
-                    if style == model.effectiveStyle {
+                    if style == model.style {
                         Label(style.title, systemImage: "checkmark")
                     } else {
                         Text(style.title)
@@ -129,7 +134,7 @@ struct KeyboardToolbar: View {
             }
         } label: {
             HStack(spacing: 5) {
-                Text(model.effectiveStyle.title)
+                Text(model.style.title)
                     .font(.system(size: 13, weight: .medium))
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8, weight: .bold))
@@ -141,7 +146,7 @@ struct KeyboardToolbar: View {
             .frame(minHeight: 44)
         }
         .disabled(model.locksSessionOptions)
-        .accessibilityLabel("Style: \(model.effectiveStyle.title)")
+        .accessibilityLabel("Style: \(model.style.title)")
     }
 
     private func caption(_ text: String) -> some View {

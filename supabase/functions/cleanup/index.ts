@@ -2,32 +2,31 @@
 // Turns a transcript into the text the user meant to type, using an OpenAI model.
 // Body: CleanupRequest (see _shared/types.ts). With `targetLanguage` set it translates instead.
 // Responses:
-//   200 { text, status: "cleaned" | "raw", reason, targetLanguage, words, model, ttftMs, totalMs, remaining }
+//   200 { text, status: "cleaned" | "raw", reason, targetLanguage, words, model, ttftMs, totalMs, remaining, timings }
 //       `reason` says why a reply is "raw" (refusal, guard such as "untranslated"); `targetLanguage`
-//       echoes the language a translation was written in, null for a cleanup.
+//       echoes the language a translation was written in, null for a cleanup. `totalMs` is the
+//       OpenAI call alone; `timings` splits the whole request (_shared/timing.ts).
 //   400 bad_request · 401 unauthorized · 402 limit_reached · 429 rate_limited
 //   502/503 cleanup_unavailable → the app inserts its locally formatted transcript instead.
 // Env: OPENAI_API_KEY (required), CLEANUP_MODEL (default gpt-6-astra), CLEANUP_EFFORT (reasoning
 // effort, default low), CLEANUP_DEADLINE_MS (whole call, default 9000), CLEANUP_DISABLED=1.
-import { DEFAULT_EFFORT, DEFAULT_MODEL, describeCleanupError, runCleanup } from "../_shared/cleanup.ts";
-import { adminClient, authenticate, background, corsHeaders, json } from "../_shared/http.ts";
+// Translations take TRANSLATE_MODEL and TRANSLATE_EFFORT instead, each defaulting to its CLEANUP_*
+// value (_shared/config.ts).
+import { describeCleanupError, runCleanup } from "../_shared/cleanup.ts";
+import { cleanupConfig, translationConfig } from "../_shared/config.ts";
+import { adminClient, authenticate, background, clientInfo, corsHeaders, json } from "../_shared/http.ts";
 import { countWords } from "../_shared/text.ts";
+import { beginRequest, Phases } from "../_shared/timing.ts";
 import { LIMITS, parseCleanupRequest } from "../_shared/types.ts";
 
 const admin = adminClient();
-const model = Deno.env.get("CLEANUP_MODEL") ?? DEFAULT_MODEL;
-const effort = Deno.env.get("CLEANUP_EFFORT") ?? DEFAULT_EFFORT;
-/** Hard bound on the whole call; must stay below the app's request timeout (11 s). */
-const deadlineMs = envNumber("CLEANUP_DEADLINE_MS", 9000);
+/** Each deadline is a hard bound on the whole call; it must stay below the app's request timeout (11 s). */
+const cleanupSettings = cleanupConfig();
+const translationSettings = translationConfig();
 /** Kill switch: answers 503 before any database or model call. */
 const disabled = Deno.env.get("CLEANUP_DISABLED") === "1";
 /** Anonymous (trial) callers get a tighter per-minute limit; signed-in users keep the SQL default (40). */
 const ANONYMOUS_PER_MINUTE = 10;
-
-function envNumber(name: string, fallback: number): number {
-  const value = Number(Deno.env.get(name));
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-}
 
 interface Preflight {
   allowed: boolean;
@@ -37,28 +36,30 @@ interface Preflight {
 }
 
 Deno.serve(async (request) => {
+  const worker = beginRequest();
+  const phases = new Phases(worker);
   if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   if (disabled) return json({ error: "cleanup_unavailable" }, 503);
 
-  const caller = await authenticate(request, admin);
+  const caller = await phases.mark("authMs", authenticate(request, admin));
   if (!caller) return json({ error: "unauthorized" }, 401);
 
-  const parsed = parseCleanupRequest(await request.json().catch(() => null));
+  const parsed = parseCleanupRequest(await phases.mark("bodyMs", request.json().catch(() => null)));
   if (!parsed.ok) return json({ error: "bad_request", detail: parsed.error }, 400);
   const body = parsed.value;
   if (caller.isAnonymous && body.transcript.length > LIMITS.anonymousTranscriptChars) {
     return json({ error: "bad_request", detail: "transcript too long" }, 400);
   }
 
-  const { data: preflight, error: preflightError } = await admin
+  const { data: preflight, error: preflightError } = await phases.mark("preflightMs", admin
     .rpc(
       "cleanup_preflight",
       caller.isAnonymous
         ? { p_user: caller.userId, p_per_minute: ANONYMOUS_PER_MINUTE }
         : { p_user: caller.userId },
     )
-    .single<Preflight>();
+    .single<Preflight>());
   if (preflightError || !preflight) {
     console.error("preflight failed", preflightError);
     return json({ error: "cleanup_unavailable" }, 503);
@@ -79,6 +80,7 @@ Deno.serve(async (request) => {
       ttftMs: null,
       totalMs: 0,
       remaining: preflight.remaining,
+      timings: phases.toJSON(),
     });
   }
 
@@ -89,14 +91,18 @@ Deno.serve(async (request) => {
     return json({ error: "cleanup_unavailable" }, 503);
   }
 
+  // With no TRANSLATE_* secret set, a translation runs with the cleanup settings, as it always has.
+  const { model, effort, deadlineMs } = body.targetLanguage ? translationSettings : cleanupSettings;
+  phases.ready();
   try {
-    const outcome = await runCleanup(body, { model, effort, apiKey, deadlineMs });
+    const outcome = await phases.mark("modelMs", runCleanup(body, { model, effort, apiKey, deadlineMs }));
     const words = countWords(outcome.text, body.targetLanguage ?? body.language);
     background(admin.rpc("record_usage", {
       p_user: caller.userId,
       p_dictation: body.dictationId,
       p_words: words,
     }));
+    const timings = phases.toJSON();
     console.log(JSON.stringify({
       event: "cleanup",
       status: outcome.status,
@@ -116,6 +122,10 @@ Deno.serve(async (request) => {
       inputTokens: outcome.usage.input,
       outputTokens: outcome.usage.output,
       cachedTokens: outcome.usage.cacheRead,
+      cacheWriteTokens: outcome.usage.cacheWrite,
+      ...worker,
+      client: clientInfo(request),
+      timings,
     }));
     return json({
       text: outcome.text,
@@ -127,6 +137,7 @@ Deno.serve(async (request) => {
       ttftMs: outcome.ttftMs,
       totalMs: outcome.totalMs,
       remaining: preflight.remaining === null ? null : Math.max(0, preflight.remaining - words),
+      timings,
     });
   } catch (error) {
     const label = describeCleanupError(error);

@@ -40,6 +40,9 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
     /// when the analyzer is adopted, because a language switch can change the target format.
     private var backlog: [AVAudioPCMBuffer] = []
     private var waitingForAnalyzer = false
+    /// Set by `shutdown`, so a teardown or preparation that ends after it leaves no analyzer
+    /// running for the rest of the process. A later `prepare` clears it.
+    private var isShutDown = false
 
     private final class Utterance: @unchecked Sendable {
         let analyzer: SpeechAnalyzer
@@ -67,6 +70,7 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
     func prepare(micFormat: AVAudioFormat, language: ResolvedLanguage) async throws {
         let interval = signposter.beginInterval("prepare")
         defer { signposter.endInterval("prepare", interval) }
+        lock.withLock { isShutDown = false }
         await discardPreparedAnalyzer()
         let module = SpeechAssetManager.makeModule(language.engine, locale: language.locale)
         guard await AssetInventory.status(forModules: [module]) == .installed else {
@@ -162,8 +166,27 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
         prepareNext()
     }
 
+    /// Detaches the dictation's analyzer under the lock and discards it in the background, as
+    /// `cancelUtterance` does. A dictation that begins right after takes the prepared analyzer or
+    /// waits for its own, out of the teardown's reach.
+    func abandonUtterance() {
+        let utterance = lock.withLock { () -> Utterance? in
+            defer {
+                current = nil
+                waitingForAnalyzer = false
+                backlog.removeAll()
+            }
+            return current
+        }
+        Task { [weak self] in
+            if let utterance { await Self.discard(utterance) }
+            self?.prepareNextIfIdle()
+        }
+    }
+
     func shutdown() async {
         let utterances = lock.withLock { () -> [Utterance] in
+            isShutDown = true
             preparingTask?.cancel()
             defer {
                 current = nil
@@ -234,6 +257,7 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
     /// Prepares the analyzer for the next dictation in the background, discarding a previously
     /// prepared one (it may be for another language).
     private func prepareNext() {
+        guard !lock.withLock({ isShutDown }) else { return }
         let (stale, generation) = lock.withLock { () -> (Utterance?, UInt64) in
             preparingTask?.cancel()
             preparingGeneration &+= 1
@@ -249,6 +273,14 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
         lock.withLock {
             if preparingGeneration == generation { preparingTask = task }
         }
+    }
+
+    /// `prepareNext` after an abandoned dictation's teardown, which can finish after the next
+    /// dictation began. Skipped when that one has an analyzer or is waiting for its own, or one is
+    /// already prepared or on its way: restarting would only delay it.
+    private func prepareNextIfIdle() {
+        let idle = lock.withLock { current == nil && !waitingForAnalyzer && prepared == nil && !preparingInFlight }
+        if idle { prepareNext() }
     }
 
     private func prepareAnalyzer(generation: UInt64) async {
@@ -295,6 +327,8 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
     private func adopt(_ utterance: Utterance) {
         let (buffers, converter, format, stale) = lock.withLock {
             () -> ([AVAudioPCMBuffer], AVAudioConverter?, AVAudioFormat?, Utterance?) in
+            // Ready only after `shutdown`: discarded like a stale one.
+            if isShutDown { return ([], nil, nil, utterance) }
             if waitingForAnalyzer, current == nil {
                 current = utterance
                 waitingForAnalyzer = false

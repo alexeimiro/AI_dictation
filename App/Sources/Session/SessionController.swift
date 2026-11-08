@@ -47,7 +47,9 @@ final class SessionController {
     /// In the cloud, the on-device languages already installed, for when a request fails.
     @ObservationIgnored private var onDeviceFallbacks: [String: ResolvedLanguage] = [:]
     @ObservationIgnored private let history: any TranscriptSink
-    @ObservationIgnored private let settings = SharedSettings.shared
+    /// Where each dictation's timings go (Debug screen); nil keeps none.
+    @ObservationIgnored private let timingsLog: TimingsLog?
+    @ObservationIgnored private let settings: SharedSettings
     @ObservationIgnored private let audio = AudioCapture()
     @ObservationIgnored private let liveActivity = LiveActivityController()
     @ObservationIgnored private let logger = Logger(subsystem: "Murmur", category: "Session")
@@ -95,13 +97,16 @@ final class SessionController {
     static let reconnectDelays: [Duration] = [.zero, .milliseconds(500), .seconds(1), .seconds(2)]
 
     init(transport: IPCTransport, pipeline: DictationPipeline, assets: SpeechAssetManager, history: any TranscriptSink,
-         transcription: (any CloudTranscribing)? = nil) {
+         transcription: (any CloudTranscribing)? = nil, timingsLog: TimingsLog? = nil,
+         settings: SharedSettings = .shared) {
         self.transport = transport
         self.publisher = HotStatePublisher(transport: transport)
         self.pipeline = pipeline
         self.assets = assets
         self.transcription = transcription
         self.history = history
+        self.timingsLog = timingsLog
+        self.settings = settings
         publisher.set(.off)
         commandObservation = transport.observe(.command) { [weak self] in
             MainActor.assumeIsolated { self?.handleCommand() }
@@ -165,6 +170,17 @@ final class SessionController {
             transport.post(.stateChanged)
         }
     }
+
+    #if DEBUG
+    /// Tests: where `start()` leaves the session, ready with `transcriber`, but without the
+    /// microphone, so a dictation can go through the session.
+    func startForTesting(with transcriber: Transcriber, language: ResolvedLanguage) {
+        self.transcriber = transcriber
+        primaryTag = language.tag
+        languages = [language.tag: language]
+        phase = .ready
+    }
+    #endif
 
     /// The keyboard opened the app for `request`: turn the microphone on and record that
     /// dictation straight away, so the user can talk while getting back to their app.
@@ -486,8 +502,13 @@ final class SessionController {
         }
     }
 
-    /// Ends the current dictation; `commit: false` discards it.
-    func endDictation(commit: Bool) {
+    /// Ends the current dictation; `commit: false` discards it. `requestedAt`: the keyboard's stop
+    /// command, for the timings.
+    func endDictation(commit: Bool, requestedAt: Date? = nil) {
+        if let requestedAt {
+            active?.stopRequestedAt = requestedAt
+            active?.tapToStopMs = Date().milliseconds(since: requestedAt)
+        }
         guard let dictation = active, let transcriber else { return }
         active = nil
         capTask?.cancel()
@@ -496,7 +517,9 @@ final class SessionController {
         playSound(.stop)
 
         guard commit else {
-            Task { await transcriber.cancelUtterance() }
+            // At once, not in a task: the next dictation can begin before a task would run
+            // (`becomeReady` starts a queued one, `handleStart` a replacement).
+            transcriber.abandonUtterance()
             becomeReady()
             return
         }
@@ -510,9 +533,10 @@ final class SessionController {
         Task {
             let outcome = await pipeline.complete(
                 dictation, transcriber: transcriber, audioSeconds: audioSeconds, stoppedAt: stoppedAt)
-            // The keyboard first, then history, so the save never delays the insertion.
+            // The keyboard first, then history and the timings, so saving never delays the insertion.
             deliver(outcome.result)
             history.record(outcome.transcript)
+            if let timings = outcome.timings { timingsLog?.append(timings) }
             becomeReady()
             // Not while a dictation the keyboard asked for in the meantime has just begun.
             if settings.disableAfter == .immediately, active == nil {
@@ -567,7 +591,7 @@ final class SessionController {
         case .start:
             handleStart(command)
         case .stop:
-            if active?.requestId == command.requestId { endDictation(commit: true) }
+            if active?.requestId == command.requestId { endDictation(commit: true, requestedAt: command.createdAt) }
         case .cancel:
             cancelledRequests.insert(command.requestId)
             if queuedStart?.requestId == command.requestId {

@@ -27,6 +27,18 @@ struct PayloadStoreTests {
         #expect(store.isClaimed(id))
     }
 
+    /// The insert time on the Debug screen is the claim marker's date.
+    @Test func claimDateIsWhenTheResultWasClaimed() throws {
+        let store = IPCPayloadStore(container: .temporary())
+        let id = UUID()
+        #expect(store.claimDate(id) == nil)
+        let before = Date()
+        store.claim(id)
+        let claimed = try #require(store.claimDate(id))
+        #expect(abs(claimed.timeIntervalSince(before)) < 2)
+        #expect(store.claimDate(UUID()) == nil)
+    }
+
     @Test func launchTokenIsSingleUseAndExpires() throws {
         let store = IPCPayloadStore(container: .temporary())
         let now = Date()
@@ -168,6 +180,43 @@ struct CleanupGateTests {
     @Test func cuesAreWholeWords() {
         #expect(!CleanupGate.needsModel("Check the dashboard and the dotted line.", style: .casual))
         #expect(!CleanupGate.needsModel("Стоит купить сорочку.", style: .casual))
+    }
+}
+
+struct StyleFormatterTests {
+    @Test func formalAndWordForWordKeepTheText() {
+        for style in [StylePreset.formal, .verbatim] {
+            #expect(StyleFormatter.apply(style, to: "Sounds good, see you soon.") == "Sounds good, see you soon.")
+        }
+    }
+
+    @Test func casualDropsOnlyASentencesFinalPeriod() {
+        #expect(StyleFormatter.apply(.casual, to: "Sounds good. See you soon.") == "Sounds good. See you soon")
+        #expect(StyleFormatter.apply(.casual, to: "Email me at john@gmail.com.") == "Email me at john@gmail.com")
+        for text in ["Are you coming?", "Great!", "Wait...", "Wait…", "See you at 5 p.m.", "Купи хлеб, молоко и т.д."] {
+            #expect(StyleFormatter.apply(.casual, to: text) == text, "\(text)")
+        }
+    }
+
+    @Test func veryCasualLowercasesSentenceStartsButNotIOrNames() {
+        #expect(StyleFormatter.apply(.veryCasual, to: "Sounds good. See you soon.") == "sounds good. see you soon")
+        #expect(StyleFormatter.apply(.veryCasual, to: "I'm on my way. NASA called.") == "I'm on my way. NASA called")
+        #expect(StyleFormatter.apply(.veryCasual, to: "Are we still on for Friday?") == "are we still on for Friday?")
+        #expect(StyleFormatter.apply(.veryCasual, to: "Привет. Я дома.") == "привет. я дома")
+    }
+
+    @Test func excitedEndsWithAnExclamationMark() {
+        #expect(StyleFormatter.apply(.excited, to: "Sounds good.") == "Sounds good!")
+        #expect(StyleFormatter.apply(.excited, to: "Sounds good") == "Sounds good!")
+        #expect(StyleFormatter.apply(.excited, to: "Are you coming?") == "Are you coming?")
+        #expect(StyleFormatter.apply(.excited, to: "See you at 5 p.m.") == "See you at 5 p.m.")
+    }
+
+    /// The model already wrote the casing and the exclamations; only the final period is enforced.
+    @Test func modelOutputKeepsItsCasing() {
+        #expect(StyleFormatter.apply(.veryCasual, to: "Anna said hi.", cleaned: true) == "Anna said hi")
+        #expect(StyleFormatter.apply(.casual, to: "Sounds good.", cleaned: true) == "Sounds good")
+        #expect(StyleFormatter.apply(.excited, to: "Sounds good.", cleaned: true) == "Sounds good.")
     }
 }
 

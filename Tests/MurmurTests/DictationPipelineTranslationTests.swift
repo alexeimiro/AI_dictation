@@ -40,6 +40,7 @@ private final class FinishedTranscriber: Transcriber, @unchecked Sendable {
     func append(_ buffer: AVAudioPCMBuffer) {}
     func finishUtterance() async throws -> String { "можешь скинуть отчёт до пятницы" }
     func cancelUtterance() async {}
+    func abandonUtterance() {}
     func shutdown() async {}
 }
 

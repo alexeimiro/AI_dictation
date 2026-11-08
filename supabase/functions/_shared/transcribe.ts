@@ -118,17 +118,20 @@ export interface TranscriptionResult {
   languages: string[];
 }
 
-/** Calls OpenAI with an overall deadline. Throws on HTTP errors and timeouts. */
+/**
+ * Calls OpenAI with an overall deadline. Throws on HTTP errors, timeouts and aborts. A `signal`
+ * replaces the `AbortSignal.timeout(deadlineMs)` default, so it should carry a deadline of its own.
+ */
 export async function transcribeWithOpenAI(
   request: TranscribeRequest,
-  options: { apiKey: string; model: string; deadlineMs: number; fetcher?: typeof fetch },
+  options: { apiKey: string; model: string; deadlineMs: number; signal?: AbortSignal; fetcher?: typeof fetch },
 ): Promise<TranscriptionResult> {
   const fetcher = options.fetcher ?? fetch;
   const response = await fetcher("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
     headers: { Authorization: `Bearer ${options.apiKey}` },
     body: openAIForm(request, options.model),
-    signal: AbortSignal.timeout(options.deadlineMs),
+    signal: options.signal ?? AbortSignal.timeout(options.deadlineMs),
   });
   if (!response.ok) {
     // The body can echo request details; keep only the status and OpenAI's error type.

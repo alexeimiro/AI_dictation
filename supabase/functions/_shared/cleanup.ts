@@ -21,8 +21,8 @@ export interface CleanupUsage {
   input: number;
   output: number;
   cacheRead: number;
-  /** Always 0: OpenAI doesn't charge for writing its prompt cache. Kept for the logs' shape. */
-  cacheCreation: number;
+  /** Input tokens written to the prompt cache, 0 when the reply doesn't say. Writes are billed. */
+  cacheWrite: number;
 }
 
 export interface CleanupOutcome {
@@ -106,7 +106,7 @@ interface ResponsesReply {
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
-    input_tokens_details?: { cached_tokens?: number };
+    input_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
   };
 }
 
@@ -138,7 +138,7 @@ export async function runCleanup(request: CleanupRequest, options: CleanupOption
       input: reply.usage?.input_tokens ?? 0,
       output: reply.usage?.output_tokens ?? 0,
       cacheRead,
-      cacheCreation: 0,
+      cacheWrite: reply.usage?.input_tokens_details?.cache_write_tokens ?? 0,
     },
     cacheReadTokens: cacheRead,
   };

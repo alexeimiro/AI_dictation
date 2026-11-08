@@ -9,7 +9,7 @@ import os
 /// compressed to AAC. If the language's on-device model is already on the iPhone, an on-device
 /// transcriber listens alongside and is used when the request fails (offline, a server error,
 /// the free plan's weekly limit), so a dictation isn't lost.
-final class OpenAITranscriber: Transcriber, @unchecked Sendable {
+final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked Sendable {
     static let sampleRate: Double = 16_000
     /// Shorter recordings are treated as silence instead of being sent.
     static let minimumSeconds: Double = 0.3
@@ -38,6 +38,11 @@ final class OpenAITranscriber: Transcriber, @unchecked Sendable {
     /// The fallback is listening to the current dictation.
     private var fallbackListening = false
     private var cloudPausedUntil: Date?
+    /// Bumped by every `beginUtterance` and `abandonUtterance`, so a finish or a buffer that
+    /// outlives its dictation doesn't report into the next one.
+    private var utteranceNumber = 0
+    /// The last finished dictation's measurements, until `takeTimings`.
+    private var timings: UtteranceTimings?
 
     /// `fallbackLanguages`: languages whose on-device model is installed and verified.
     init(client: any CloudTranscribing, fallback: (any Transcriber)? = nil,
@@ -101,54 +106,75 @@ final class OpenAITranscriber: Transcriber, @unchecked Sendable {
     }
 
     func beginUtterance() {
-        let listen = lock.withLock { () -> Bool in
+        let (unended, listen) = lock.withLock { () -> (Bool, Bool) in
+            // The last dictation's part, when a reconnect let this one begin while that one was
+            // still uploading: its finish can no longer claim it, so it's ended here.
+            let unended = fallbackListening
             samples.removeAll(keepingCapacity: true)
             capturing = true
+            utteranceNumber += 1
+            timings = nil
             // The fallback only helps when it recognizes the dictation's language.
             fallbackListening = fallbackPrepared && language.map { fallbackLanguages[$0.tag] != nil } == true
-            return fallbackListening
+            return (unended, fallbackListening)
         }
+        if unended { fallback?.abandonUtterance() }
         if listen { fallback?.beginUtterance() }
     }
 
     /// Audio thread.
     func append(_ buffer: AVAudioPCMBuffer) {
-        let (converter, capturing, listening) = lock.withLock { (self.converter, self.capturing, fallbackListening) }
+        let (converter, capturing, listening, utterance) = lock.withLock {
+            (self.converter, self.capturing, fallbackListening, utteranceNumber)
+        }
         guard capturing, let converter else { return }
         if listening { fallback?.append(buffer) }
         guard let converted = convert(buffer, with: converter) else { return }
         let channel = UnsafeBufferPointer(start: converted.floatChannelData![0], count: Int(converted.frameLength))
-        lock.withLock { samples.append(contentsOf: channel) }
+        // Not into a dictation that was abandoned, or began, while this buffer was converted.
+        lock.withLock { if utteranceNumber == utterance { samples.append(contentsOf: channel) } }
     }
 
     func finishUtterance() async throws -> String {
-        let (pcm, language, listening, paused) = lock.withLock { () -> ([Float], ResolvedLanguage?, Bool, Bool) in
+        let (pcm, language, paused, utterance) = lock.withLock { () -> ([Float], ResolvedLanguage?, Bool, Int) in
             capturing = false
             let taken = samples
             samples.removeAll(keepingCapacity: true)
-            return (taken, self.language, fallbackListening, cloudPausedUntil.map { $0 > Date() } ?? false)
+            return (taken, self.language, cloudPausedUntil.map { $0 > Date() } ?? false, utteranceNumber)
         }
         guard Double(pcm.count) >= Self.sampleRate * Self.minimumSeconds else {
-            if listening { await fallback?.cancelUtterance() }
+            if claimFallback(of: utterance) { fallback?.abandonUtterance() }
             return ""
         }
-        if paused, listening, let fallback {
+        if paused, claimFallback(of: utterance), let fallback {
             return try await fallback.finishUtterance()
         }
         do {
+            let encodeStarted = ContinuousClock.now
             let audio = try EncodedAudio(samples: pcm, sampleRate: Self.sampleRate)
-            let text = try await client.transcribe(
+            var measured = UtteranceTimings(encodeMs: encodeStarted.elapsedMilliseconds, audioBytes: audio.data.count)
+            record(measured, for: utterance)
+            let transcript = try await client.transcribe(
                 audio: audio.data, format: audio.format,
                 language: language?.language.isAutomatic == true ? nil : language?.tag,
                 keywords: language?.contextualStrings ?? [])
+            measured.requests = transcript.timing.map { [$0] } ?? []
+            measured.cloudTranscript = true
+            record(measured, for: utterance)
             lock.withLock { cloudPausedUntil = nil }
-            if listening { await fallback?.cancelUtterance() }
-            return text
+            if claimFallback(of: utterance) { fallback?.abandonUtterance() }
+            return transcript.text
+        } catch CloudTranscriptionError.cancelled {
+            // The dictation is being dropped, or another path already answered: the service isn't
+            // at fault, and nobody is waiting for an on-device transcript.
+            if claimFallback(of: utterance) { fallback?.abandonUtterance() }
+            throw CloudTranscriptionError.cancelled
         } catch {
             if case .unavailable = error as? CloudTranscriptionError {
                 lock.withLock { cloudPausedUntil = Date().addingTimeInterval(Self.cloudPause) }
             }
-            guard listening, let fallback else { throw error }
+            recordFailure(error, for: utterance)
+            guard claimFallback(of: utterance), let fallback else { throw error }
             logger.notice("Cloud transcription failed, using on-device: \(error.localizedDescription, privacy: .public)")
             return try await fallback.finishUtterance()
         }
@@ -163,8 +189,57 @@ final class OpenAITranscriber: Transcriber, @unchecked Sendable {
         if listening { await fallback?.cancelUtterance() }
     }
 
+    /// Under the lock, so audio and a finish still under way for this dictation find it gone: no
+    /// samples or timings kept (`utteranceNumber` moves on), and the fallback's part ended once,
+    /// here.
+    func abandonUtterance() {
+        let listening = lock.withLock { () -> Bool in
+            capturing = false
+            samples.removeAll(keepingCapacity: true)
+            utteranceNumber += 1
+            timings = nil
+            defer { fallbackListening = false }
+            return fallbackListening
+        }
+        if listening { fallback?.abandonUtterance() }
+    }
+
     func shutdown() async {
         await fallback?.shutdown()
+    }
+
+    /// Whether the fallback still listens to `utterance`, handing it to the caller to end if so.
+    /// False once that dictation was abandoned (which ended it) or a newer one began, so a finish
+    /// that outlives its dictation never ends or uses the next one's.
+    private func claimFallback(of utterance: Int) -> Bool {
+        lock.withLock {
+            guard utteranceNumber == utterance, fallbackListening else { return false }
+            fallbackListening = false
+            return true
+        }
+    }
+
+    // MARK: Timings
+
+    func takeTimings() -> UtteranceTimings? {
+        lock.withLock {
+            defer { timings = nil }
+            return timings
+        }
+    }
+
+    /// Keeps `measured` for `takeTimings`, unless a newer dictation has begun meanwhile.
+    private func record(_ measured: UtteranceTimings, for utterance: Int) {
+        lock.withLock {
+            if utteranceNumber == utterance { timings = measured }
+        }
+    }
+
+    /// Adds why the request failed to `utterance`'s timings, for the pipeline to tell the user.
+    private func recordFailure(_ error: any Error, for utterance: Int) {
+        lock.withLock {
+            if utteranceNumber == utterance { timings?.cloudFailure = error as? CloudTranscriptionError }
+        }
     }
 
     // MARK: Audio

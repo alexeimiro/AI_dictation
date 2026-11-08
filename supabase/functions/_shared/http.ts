@@ -2,7 +2,7 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.1
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-murmur-warm, x-murmur-dictation",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -56,6 +56,11 @@ export async function authenticate(request: Request, admin: SupabaseClient): Pro
 
 export function clientIP(request: Request): string {
   return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+}
+
+/** The caller's `x-client-info` (app build or SDK version) for the logs, capped: the client sets it. */
+export function clientInfo(request: Request): string | null {
+  return request.headers.get("x-client-info")?.slice(0, 64) ?? null;
 }
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;

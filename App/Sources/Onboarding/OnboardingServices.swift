@@ -37,11 +37,12 @@ final class OnboardingServices {
             languages: SystemKeyboardLanguages())
     }
 
-    /// `offer: nil` behaves like a server that can't be reached.
-    static func fixtures(offer: OfferVariant? = .trial(days: 14)) -> OnboardingServices {
+    /// `offer: nil` behaves like a server that can't be reached. `account`: a faked one
+    /// (`-account-state`), which the offer follows.
+    static func fixtures(offer: OfferVariant? = .trial(days: 14), account: AccountModel? = nil) -> OnboardingServices {
         OnboardingServices(
             auth: FixtureAuth(),
-            offers: FixtureOffers(offer: offer),
+            offers: FixtureOffers(offer: offer, account: account),
             notifications: FixtureNotifications(),
             profile: FixtureProfileSync(),
             languages: FixtureLanguages())
@@ -115,6 +116,7 @@ final class SupabaseOnboardingAuth: OnboardingAuthenticating {
         do {
             try await client.auth.signInWithIdToken(
                 credentials: OpenIDConnectCredentials(provider: .apple, idToken: idToken, nonce: nonce))
+            backend?.didSignIn()
             if let name = credential.fullName.flatMap(Self.format), !name.isEmpty {
                 // Apple sends the name only on the first sign-in.
                 _ = try? await client.auth.update(user: UserAttributes(data: ["full_name": .string(name)]))
@@ -131,6 +133,7 @@ final class SupabaseOnboardingAuth: OnboardingAuthenticating {
             try await client.auth.signInWithOAuth(provider: .google, redirectTo: Self.callbackURL) { session in
                 session.prefersEphemeralWebBrowserSession = false
             }
+            backend?.didSignIn()
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
             throw .cancelled
         } catch {
@@ -155,12 +158,14 @@ final class SupabaseOnboardingAuth: OnboardingAuthenticating {
         } catch {
             throw .failed("That code didn't work. Check it, or send a new one.")
         }
+        backend?.didSignIn()
     }
 
     func handleCallback(_ url: URL) async -> Bool {
         guard let client = backend?.client else { return false }
         do {
             try await client.auth.session(from: url)
+            backend?.didSignIn()
             return true
         } catch {
             logger.error("Auth callback failed: \(error.localizedDescription, privacy: .public)")
@@ -456,12 +461,16 @@ final class FixtureAuth: OnboardingAuthenticating {
 @MainActor
 final class FixtureOffers: OfferProviding {
     let offer: OfferVariant?
+    private let account: AccountModel?
 
-    init(offer: OfferVariant?) {
+    init(offer: OfferVariant?, account: AccountModel? = nil) {
         self.offer = offer
+        self.account = account
     }
 
     func currentOffer() async throws -> OfferVariant {
+        // As `ensureSession` refuses the real one.
+        if account?.isSignedOut == true { throw BackendError.signedOut }
         guard let offer else { throw URLError(.notConnectedToInternet) }
         return offer
     }

@@ -8,6 +8,16 @@ struct SettingsView: View {
     var body: some View {
         @Bindable var settings = model.settings
         Form {
+            // Also while signed out: the keyboard's button for opening Murmur lands here.
+            if let account = model.account, account.isSignedOut || account.isGuest {
+                Section {
+                    Button("Sign in…") { model.signInSheet = .options }
+                } header: {
+                    Text("Account")
+                } footer: {
+                    Text(Self.accountFooter(phrase: account.phrase, guest: account.isGuest))
+                }
+            }
             Section("Dictation") {
                 NavigationLink(value: Route.languages) {
                     LabeledContent("Languages", value: languagesSummary)
@@ -60,6 +70,18 @@ struct SettingsView: View {
         .background(Palette.canvas)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// What signing in brings back, after a sign-out or "Continue without an account". No word on
+    /// a guest's plan: it's whatever the server grants a new user. `phrase`: how the copy names
+    /// the remembered account (`AccountModel.Account.phrase`).
+    static func accountFooter(phrase: String?, guest: Bool) -> String {
+        if guest {
+            let signIn = phrase.map { "Sign in \($0) to get it back." } ?? "Sign in to get it back."
+            return "You're using Murmur as a guest, without your account's plan. \(signIn)"
+        }
+        let signIn = phrase.map { "Sign in again \($0)" } ?? "Sign in again"
+        return "You're signed out. \(signIn) to keep cloud dictation and your plan."
     }
 
     private var languagesSummary: String {

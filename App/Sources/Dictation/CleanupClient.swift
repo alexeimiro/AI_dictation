@@ -1,6 +1,5 @@
 import Foundation
 import MurmurCore
-import Supabase
 
 /// Calls the `cleanup` Edge Function (an OpenAI model) with the transcript.
 @MainActor
@@ -21,6 +20,14 @@ final class CleanupClient: Cleaning {
         /// deployed before translation leaves it out: it ignores `targetLanguage` and cleans up in
         /// the spoken language.
         var targetLanguage: String? = nil
+        /// What the function measured; a function deployed before timings leaves it out.
+        var timings: ServerTiming? = nil
+        /// How the request went. Set by the client, never decoded from the reply.
+        var request: RequestTiming? = nil
+
+        private enum CodingKeys: String, CodingKey {
+            case text, status, words, model, ttftMs, totalMs, remaining, reason, targetLanguage, timings
+        }
     }
 
     enum Failure: Error {
@@ -28,6 +35,9 @@ final class CleanupClient: Cleaning {
         case limitReached
         case rateLimited
         case unavailable(String)
+        /// The server rejected the signed-in account's session (`BackendError.signedOut`). Nothing
+        /// was sent, and nothing will be until the user signs in again.
+        case signedOut
     }
 
     private struct RequestBody: Encodable {
@@ -50,17 +60,17 @@ final class CleanupClient: Cleaning {
         let snippets: [Snippet]
     }
 
-    private let backend: Backend?
+    private let functions: EdgeFunctionClient?
     /// The server bounds the whole model call at 9 s (`CLEANUP_DEADLINE_MS`); this leaves ~2 s
     /// for the edge function and the network. Russian costs more tokens per word, so long
     /// dictations use most of it.
     private let timeout: TimeInterval = 11
 
-    init(backend: Backend?) {
-        self.backend = backend
+    init(functions: EdgeFunctionClient?) {
+        self.functions = functions
     }
 
-    var isConfigured: Bool { backend != nil }
+    var isConfigured: Bool { functions != nil }
 
     func clean(
         dictationId: UUID,
@@ -71,7 +81,7 @@ final class CleanupClient: Cleaning {
         dictionary: [DictionaryTerm],
         snippets: [SnippetDefinition]
     ) async throws(Failure) -> Response {
-        guard let backend else { throw .notConfigured }
+        guard let functions else { throw .notConfigured }
         let body = RequestBody(
             dictationId: dictationId,
             transcript: transcript,
@@ -81,15 +91,18 @@ final class CleanupClient: Cleaning {
             dictionary: dictionary.prefix(300).map { .init(term: $0.term, misspelling: $0.misspelling) },
             snippets: snippets.prefix(200).map { .init(token: SnippetPlaceholders.token(for: $0), trigger: $0.trigger) })
         do {
-            try await backend.ensureSession()
-            return try await backend.client.functions.invoke(
-                "cleanup", options: FunctionInvokeOptions(body: body, timeoutInterval: timeout))
-        } catch let FunctionsError.httpError(code, _) {
+            let reply = try await functions.post("cleanup", body: body, timeout: timeout)
+            var response = try JSONDecoder().decode(Response.self, from: reply.data)
+            response.request = reply.timing
+            return response
+        } catch EdgeFunctionError.httpError(let code) {
             switch code {
             case 402: throw .limitReached
             case 429: throw .rateLimited
             default: throw .unavailable("HTTP \(code)")
             }
+        } catch EdgeFunctionError.transport(BackendError.signedOut) {
+            throw .signedOut
         } catch {
             throw .unavailable(error.localizedDescription)
         }

@@ -4,6 +4,10 @@ import SwiftUI
 /// Reference 08: "Continue with your email", then a six-digit code from the email (or its link,
 /// handled by the `murmur://auth-callback` deep link).
 struct EmailSignInView: View {
+    /// Back from the address step, and a finished sign-in. Nil is onboarding's: its back and
+    /// `.authenticated(.email)` events.
+    private let onBack: (() -> Void)?
+    private let onSignedIn: (() -> Void)?
     @Environment(AppModel.self) private var model
     @State private var email = ""
     @State private var code = ""
@@ -11,6 +15,11 @@ struct EmailSignInView: View {
     @State private var busy = false
     @State private var error: String?
     @FocusState private var focused: Bool
+
+    init(onBack: (() -> Void)? = nil, onSignedIn: (() -> Void)? = nil) {
+        self.onBack = onBack
+        self.onSignedIn = onSignedIn
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -58,6 +67,8 @@ struct EmailSignInView: View {
                     sentTo = nil
                     code = ""
                     error = nil
+                } else if let onBack {
+                    onBack()
                 } else {
                     model.onboarding.send(.back)
                 }
@@ -137,7 +148,7 @@ struct EmailSignInView: View {
             defer { busy = false }
             do throws(OnboardingAuthError) {
                 try await model.onboardingServices.auth.verifyEmailCode(code, email: address)
-                model.onboarding.send(.authenticated(.email))
+                if let onSignedIn { onSignedIn() } else { model.onboarding.send(.authenticated(.email)) }
             } catch {
                 self.error = error.message
             }

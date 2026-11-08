@@ -44,4 +44,9 @@ final class SettingsModel {
         transcriberEngine = TranscriberEngine.current
         autoReturn = settings.autoReturn
     }
+
+    /// The keyboard's style pill changes the default style while the app waits in the background.
+    func reloadDefaultStyle() {
+        if defaultStyle != settings.defaultStyle { defaultStyle = settings.defaultStyle }
+    }
 }

@@ -30,8 +30,35 @@ protocol Transcriber: AnyObject, Sendable {
 
     func cancelUtterance() async
 
+    /// Drops the current dictation at once, from any context, and tears it down in the
+    /// background: nothing it does afterwards reaches a dictation that begins right after (a
+    /// `cancelUtterance` run in a task could stop that one recording). Each transcriber
+    /// implements it itself; a default forwarding to `cancelUtterance` would bring the race back.
+    func abandonUtterance()
+
     /// Called when the session ends.
     func shutdown() async
+}
+
+/// What a cloud transcriber measured for one dictation, for `DictationTimings`.
+struct UtteranceTimings: Sendable, Equatable {
+    /// Compressing the audio after stop.
+    var encodeMs: Int?
+    var audioBytes: Int?
+    /// The `transcribe` request; empty when the cloud was skipped or the request failed.
+    var requests: [RequestTiming] = []
+    /// The transcript is the cloud's; false when the fallback made it.
+    var cloudTranscript = false
+    /// Why the cloud didn't answer, when the fallback answered instead: its transcript alone
+    /// doesn't say that the account is signed out.
+    var cloudFailure: CloudTranscriptionError?
+}
+
+/// A transcriber that measures its cloud work (`OpenAITranscriber`).
+protocol UtteranceTimingProviding: AnyObject {
+    /// The last finished dictation's measurements, once: they are cleared by this call, when the
+    /// next dictation begins, and when one is abandoned.
+    func takeTimings() -> UtteranceTimings?
 }
 
 enum TranscriberEngine: String, CaseIterable, Identifiable {
@@ -128,5 +155,7 @@ final class StubTranscriber: Transcriber, @unchecked Sendable {
     }
 
     func cancelUtterance() async {}
+    /// Nothing to tear down: the next `beginUtterance` resets the frame count.
+    func abandonUtterance() {}
     func shutdown() async {}
 }

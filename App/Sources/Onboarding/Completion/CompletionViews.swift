@@ -39,6 +39,10 @@ struct TrialOfferView: View {
     var body: some View {
         let store = model.onboarding
         let offer = store.answers.offer
+        // The server rejected the account's session after sign-in: no retry can load the plan, and
+        // this page has no way back, so it offers the sign-in sheet (which also lets them go on
+        // as a guest).
+        let signedOut = model.account?.isSignedOut == true
         OnboardingPage(showsHeader: false, actionInset: 16) {
             VStack(spacing: 0) {
                 if let offer {
@@ -74,13 +78,15 @@ struct TrialOfferView: View {
                 } else if failed {
                     Spacer()
                     VStack(spacing: 12) {
-                        Text("Couldn’t load your plan")
+                        Text(signedOut ? "You’re signed out" : "Couldn’t load your plan")
                             .font(.serif(32))
                             .foregroundStyle(Palette.ink)
-                        Text("Check your connection and try again.")
+                        Text(signedOut ? Self.signedOutDetail(model.account?.phrase) : "Check your connection and try again.")
                             .font(.ui(17))
                             .foregroundStyle(Palette.textSecondary)
+                            .multilineTextAlignment(.center)
                     }
+                    .padding(.horizontal, 24)
                     Spacer()
                 } else {
                     Spacer()
@@ -89,7 +95,10 @@ struct TrialOfferView: View {
                 }
             }
         } actions: {
-            if offer == nil && failed {
+            if offer == nil && failed && signedOut {
+                Button("Sign in again") { model.signInSheet = .options }
+                    .buttonStyle(.pill(.ink))
+            } else if offer == nil && failed {
                 Button("Try again") { Task { await load() } }
                     .buttonStyle(.pill(.ink))
                     .disabled(loading)
@@ -105,6 +114,18 @@ struct TrialOfferView: View {
         .task {
             if store.answers.offer == nil { await load() }
         }
+        .onChange(of: signedOut) { _, stillSignedOut in
+            // Signed in again, or going on as a guest: the plan can load now.
+            guard !stillSignedOut, failed, store.answers.offer == nil else { return }
+            failed = false
+            Task { await load() }
+        }
+    }
+
+    /// Under "You're signed out".
+    static func signedOutDetail(_ phrase: String?) -> String {
+        guard let phrase else { return "Sign in again to load your plan." }
+        return "Sign in again \(phrase) to load your plan."
     }
 
     private func load() async {

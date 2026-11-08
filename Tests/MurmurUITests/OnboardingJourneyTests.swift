@@ -218,4 +218,22 @@ final class OnboardingJourneyTests: XCTestCase {
         expectText("Couldn’t load your plan")
         XCTAssertTrue(button("Try again").waitForExistence(timeout: 5))
     }
+
+    /// The server rejected the session after sign-in, so the offer can't load and this page has
+    /// no way back. It opens the sign-in sheet instead of a retry that can't work, and going on
+    /// as a guest there finishes onboarding.
+    func testASignOutBeforeTheOfferStillLetsOnboardingFinish() {
+        app.launchArguments = ["-onboarding-step", "trialOffer", "-account-state", "signedOut",
+                               "-account-email", "olga@example.com"]
+        app.launch()
+        expectText("You’re signed out")
+        XCTAssertFalse(button("Try again").exists)
+        tap("Sign in again")
+        expectText("You were signed in as olga@example.com")
+        tap("Continue without an account")
+        tap("Continue as a guest")
+        expectText("unlimited access for 2 weeks")
+        tap("Get started")
+        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5), "Home after the offer")
+    }
 }

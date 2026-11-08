@@ -82,6 +82,7 @@ public final class SharedSettings: @unchecked Sendable {
         case useBuiltInMic, aiCleanupEnabled, transcriberEngine, liveActivities, transcriptRetention, autoReturn
         case primaryLanguage, secondaryLanguage, verifiedEngines
         case translationEnabled, translationSourceLanguage, translationTargetLanguage, recentTranslationLanguages
+        case debugKeyboardPeakFootprint
         /// Phase 1 single-language setting, migrated into `primaryLanguage`.
         case dictationLocale
     }
@@ -221,6 +222,13 @@ public final class SharedSettings: @unchecked Sendable {
     public var transcriberEngine: String? {
         get { defaults.string(forKey: Key.transcriberEngine.rawValue) }
         set { setString(newValue, for: .transcriberEngine) }
+    }
+
+    /// Debug: the keyboard's largest memory footprint so far, in bytes. Debug builds of the
+    /// keyboard raise it; the app's Debug screen shows it and resets it to 0.
+    public var debugKeyboardPeakFootprint: Int {
+        get { defaults.integer(forKey: Key.debugKeyboardPeakFootprint.rawValue) }
+        set { defaults.set(newValue, forKey: Key.debugKeyboardPeakFootprint.rawValue) }
     }
 
     private func bool(_ key: Key, default value: Bool) -> Bool {

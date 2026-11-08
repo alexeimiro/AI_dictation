@@ -10,8 +10,8 @@ final class KeyboardModel {
     var sessionStatus: SessionStatus = .off
     var pendingResult: DictationResult?
     var hasFullAccess = false
-    var styleOverride: StylePreset?
-    var defaultStyle: StylePreset = .casual
+    /// The app's Default style, which the style pill changes too.
+    var style: StylePreset = .casual
     var primaryLanguage = DictationLanguage.englishUS
     /// Set only when a verified secondary language exists; shows the language pill.
     var secondaryLanguage: DictationLanguage?
@@ -22,6 +22,8 @@ final class KeyboardModel {
     var showsLanguageSelector = false
     /// Recent mic levels for the waveform, oldest first.
     var levels: [Double] = Array(repeating: 0.06, count: 30)
+    /// Debug builds: the extension's memory, shown in the toolbar.
+    var debugMemory: String?
     /// The voice layout's pad is up; the toolbar drops its mic, since the pad has the big one.
     var showsVoicePad = false
     /// The field's return key title ("return", "send", …), for the pad's return button.
@@ -41,7 +43,7 @@ final class KeyboardModel {
         var dismissPending: () -> Void = {}
         var dismissNotice: () -> Void = {}
         var openApp: () -> Void = {}
-        var setStyle: (StylePreset?) -> Void = { _ in }
+        var setStyle: (StylePreset) -> Void = { _ in }
         var setLanguage: (DictationLanguage?) -> Void = { _ in }
         var showLanguageSelector: () -> Void = {}
         var hideLanguageSelector: () -> Void = {}
@@ -85,8 +87,6 @@ final class KeyboardModel {
     var listeningSince: Date? {
         if case .listening(_, let since) = phase { since } else { nil }
     }
-
-    var effectiveStyle: StylePreset { styleOverride ?? defaultStyle }
 
     var effectiveLanguage: DictationLanguage { languageOverride ?? primaryLanguage }
 
