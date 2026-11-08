@@ -80,6 +80,7 @@ public final class SharedSettings: @unchecked Sendable {
     private enum Key: String {
         case disableAfter, keyboardLayout, keyboardFeedback, readyHaptic, interactionSounds, defaultStyle
         case useBuiltInMic, aiCleanupEnabled, transcriberEngine, liveActivities, transcriptRetention, autoReturn
+        case translateInOneRequest
         case primaryLanguage, secondaryLanguage, verifiedEngines
         case translationEnabled, translationSourceLanguage, translationTargetLanguage, recentTranslationLanguages
         case debugKeyboardPeakFootprint
@@ -143,6 +144,13 @@ public final class SharedSettings: @unchecked Sendable {
     public var autoReturn: Bool {
         get { bool(.autoReturn, default: true) }
         set { defaults.set(newValue, forKey: Key.autoReturn.rawValue) }
+    }
+
+    /// Translate a cloud dictation in one `dictate` request instead of `transcribe` then `cleanup`.
+    /// App-only; a Debug switch, to compare the two in one build.
+    public var translateInOneRequest: Bool {
+        get { bool(.translateInOneRequest, default: true) }
+        set { defaults.set(newValue, forKey: Key.translateInOneRequest.rawValue) }
     }
 
     /// Auto-delete transcripts older than this. App-only; applied by the history store.

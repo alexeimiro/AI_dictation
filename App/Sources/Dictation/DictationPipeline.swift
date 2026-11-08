@@ -47,6 +47,8 @@ protocol Cleaning: AnyObject {
 
 /// Turns a finished recording into the text the keyboard inserts:
 /// transcript (OpenAI, or on-device) → AI cleanup (OpenAI, via the `cleanup` function) → `DictationResult`.
+/// A translation the transcriber made in the same request (`dictate`) skips the cleanup call, and
+/// its reply is judged as `cleanup`'s would be.
 /// Falls back to `LocalFormatter` when cleanup is off, unavailable, the dictation is tiny, or
 /// `CleanupGate` finds nothing in the transcript for the model to rewrite. `StyleFormatter` then
 /// applies what it can of the style, so the style shows either way.
@@ -79,9 +81,17 @@ final class DictationPipeline {
         let language = dictation.language
         let targetLanguage = dictation.translationTargetLanguage
         let style = dictation.style ?? settings.defaultStyle
-        let raw: String
+        let translation = targetLanguage.map {
+            TranslationRequest(dictationId: dictation.requestId, targetLanguage: $0, style: style,
+                               dictionary: dictionary, snippets: snippets)
+        }
+        let output: UtteranceOutput
         do {
-            raw = try await transcriber.finishUtterance()
+            output = if let translation {
+                try await transcriber.finishUtterance(translation: translation)
+            } else {
+                UtteranceOutput(transcript: try await transcriber.finishUtterance())
+            }
         } catch {
             logger.error("Transcription failed: \(error.localizedDescription, privacy: .public)")
             let utterance = (transcriber as? UtteranceTimingProviding)?.takeTimings()
@@ -97,9 +107,12 @@ final class DictationPipeline {
                 metrics: TranscriptMetrics(audioSeconds: audioSeconds, words: 0, asrMs: Self.milliseconds(since: stoppedAt)),
                 utterance: utterance)
         }
-        let transcriptMs = Self.milliseconds(since: stoppedAt)
+        let finishedMs = Self.milliseconds(since: stoppedAt)
         let utterance = (transcriber as? UtteranceTimingProviding)?.takeTimings()
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The model's part of a single request, so recognition stays comparable with two requests.
+        let singleCallModelMs = output.translation == nil ? nil : utterance?.requests.first?.server?.modelMs
+        let transcriptMs = max(0, finishedMs - (singleCallModelMs ?? 0))
+        let trimmed = output.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return outcome(
                 dictation, raw: "", text: "", status: .empty,
@@ -109,11 +122,19 @@ final class DictationPipeline {
                 utterance: utterance)
         }
 
-        let localText = StyleFormatter.apply(
-            style, to: LocalFormatter(dictionary: dictionary, snippets: snippets, language: language).format(trimmed))
-        let cleaned = await runCleanup(
-            dictationId: dictation.requestId, raw: trimmed, language: language,
-            targetLanguage: targetLanguage, style: style, localText: localText)
+        let cleaned: CleanupOutcome
+        if let translated = output.translation {
+            var judged = judge(translated, targetLanguage: targetLanguage, style: style, localText: "")
+            judged.cleanupMs = singleCallModelMs
+            cleaned = judged
+        } else {
+            // A translation never inserts the transcript, so it needs no local text.
+            let localText = targetLanguage != nil ? "" : StyleFormatter.apply(
+                style, to: LocalFormatter(dictionary: dictionary, snippets: snippets, language: language).format(trimmed))
+            cleaned = await runCleanup(
+                dictationId: dictation.requestId, raw: trimmed, language: language,
+                targetLanguage: targetLanguage, style: style, localText: localText)
+        }
         let metrics = TranscriptMetrics(
             audioSeconds: audioSeconds,
             words: WordCounter.count(cleaned.text),
@@ -203,12 +224,29 @@ final class DictationPipeline {
             return outcome
         }
         let started = ContinuousClock.now
+        let result: Result<CleanupClient.Response, CleanupClient.Failure>
         do {
-            let response = try await cleanup.clean(
+            result = .success(try await cleanup.clean(
                 dictationId: dictationId, transcript: raw, language: language,
                 targetLanguage: targetLanguage, style: style,
-                dictionary: dictionary, snippets: snippets)
-            outcome.cleanupMs = Self.milliseconds(since: started)
+                dictionary: dictionary, snippets: snippets))
+        } catch {
+            result = .failure(error)
+        }
+        outcome = judge(result, targetLanguage: targetLanguage, style: style, localText: localText)
+        outcome.cleanupMs = Self.milliseconds(since: started)
+        return outcome
+    }
+
+    /// What a cleanup's or a translation's reply comes to, from `cleanup` or from the request
+    /// that also transcribed (`dictate`). `localText` is kept when there's nothing better.
+    private func judge(
+        _ result: Result<CleanupClient.Response, CleanupClient.Failure>, targetLanguage: String?,
+        style: StylePreset, localText: String
+    ) -> CleanupOutcome {
+        var outcome = CleanupOutcome(text: localText, status: .raw)
+        switch result {
+        case .success(let response):
             outcome.ttftMs = response.ttftMs
             outcome.model = response.model
             outcome.request = response.request
@@ -229,13 +267,11 @@ final class DictationPipeline {
             } else {
                 outcome.errorReason = "The cleanup returned the transcript unchanged."
             }
-        } catch .limitReached {
-            outcome.cleanupMs = Self.milliseconds(since: started)
+        case .failure(.limitReached):
             outcome.status = .limitReached
             outcome.message = "Dictation limit reached. Get unlimited access in Murmur."
             outcome.errorReason = "Dictation limit reached."
-        } catch {
-            outcome.cleanupMs = Self.milliseconds(since: started)
+        case .failure(let error):
             outcome.failure = error
             outcome.errorReason = Self.describe(error)
             // A dictation still gets its local text, and the keyboard shows this after inserting
@@ -265,8 +301,9 @@ final class DictationPipeline {
         case .rateLimited: "Too many dictations in a minute. Try again shortly."
         case .unavailable: "Couldn't reach transcription. Check your connection and try again."
         case .signedOut: signedOutMessage
-        // A cancelled dictation is normally gone before anyone sees this.
-        case .notConfigured, .cancelled, nil: "Couldn't transcribe that. Please try again."
+        // A cancelled dictation is normally gone before anyone sees this, and an undeployed
+        // `dictate` is retried through `transcribe`.
+        case .notConfigured, .cancelled, .notDeployed, nil: "Couldn't transcribe that. Please try again."
         }
     }
 

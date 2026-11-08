@@ -242,6 +242,50 @@ struct BackendSessionTests {
         #expect(backend.client.auth.currentUser?.isAnonymous == true)
     }
 
+    /// A session that would run out within a dictation is refreshed while the user speaks
+    /// (`BackendWarmup`), not when the request at stop needs it.
+    @Test func aSessionExpiringSoonIsRefreshedEarly() async throws {
+        AuthStub.answer(host, refresh: .refreshed)
+        var stored = storedSession(anonymous: true, expired: false)
+        stored.expiresAt = Date().addingTimeInterval(120).timeIntervalSince1970
+        let backend = try backend(storing: stored)
+
+        try await backend.ensureSession()
+        #expect(refreshes == 0)
+
+        try await backend.ensureSession(validFor: 360)
+        #expect(refreshes == 1)
+        #expect(anonymousSignIns == 0)
+        #expect(backend.client.auth.currentSession?.refreshToken != stored.refreshToken)
+    }
+
+    /// Offline, the session it had still works for a while: it's kept, and nobody new signs in.
+    @Test(arguments: [false, true])
+    func aFailedEarlyRefreshKeepsTheSession(anonymous: Bool) async throws {
+        AuthStub.answer(host, refresh: .offline)
+        var stored = storedSession(anonymous: anonymous, expired: false)
+        stored.expiresAt = Date().addingTimeInterval(120).timeIntervalSince1970
+        let backend = try backend(storing: stored)
+
+        try await backend.ensureSession(validFor: 360)
+        #expect(backend.client.auth.currentSession?.refreshToken == stored.refreshToken)
+        #expect(backend.account.isSignedOut == false)
+        // Auth's client tries a request that couldn't connect once more.
+        #expect(refreshes >= 1)
+        #expect(anonymousSignIns == 0)
+    }
+
+    /// Rejected early is rejected all the same: the account is signed out, not replaced.
+    @Test func aRejectedEarlyRefreshSignsTheAccountOut() async throws {
+        AuthStub.answer(host, refresh: .rejected)
+        var stored = storedSession(anonymous: false, expired: false)
+        stored.expiresAt = Date().addingTimeInterval(120).timeIntervalSince1970
+        let backend = try backend(storing: stored)
+
+        await #expect(throws: BackendError.signedOut) { try await backend.ensureSession(validFor: 360) }
+        #expect(anonymousSignIns == 0)
+    }
+
     /// The ways into `ensureSession` end a rejected signed-in session as a failure, with no
     /// anonymous sign-in: the offer, the desktop link, and the edge functions' token, which
     /// transcription and cleanup report as their own case, so the cloud isn't paused and the

@@ -18,7 +18,7 @@ enum BackendError: LocalizedError {
 /// (Config/Local.xcconfig → Info.plist). Nil when not configured, in which case dictation still
 /// works with on-device formatting only.
 @MainActor
-final class Backend {
+final class Backend: SessionRenewing {
     /// The project's base URL; the edge functions live under it (`EdgeFunctionClient`).
     let url: URL
     let client: SupabaseClient
@@ -30,9 +30,9 @@ final class Backend {
     private let authEvents: Task<Void, Never>
 
     /// `options`: tests pass in-memory auth storage and a stubbed URLSession; the default is
-    /// what `SupabaseClient(supabaseURL:supabaseKey:)` uses. `defaults`: where the account is
-    /// remembered; tests pass a suite of their own.
-    init(url: URL, anonKey: String, options: SupabaseClientOptions = SupabaseClientOptions(),
+    /// what `SupabaseClient(supabaseURL:supabaseKey:)` uses, with its Keychain storage cached.
+    /// `defaults`: where the account is remembered; tests pass a suite of their own.
+    init(url: URL, anonKey: String, options: SupabaseClientOptions = Backend.defaultOptions(),
          defaults: UserDefaults = .standard) {
         self.url = url
         let client = SupabaseClient(supabaseURL: url, supabaseKey: anonKey, options: options)
@@ -55,12 +55,18 @@ final class Backend {
         authEvents.cancel()
     }
 
-    static func fromInfoPlist(_ bundle: Bundle = .main, options: SupabaseClientOptions = SupabaseClientOptions(),
+    static func fromInfoPlist(_ bundle: Bundle = .main, options: SupabaseClientOptions = Backend.defaultOptions(),
                               defaults: UserDefaults = .standard) -> Backend? {
         guard let host = infoString("MurmurSupabaseHost", bundle),
               let key = infoString("MurmurSupabaseAnonKey", bundle),
               let url = baseURL(forHost: host) else { return nil }
         return Backend(url: url, anonKey: key, options: options, defaults: defaults)
+    }
+
+    /// supabase-swift's defaults, with the session read from the Keychain once rather than on
+    /// every request (`CachedAuthStorage`).
+    nonisolated static func defaultOptions() -> SupabaseClientOptions {
+        SupabaseClientOptions(auth: .init(storage: CachedAuthStorage(AuthClient.Configuration.defaultLocalStorage)))
     }
 
     /// `abcd.supabase.co` → https; a local stack (`127.0.0.1:54321`, LAN IPs, `*.local`) → http.
@@ -126,7 +132,10 @@ final class Backend {
     /// request, until they sign in again or continue as a guest (`account`). Other refresh
     /// failures (offline, a timeout, a 5xx) are thrown as they are, and the session stays stored
     /// for the next attempt.
-    func ensureSession() async throws {
+    ///
+    /// `validFor`: a session that expires sooner is refreshed now, ahead of the requests that will
+    /// need it (`BackendWarmup`). If that early refresh fails, the session still works and is kept.
+    func ensureSession(validFor minimum: TimeInterval = 0) async throws {
         let stored = client.auth.currentSession
         if account.isSignedOut {
             // Only a session the user signed in with again gets through: no refresh, no anonymous
@@ -141,12 +150,14 @@ final class Backend {
             throw BackendError.signedOut
         }
         // From here on as before: the account's own session, a guest's, or no account's.
-        if let stored, !stored.isExpired { return }
+        let early = stored.map { !$0.isExpired } ?? false
+        if let stored, early, stored.expiresAt - Date().timeIntervalSince1970 >= minimum { return }
         // Read before the refresh: when the server rejects the refresh token, supabase-swift
         // deletes the stored session itself, and the user with it.
         let signedIn = stored?.user.isAnonymous == false
         do {
-            _ = try await client.auth.session // refreshes if possible
+            // `session` refreshes only an expired one.
+            _ = try await early ? client.auth.refreshSession() : client.auth.session
         } catch {
             // Read again: a sign-in can finish while the refresh is out.
             let current = client.auth.currentSession
@@ -155,6 +166,12 @@ final class Backend {
                 // it's the one to use, and an anonymous sign-in would replace it.
                 guard current.isExpired else { return }
                 throw error
+            }
+            if early, let current, !current.isExpired {
+                // Refreshed early, and still stored (offline, a timeout, a 5xx): it works for now,
+                // and the next call tries again.
+                logger.notice("Couldn't refresh the session early: \(error.localizedDescription, privacy: .public)")
+                return
             }
             if signedIn || current?.user.isAnonymous == false {
                 // Still stored: offline, a timeout or a 5xx, and the next attempt can refresh it.
@@ -195,6 +212,46 @@ final class Backend {
         guard let value = bundle.object(forInfoDictionaryKey: key) as? String,
               !value.isEmpty, !value.hasPrefix("$(") else { return nil }
         return value
+    }
+}
+
+/// Auth's storage with what it holds kept in memory. supabase-swift reads the stored session at
+/// every `currentSession` and `session`, a Keychain read and a decode each time: several per
+/// dictation, some on the main thread. Only this app's process writes the item, and every write
+/// goes through here, so the copy is never stale.
+final class CachedAuthStorage: AuthLocalStorage, @unchecked Sendable {
+    private let base: any AuthLocalStorage
+    private let lock = NSLock()
+    /// By key: the stored value, or `.some(nil)` once it's known there is none.
+    private var values: [String: Data?] = [:]
+
+    init(_ base: any AuthLocalStorage) {
+        self.base = base
+    }
+
+    // The Keychain calls stay under the lock, so a read can't put back a value a write replaced.
+    func store(key: String, value: Data) throws {
+        try lock.withLock {
+            try base.store(key: key, value: value)
+            values[key] = .some(value)
+        }
+    }
+
+    func retrieve(key: String) throws -> Data? {
+        try lock.withLock {
+            if let known = values[key] { return known }
+            // Not kept when the read fails (a locked device): the next read tries the Keychain again.
+            let value = try base.retrieve(key: key)
+            values[key] = .some(value)
+            return value
+        }
+    }
+
+    func remove(key: String) throws {
+        try lock.withLock {
+            try base.remove(key: key)
+            values[key] = .some(nil)
+        }
     }
 }
 

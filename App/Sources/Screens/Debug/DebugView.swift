@@ -75,6 +75,7 @@ struct DebugView: View {
                 metricsRow("Tap → insert", cloud.tapToInsert)
                 shareRow("Reused connection", cloud.reused)
                 shareRow("Cold worker", cloud.cold)
+                shareRow("Warm-up hit its worker", cloud.warmedWorker)
                 LabeledContent("Regions") {
                     Text(verbatim: Self.describe(cloud.regions)).monospacedDigit()
                 }
@@ -82,6 +83,8 @@ struct DebugView: View {
                     Text(verbatim: tokenSigning)
                 }
                 #if DEBUG
+                Toggle("Translate in one request", isOn: $settings.translateInOneRequest)
+                    .tint(Palette.toggleGreen)
                 if let export = model.timingsLog.exportURL {
                     ShareLink("Export timings", item: export)
                 }
@@ -99,7 +102,7 @@ struct DebugView: View {
             } header: {
                 Text("Cloud latency, last \(cloud.count) (median / p95)")
             } footer: {
-                Text("Only dictations with a cloud transcript count, not the on-device fallback or failures. Upload, wait and the server rows add up a dictation's requests (transcribe, then cleanup). Inserts more than 10 s after the result are left out, from the tap too: those are taps on Insert last dictation.")
+                Text("Only dictations with a cloud transcript count, not the on-device fallback or failures. Upload, wait and the server rows add up a dictation's requests: transcribe then cleanup, or one dictate for a translation. Inserts more than 10 s after the result are left out, from the tap too: those are taps on Insert last dictation.")
             }
             Section("Housekeeping") {
                 Button("Reconcile insertions") {

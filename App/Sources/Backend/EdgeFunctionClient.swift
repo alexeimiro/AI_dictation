@@ -61,11 +61,21 @@ final class EdgeFunctionClient {
     /// POSTs `body` as JSON and returns a 2xx reply undecoded, with its timing.
     func post(_ function: String, body: some Encodable, timeout: TimeInterval) async throws(EdgeFunctionError) -> Reply {
         let payload: Data
-        let started: ContinuousClock.Instant
-        let token: String
         do {
             payload = try JSONEncoder().encode(body)
-            started = .now
+        } catch {
+            throw .transport(error)
+        }
+        return try await send(function, payload: payload, contentType: "application/json", timeout: timeout)
+    }
+
+    /// POSTs `payload` (none for a warm-up) with `extraHeaders`, and returns a 2xx reply undecoded.
+    /// `timeout` is URLRequest's: how long the request may go without sending or receiving data.
+    func send(_ function: String, payload: Data = Data(), contentType: String? = nil,
+              extraHeaders: [String: String] = [:], timeout: TimeInterval) async throws(EdgeFunctionError) -> Reply {
+        let started = ContinuousClock.now
+        let token: String
+        do {
             token = try await accessToken()
         } catch {
             throw .transport(error)
@@ -73,10 +83,10 @@ final class EdgeFunctionClient {
         let tokenMs = started.elapsedMilliseconds
         var request = URLRequest(url: functionsURL.appendingPathComponent(function), timeoutInterval: timeout)
         request.httpMethod = "POST"
-        for (name, value) in headers {
+        for (name, value) in headers.merging(extraHeaders, uniquingKeysWith: { $1 }) {
             request.setValue(value, forHTTPHeaderField: name)
         }
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
         let metrics = TaskMetricsCollector()

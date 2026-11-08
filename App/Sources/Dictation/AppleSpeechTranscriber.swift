@@ -153,6 +153,11 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
         return Self.normalize(text)
     }
 
+    /// On-device, the transcript alone: the pipeline translates it.
+    func finishUtterance(translation: TranslationRequest) async throws -> UtteranceOutput {
+        UtteranceOutput(transcript: try await finishUtterance())
+    }
+
     func cancelUtterance() async {
         let utterance = lock.withLock { () -> Utterance? in
             defer {

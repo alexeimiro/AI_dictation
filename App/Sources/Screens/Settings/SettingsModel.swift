@@ -25,6 +25,7 @@ final class SettingsModel {
         didSet { settings.transcriberEngine = transcriberEngine == .auto ? nil : transcriberEngine.rawValue }
     }
     var autoReturn: Bool { didSet { settings.autoReturn = autoReturn } }
+    var translateInOneRequest: Bool { didSet { settings.translateInOneRequest = translateInOneRequest } }
 
     @ObservationIgnored private let settings: SharedSettings
     @ObservationIgnored var onRetentionChange: (() -> Void)?
@@ -43,6 +44,7 @@ final class SettingsModel {
         transcriptRetention = settings.transcriptRetention
         transcriberEngine = TranscriberEngine.current
         autoReturn = settings.autoReturn
+        translateInOneRequest = settings.translateInOneRequest
     }
 
     /// The keyboard's style pill changes the default style while the app waits in the background.

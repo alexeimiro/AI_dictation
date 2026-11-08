@@ -40,17 +40,29 @@ final class CleanupClient: Cleaning {
         case signedOut
     }
 
+    /// A dictionary term as the functions take it (`cleanup`, and `dictate`'s metadata).
+    struct Entry: Encodable {
+        let term: String
+        let misspelling: String?
+
+        /// The terms a request carries: the first 300, as the functions keep.
+        static func wire(_ dictionary: [DictionaryTerm]) -> [Entry] {
+            dictionary.prefix(300).map { Entry(term: $0.term, misspelling: $0.misspelling) }
+        }
+    }
+
+    /// A snippet as the functions take it: the model keeps its token in place of the trigger.
+    struct Snippet: Encodable {
+        let token: String
+        let trigger: String
+
+        /// The snippets a request carries: the first 200, as the functions keep.
+        static func wire(_ snippets: [SnippetDefinition]) -> [Snippet] {
+            snippets.prefix(200).map { Snippet(token: SnippetPlaceholders.token(for: $0), trigger: $0.trigger) }
+        }
+    }
+
     private struct RequestBody: Encodable {
-        struct Entry: Encodable {
-            let term: String
-            let misspelling: String?
-        }
-
-        struct Snippet: Encodable {
-            let token: String
-            let trigger: String
-        }
-
         let dictationId: UUID
         let transcript: String
         let language: String?
@@ -88,8 +100,7 @@ final class CleanupClient: Cleaning {
             language: language,
             targetLanguage: targetLanguage,
             style: style.rawValue,
-            dictionary: dictionary.prefix(300).map { .init(term: $0.term, misspelling: $0.misspelling) },
-            snippets: snippets.prefix(200).map { .init(token: SnippetPlaceholders.token(for: $0), trigger: $0.trigger) })
+            dictionary: Entry.wire(dictionary), snippets: Snippet.wire(snippets))
         do {
             let reply = try await functions.post("cleanup", body: body, timeout: timeout)
             var response = try JSONDecoder().decode(Response.self, from: reply.data)

@@ -69,8 +69,11 @@ final class AppModel {
         self.practiceBuffer = practiceBuffer
         let timingsLog = TimingsLog()
         self.timingsLog = timingsLog
+        let dictate = DictateClient(functions: functions)
         let session = SessionController(transport: transport, pipeline: pipeline, assets: assets, history: practiceBuffer,
-                                        transcription: TranscriptionClient(functions: functions), timingsLog: timingsLog)
+                                        transcription: TranscriptionClient(functions: functions), dictate: dictate,
+                                        warmup: backend.map { BackendWarmup(session: $0, dictate: dictate) },
+                                        timingsLog: timingsLog)
         self.session = session
         self.languages = LanguageSettingsModel(assets: assets, session: session)
         self.setup = SetupStatus(payloads: transport.payloads)

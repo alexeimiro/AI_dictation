@@ -147,8 +147,11 @@ public struct DictationTimings: Codable, Sendable, Hashable {
     /// The app's stop → the result (`DictationMetrics.stopToResultMs`), or → the failure when
     /// there was no transcript.
     public var stopToResultMs: Int?
-    /// In the order they were made: `transcribe`, then `cleanup`.
+    /// In the order they were made: `transcribe`, then `cleanup`; or a translation's one `dictate`.
     public var requests: [RequestTiming]
+    /// The warm-up sent while the user spoke, when it answered before the result. Its
+    /// `server.executionId` against the requests' says whether it warmed the worker they reached.
+    public var warmup: RequestTiming?
     public var cleanupModel: String?
     /// The result's `ResultStatus`.
     public var status: String?
@@ -165,8 +168,9 @@ public struct DictationTimings: Codable, Sendable, Hashable {
 
     public init(requestId: UUID, createdAt: Date, kind: Kind, audioSeconds: Double, stopRequestedAt: Date? = nil,
                 tapToStopMs: Int? = nil, encodeMs: Int? = nil, audioBytes: Int? = nil, tokenMs: Int? = nil,
-                stopToResultMs: Int? = nil, requests: [RequestTiming] = [], cleanupModel: String? = nil,
-                status: String? = nil, insertable: Bool? = nil, cloudTranscript: Bool? = nil, claimedAt: Date? = nil) {
+                stopToResultMs: Int? = nil, requests: [RequestTiming] = [], warmup: RequestTiming? = nil,
+                cleanupModel: String? = nil, status: String? = nil, insertable: Bool? = nil,
+                cloudTranscript: Bool? = nil, claimedAt: Date? = nil) {
         self.requestId = requestId
         self.createdAt = createdAt
         self.kind = kind
@@ -178,6 +182,7 @@ public struct DictationTimings: Codable, Sendable, Hashable {
         self.tokenMs = tokenMs
         self.stopToResultMs = stopToResultMs
         self.requests = requests
+        self.warmup = warmup
         self.cleanupModel = cleanupModel
         self.status = status
         self.insertable = insertable
@@ -234,6 +239,9 @@ public struct TimingsSummary: Sendable, Hashable {
     public var reused: Share
     /// Requests that were their worker's first.
     public var cold: Share
+    /// Dictations with a warm-up whose worker is known, and of those, the ones whose request
+    /// reached that worker: a warm-up that lands elsewhere warms nothing the dictation uses.
+    public var warmedWorker: Share
     /// Requests per region: the reply's `x-sb-edge-region`, else the function's `SB_REGION`.
     public var regions: [String: Int]
 
@@ -258,6 +266,11 @@ public struct TimingsSummary: Sendable, Hashable {
                   (0...automaticInsertLimitMs).contains(claimed.milliseconds(since: entry.createdAt)) else { return nil }
             return (entry, claimed)
         }
+        let warmed = entries.compactMap { entry -> Bool? in
+            guard let worker = entry.warmup?.server?.executionId else { return nil }
+            let reached = entry.requests.compactMap(\.server?.executionId)
+            return reached.isEmpty ? nil : reached.contains(worker)
+        }
         let reported = requests.compactMap(\.reused)
         let cold = requests.compactMap(\.server?.cold)
         var regions: [String: Int] = [:]
@@ -281,6 +294,7 @@ public struct TimingsSummary: Sendable, Hashable {
             }),
             reused: Share(count: reported.filter { $0 }.count, total: reported.count),
             cold: Share(count: cold.filter { $0 }.count, total: cold.count),
+            warmedWorker: Share(count: warmed.filter { $0 }.count, total: warmed.count),
             regions: regions)
     }
 }

@@ -1,0 +1,135 @@
+import Foundation
+import MurmurCore
+import Testing
+@testable import Murmur
+
+@MainActor
+private final class FakeSession: SessionRenewing {
+    var failure: (any Error)?
+    private(set) var renewals: [TimeInterval] = []
+
+    func ensureSession(validFor seconds: TimeInterval) async throws {
+        renewals.append(seconds)
+        if let failure { throw failure }
+    }
+}
+
+@MainActor
+private final class WarmedDictate: Dictating {
+    var isAvailable = true
+    var lastReplyAt: ContinuousClock.Instant?
+    var result = WarmupResult.warmed(RequestTiming(function: "dictate", status: 200, totalMs: 400,
+                                                   server: ServerTiming(executionId: "w1")))
+    /// Warm-ups wait for `release()`.
+    var holds = false
+    private(set) var warmUps = 0
+    private var held: [CheckedContinuation<Void, Never>] = []
+
+    func dictate(audio: Data, format: EncodedAudio.Format, language: String?, keywords: [String],
+                 translation: TranslationRequest) async throws(CloudTranscriptionError) -> DictateReply {
+        throw .notDeployed
+    }
+
+    func warm() async -> WarmupResult {
+        warmUps += 1
+        if holds { await withCheckedContinuation { held.append($0) } }
+        return result
+    }
+
+    func release() {
+        held.forEach { $0.resume() }
+        held.removeAll()
+    }
+}
+
+@MainActor
+struct BackendWarmupTests {
+    private let session = FakeSession()
+    private let dictate = WarmedDictate()
+
+    private func warmup() -> BackendWarmup {
+        BackendWarmup(session: session, dictate: dictate)
+    }
+
+    @Test func aTranslationRenewsTheTokenAndWarmsDictate() async throws {
+        let warmup = warmup()
+        let id = UUID()
+        warmup.dictationDidStart(id, translating: true)
+        await warmup.waitUntilIdle()
+
+        #expect(session.renewals == [360])
+        #expect(dictate.warmUps == 1)
+        #expect(warmup.takeTiming(for: UUID()) == nil)
+        #expect(try #require(warmup.takeTiming(for: id)).server?.executionId == "w1")
+        // Once.
+        #expect(warmup.takeTiming(for: id) == nil)
+    }
+
+    /// Plain dictations go to `transcribe` and `cleanup`: the token only.
+    @Test func aPlainDictationOnlyRenewsTheToken() async {
+        let warmup = warmup()
+        warmup.dictationDidStart(UUID(), translating: false)
+        await warmup.waitUntilIdle()
+
+        #expect(session.renewals == [360])
+        #expect(dictate.warmUps == 0)
+    }
+
+    @Test func noWarmUpRightAfterDictateAnswered() async {
+        dictate.lastReplyAt = .now
+        let warmup = warmup()
+        warmup.dictationDidStart(UUID(), translating: true)
+        await warmup.waitUntilIdle()
+
+        #expect(dictate.warmUps == 0)
+
+        dictate.lastReplyAt = ContinuousClock.now.advanced(by: .seconds(-21))
+        warmup.dictationDidStart(UUID(), translating: true)
+        await warmup.waitUntilIdle()
+        #expect(dictate.warmUps == 1)
+    }
+
+    @Test func noWarmUpWhenDictateIsUnavailable() async {
+        dictate.isAvailable = false
+        let warmup = warmup()
+        warmup.dictationDidStart(UUID(), translating: true)
+        await warmup.waitUntilIdle()
+
+        #expect(session.renewals == [360])
+        #expect(dictate.warmUps == 0)
+    }
+
+    /// Signed out, or offline: nothing else goes out.
+    @Test func noWarmUpWithoutASession() async {
+        session.failure = BackendError.signedOut
+        let warmup = warmup()
+        warmup.dictationDidStart(UUID(), translating: true)
+        await warmup.waitUntilIdle()
+
+        #expect(dictate.warmUps == 0)
+    }
+
+    @Test func aRejectedTokenIsReplacedRightAway() async {
+        dictate.result = .rejected
+        let warmup = warmup()
+        let id = UUID()
+        warmup.dictationDidStart(id, translating: true)
+        await warmup.waitUntilIdle()
+
+        #expect(session.renewals == [360, .infinity])
+        #expect(warmup.takeTiming(for: id) == nil)
+    }
+
+    @Test func oneWarmUpAtATime() async {
+        dictate.holds = true
+        let warmup = warmup()
+        warmup.dictationDidStart(UUID(), translating: true)
+        for _ in 0..<1_000 where dictate.warmUps == 0 { await Task.yield() }
+        warmup.dictationDidStart(UUID(), translating: true)
+        dictate.release()
+        await warmup.waitUntilIdle()
+
+        #expect(dictate.warmUps == 1)
+        #expect(session.renewals == [360])
+    }
+}

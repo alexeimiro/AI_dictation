@@ -43,6 +43,8 @@ struct DictationTimingsCodingTests {
             requests: [RequestTiming(function: "transcribe", status: 200, tokenMs: 3, totalMs: 1_500, reused: false,
                                      protocolName: "h2", connectMs: 250, tlsMs: 170, uploadMs: 60, waitMs: 1_150,
                                      bytesSent: 34_000, region: "eu-central-1", server: server)],
+            warmup: RequestTiming(function: "dictate", status: 200, tokenMs: 0, totalMs: 480, reused: true,
+                                  server: ServerTiming(cold: true, executionId: "e1", authMs: 40, totalMs: 300)),
             cleanupModel: "gpt-6.1-terra", status: "cleaned", insertable: true, cloudTranscript: true,
             claimedAt: stop.addingTimeInterval(2.8))
         let (encoder, decoder) = coder()
@@ -119,6 +121,24 @@ struct TimingsSummaryTests {
         #expect(summary.cold.fraction == 0.5)
         #expect(summary.regions == ["eu-central-1": 2, "us-east-1": 1])
         #expect(TimingsSummary.summarize(entries, kind: .translation).reused.fraction == nil)
+    }
+
+    /// Only a warm-up and a request that both name their worker say whether it was the same one.
+    @Test func warmedWorkerComparesTheWarmUpsWorkerWithTheRequests() {
+        func translation(warmedOn warmed: String?, reached: String?) -> DictationTimings {
+            var timings = entry(.translation, requests: [request("dictate", server: ServerTiming(executionId: reached))])
+            timings.warmup = RequestTiming(function: "dictate", totalMs: 400, server: ServerTiming(executionId: warmed))
+            return timings
+        }
+        let entries = [
+            translation(warmedOn: "w1", reached: "w1"),
+            translation(warmedOn: "w2", reached: "w3"),
+            translation(warmedOn: nil, reached: "w4"),
+            translation(warmedOn: "w5", reached: nil),
+            entry(.translation, requests: [request("dictate", server: ServerTiming(executionId: "w6"))]),
+        ]
+        let summary = TimingsSummary.summarize(entries, kind: .translation)
+        #expect(summary.warmedWorker == .init(count: 1, total: 2))
     }
 
     /// Late claims are "Insert last dictation" taps, even one soon after the stop, and a failed

@@ -37,6 +37,9 @@ private final class SpokenTranscriber: Transcriber, @unchecked Sendable {
     func beginUtterance() {}
     func append(_ buffer: AVAudioPCMBuffer) {}
     func finishUtterance() async throws -> String { transcript }
+    func finishUtterance(translation: TranslationRequest) async throws -> UtteranceOutput {
+        UtteranceOutput(transcript: try await finishUtterance())
+    }
     func cancelUtterance() async {}
     func abandonUtterance() {}
     func shutdown() async {}

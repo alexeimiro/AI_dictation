@@ -15,22 +15,33 @@ private final class TranslationCleanup: Cleaning {
     /// ignores it and doesn't.
     var echoesTarget = true
     private(set) var receivedTarget: String?
+    private(set) var calls = 0
 
     func clean(
         dictationId: UUID, transcript: String, language: String?, targetLanguage: String?,
         style: StylePreset, dictionary: [DictionaryTerm], snippets: [SnippetDefinition]
     ) async throws(CleanupClient.Failure) -> CleanupClient.Response {
+        calls += 1
         receivedTarget = targetLanguage
-        if let failure { throw failure }
-        return CleanupClient.Response(
+        return try reply(to: targetLanguage).get()
+    }
+
+    /// What it answers for `target`, as a result: what `dictate` would have answered with the transcript.
+    func reply(to target: String?) -> Result<CleanupClient.Response, CleanupClient.Failure> {
+        if let failure { return .failure(failure) }
+        return .success(CleanupClient.Response(
             text: text, status: status, words: 7, model: "test", ttftMs: 10, totalMs: 20, remaining: nil,
-            reason: reason, targetLanguage: echoesTarget ? targetLanguage : nil)
+            reason: reason, targetLanguage: echoesTarget ? target : nil))
     }
 }
 
-private final class FinishedTranscriber: Transcriber, @unchecked Sendable {
+private final class FinishedTranscriber: Transcriber, UtteranceTimingProviding, @unchecked Sendable {
     let displayName = "Test"
     var currentLanguage: ResolvedLanguage?
+    /// Set: translates in the request that transcribes, answering this.
+    var translation: Result<CleanupClient.Response, CleanupClient.Failure>?
+    var timings: UtteranceTimings?
+    private(set) var translationRequest: TranslationRequest?
 
     func prepare(micFormat: AVAudioFormat, language: ResolvedLanguage) async throws {
         currentLanguage = language
@@ -39,9 +50,38 @@ private final class FinishedTranscriber: Transcriber, @unchecked Sendable {
     func beginUtterance() {}
     func append(_ buffer: AVAudioPCMBuffer) {}
     func finishUtterance() async throws -> String { "можешь скинуть отчёт до пятницы" }
+    func finishUtterance(translation request: TranslationRequest) async throws -> UtteranceOutput {
+        translationRequest = request
+        return UtteranceOutput(transcript: try await finishUtterance(), translation: translation)
+    }
     func cancelUtterance() async {}
     func abandonUtterance() {}
     func shutdown() async {}
+    func takeTimings() -> UtteranceTimings? { timings }
+}
+
+/// The cleanup's answers a translation can get, to give through `cleanup` and through `dictate`.
+enum TranslationAnswer: CaseIterable, Sendable {
+    case translated, untranslated, unusable, ignoredTarget, unavailable, limitReached, signedOut
+
+    @MainActor
+    fileprivate func configure(_ cleanup: TranslationCleanup) {
+        switch self {
+        case .translated: break
+        case .untranslated:
+            cleanup.status = "raw"
+            cleanup.reason = "untranslated"
+        case .unusable:
+            cleanup.status = "raw"
+            cleanup.reason = "transcript_too_long"
+        case .ignoredTarget:
+            cleanup.echoesTarget = false
+            cleanup.text = "Можешь скинуть отчёт до пятницы?"
+        case .unavailable: cleanup.failure = .unavailable("dictate couldn't translate (deadline)")
+        case .limitReached: cleanup.failure = .limitReached
+        case .signedOut: cleanup.failure = .signedOut
+        }
+    }
 }
 
 @MainActor
@@ -128,15 +168,90 @@ struct DictationPipelineTranslationTests {
         #expect(updated.cleanedText == "Можешь скинуть отчёт до пятницы?")
     }
 
-    /// A Russian → Turkish keyboard dictation through `cleanup`. Returns the result's parts, since
-    /// `DictationOutcome` names both the pipeline's outcome and MurmurCore's keyboard enum here.
-    private func translate(with cleanup: TranslationCleanup) async -> (DictationResult, Transcript) {
+    /// Whatever `dictate` answers, the keyboard and the history get what two requests would give them.
+    @Test(arguments: TranslationAnswer.allCases)
+    func oneRequestComesToWhatTwoDo(_ answer: TranslationAnswer) async {
+        let twoCalls = TranslationCleanup()
+        answer.configure(twoCalls)
+        let (expected, expectedTranscript) = await translate(with: twoCalls)
+
+        let unused = TranslationCleanup()
+        let transcriber = FinishedTranscriber()
+        transcriber.translation = twoCalls.reply(to: "tr-TR")
+        let (result, transcript) = await translate(with: unused, transcriber: transcriber)
+
+        #expect(unused.calls == 0)
+        #expect(result.status == expected.status)
+        #expect(result.text == expected.text)
+        #expect(result.message == expected.message)
+        #expect(result.language == expected.language)
+        #expect(transcript.rawText == expectedTranscript.rawText)
+        #expect(transcript.errorReason == expectedTranscript.errorReason)
+        #expect(transcript.cleanedText == expectedTranscript.cleanedText)
+    }
+
+    /// The request names the dictation, so `dictate` counts its usage once, and asks for its style.
+    @Test func oneRequestCarriesTheDictationsTranslation() async {
+        let transcriber = FinishedTranscriber()
+        transcriber.translation = TranslationCleanup().reply(to: "tr-TR")
+        let pipeline = DictationPipeline(cleanup: TranslationCleanup())
+        let requestID = UUID()
+        let dictation = ActiveDictation(
+            requestId: requestID, documentIdentifier: nil, style: .formal, language: "ru-RU",
+            translationTargetLanguage: "tr-TR", source: .keyboard, startedAt: Date())
+
+        _ = await pipeline.complete(dictation, transcriber: transcriber, audioSeconds: 2, stoppedAt: ContinuousClock.now)
+
+        #expect(transcriber.translationRequest?.dictationId == requestID)
+        #expect(transcriber.translationRequest?.targetLanguage == "tr-TR")
+        #expect(transcriber.translationRequest?.style == .formal)
+    }
+
+    /// The fallback's transcript, or `transcribe`'s when `dictate` isn't there, still gets translated.
+    @Test func aTranscriptWithoutItsTranslationIsTranslatedByCleanup() async {
+        let cleanup = TranslationCleanup()
+
+        let (result, _) = await translate(with: cleanup)
+
+        #expect(cleanup.calls == 1)
+        #expect(result.status == .cleaned)
+    }
+
+    /// The model's share of the one request is the cleanup's, and only the rest is recognition.
+    @Test func oneRequestsTimingsSplitAtTheModel() async throws {
+        let transcriber = FinishedTranscriber()
+        transcriber.translation = TranslationCleanup().reply(to: "tr-TR")
+        transcriber.timings = UtteranceTimings(
+            encodeMs: 30, audioBytes: 20_000,
+            requests: [RequestTiming(function: "dictate", status: 200, totalMs: 1_900,
+                                     server: ServerTiming(transcribeMs: 800, modelMs: 700))],
+            cloudTranscript: true)
+        let dictation = ActiveDictation(
+            requestId: UUID(), documentIdentifier: nil, style: .casual, language: "ru-RU",
+            translationTargetLanguage: "tr-TR", source: .keyboard, startedAt: Date())
+
+        let outcome = await DictationPipeline(cleanup: TranslationCleanup()).complete(
+            dictation, transcriber: transcriber, audioSeconds: 2, stoppedAt: ContinuousClock.now)
+
+        #expect(outcome.transcript.metrics.cleanupMs == 700)
+        #expect(outcome.transcript.metrics.ttftMs == 10)
+        #expect(outcome.transcript.cleanupModel == "test")
+        let timings = try #require(outcome.timings)
+        #expect(timings.requests.map(\.function) == ["dictate"])
+        #expect(timings.cloudTranscript == true)
+    }
+
+    /// A Russian → Turkish keyboard dictation through `cleanup`, or through `transcriber`'s own
+    /// translation when it has one. Returns the result's parts, since `DictationOutcome` names
+    /// both the pipeline's outcome and MurmurCore's keyboard enum here.
+    private func translate(with cleanup: TranslationCleanup,
+                           transcriber: FinishedTranscriber = FinishedTranscriber()) async -> (DictationResult, Transcript) {
         let pipeline = DictationPipeline(cleanup: cleanup)
         let dictation = ActiveDictation(
             requestId: UUID(), documentIdentifier: nil, style: .casual, language: "ru-RU",
             translationTargetLanguage: "tr-TR", source: .keyboard, startedAt: Date())
         let outcome = await pipeline.complete(
-            dictation, transcriber: FinishedTranscriber(), audioSeconds: 2,
+            dictation, transcriber: transcriber, audioSeconds: 2,
             stoppedAt: ContinuousClock.now)
         return (outcome.result, outcome.transcript)
     }

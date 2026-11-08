@@ -31,6 +31,29 @@ private final class FakeCloud: CloudTranscribing {
     }
 }
 
+/// `dictate`: transcribes and translates in one request, or fails as told.
+@MainActor
+private final class FakeDictate: Dictating {
+    var isAvailable = true
+    var lastReplyAt: ContinuousClock.Instant?
+    var failure: CloudTranscriptionError?
+    private(set) var calls: [(audio: Data, language: String?, translation: TranslationRequest)] = []
+
+    func dictate(audio: Data, format: EncodedAudio.Format, language: String?, keywords: [String],
+                 translation: TranslationRequest) async throws(CloudTranscriptionError) -> DictateReply {
+        calls.append((audio, language, translation))
+        if let failure { throw failure }
+        return DictateReply(
+            transcript: "Привет из облака.",
+            translation: .success(CleanupClient.Response(
+                text: "Hi from the cloud.", status: "cleaned", words: 4, model: "gpt-test", ttftMs: nil,
+                totalMs: 500, remaining: nil, targetLanguage: translation.targetLanguage)),
+            timing: RequestTiming(function: "dictate", status: 200, totalMs: 1_200))
+    }
+
+    func warm() async -> WarmupResult { .skipped }
+}
+
 /// Translates everything, reporting its request's timing like `CleanupClient`.
 @MainActor
 private final class TimedCleanup: Cleaning {
@@ -81,6 +104,9 @@ private final class FakeOnDevice: Transcriber, @unchecked Sendable {
     func finishUtterance() async throws -> String {
         lock.withLock { _finished += 1 }
         return "Recognized on the iPhone."
+    }
+    func finishUtterance(translation: TranslationRequest) async throws -> UtteranceOutput {
+        UtteranceOutput(transcript: try await finishUtterance())
     }
     func cancelUtterance() async {
         lock.withLock { _cancelled += 1 }
@@ -133,6 +159,98 @@ struct OpenAITranscriberTests {
             transcriber.append(buffer)
             written += frames
         }
+    }
+
+    private func translation() -> TranslationRequest {
+        TranslationRequest(dictationId: UUID(), targetLanguage: "en-US", style: .casual, dictionary: [], snippets: [])
+    }
+
+    @Test func aTranslationIsTranscribedAndTranslatedInOneRequest() async throws {
+        let cloud = FakeCloud()
+        let dictate = FakeDictate()
+        let transcriber = OpenAITranscriber(client: cloud, dictation: dictate)
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        let request = translation()
+
+        let output = try await transcriber.finishUtterance(translation: request)
+
+        #expect(output.transcript == "Привет из облака.")
+        #expect(try output.translation?.get().text == "Hi from the cloud.")
+        #expect(cloud.calls.isEmpty)
+        let call = try #require(dictate.calls.first)
+        #expect(call.language == "ru-RU")
+        #expect(call.translation.dictationId == request.dictationId)
+        let timings = try #require(transcriber.takeTimings())
+        #expect(timings.requests.map(\.function) == ["dictate"])
+        #expect(timings.cloudTranscript)
+    }
+
+    /// Switched off in Debug, or answered 404 earlier: `transcribe` alone, and the pipeline translates.
+    @Test func withoutDictateATranslationIsOnlyTranscribed() async throws {
+        let cloud = FakeCloud()
+        let dictate = FakeDictate()
+        dictate.isAvailable = false
+        let transcriber = OpenAITranscriber(client: cloud, dictation: dictate)
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+
+        let output = try await transcriber.finishUtterance(translation: translation())
+
+        #expect(output.transcript == "Hello from OpenAI.")
+        #expect(output.translation == nil)
+        #expect(dictate.calls.isEmpty && cloud.calls.count == 1)
+    }
+
+    /// A 404 sends the very same audio to `transcribe`: the user never sees it.
+    @Test func anUndeployedDictateSendsTheSameAudioToTranscribe() async throws {
+        let cloud = FakeCloud()
+        let dictate = FakeDictate()
+        dictate.failure = .notDeployed
+        let transcriber = OpenAITranscriber(client: cloud, dictation: dictate)
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+
+        let output = try await transcriber.finishUtterance(translation: translation())
+
+        #expect(output.transcript == "Hello from OpenAI.")
+        #expect(output.translation == nil)
+        #expect(try #require(cloud.calls.first).audio == #require(dictate.calls.first).audio)
+    }
+
+    /// Like a failed `transcribe`: the on-device transcript, for the pipeline to translate, and
+    /// the cloud paused.
+    @Test func aFailedOneRequestFallsBackOnDeviceAndPausesTheCloud() async throws {
+        let cloud = FakeCloud()
+        let dictate = FakeDictate()
+        dictate.failure = .unavailable("offline")
+        let onDevice = FakeOnDevice()
+        let transcriber = OpenAITranscriber(client: cloud, dictation: dictate, fallback: onDevice,
+                                            fallbackLanguages: ["ru-RU": russian])
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        await transcriber.prepareFallback()
+        for _ in 0..<2 {
+            transcriber.beginUtterance()
+            feed(transcriber, seconds: 1)
+            let output = try await transcriber.finishUtterance(translation: translation())
+            #expect(output.transcript == "Recognized on the iPhone.")
+            #expect(output.translation == nil)
+        }
+        #expect(dictate.calls.count == 1 && cloud.calls.isEmpty)
+    }
+
+    @Test func aDictationWithoutTranslationNeverUsesDictate() async throws {
+        let dictate = FakeDictate()
+        let transcriber = OpenAITranscriber(client: FakeCloud(), dictation: dictate)
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+
+        #expect(try await transcriber.finishUtterance() == "Hello from OpenAI.")
+        #expect(dictate.calls.isEmpty)
     }
 
     @Test func sendsTheDictationsAudioWithItsLanguageAndDictionary() async throws {

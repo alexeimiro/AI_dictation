@@ -13,6 +13,9 @@ enum CloudTranscriptionError: LocalizedError, Equatable {
     /// The server rejected the signed-in user's session (`BackendError.signedOut`). It answered,
     /// so the cloud isn't paused; the on-device fallback can still transcribe the dictation.
     case signedOut
+    /// `dictate` answered 404: not deployed, or switched off (`DICTATE_DISABLED`). The same audio
+    /// goes to `transcribe` instead, so the user never sees it.
+    case notDeployed
 
     var errorDescription: String? {
         switch self {
@@ -22,6 +25,29 @@ enum CloudTranscriptionError: LocalizedError, Equatable {
         case .unavailable(let reason): "Transcription unavailable: \(reason)"
         case .cancelled: "Transcription was cancelled."
         case .signedOut: BackendError.signedOut.localizedDescription
+        case .notDeployed: "Translating in one request isn't available."
+        }
+    }
+
+    /// What a failed `transcribe` or `dictate` request comes to: what `EdgeFunctionClient` threw,
+    /// or the reply that didn't decode.
+    init(_ error: any Error) {
+        if case EdgeFunctionError.httpError(let code) = error {
+            switch code {
+            case 402: self = .limitReached
+            case 429: self = .rateLimited
+            default: self = .unavailable("HTTP \(code)")
+            }
+            return
+        }
+        // What URLSession or the token threw, which `EdgeFunctionClient` wraps.
+        let cause = if case EdgeFunctionError.transport(let inner) = error { inner } else { error }
+        if Task.isCancelled || cause is CancellationError || (cause as? URLError)?.code == .cancelled {
+            self = .cancelled
+        } else if cause as? BackendError == .signedOut {
+            self = .signedOut
+        } else {
+            self = .unavailable(error.localizedDescription)
         }
     }
 }
@@ -77,27 +103,8 @@ final class TranscriptionClient: CloudTranscribing {
             let reply = try await functions.post("transcribe", body: body, timeout: timeout)
             let response = try JSONDecoder().decode(Response.self, from: reply.data)
             return CloudTranscript(text: response.text, timing: reply.timing)
-        } catch EdgeFunctionError.httpError(let code) {
-            switch code {
-            case 402: throw .limitReached
-            case 429: throw .rateLimited
-            default: throw .unavailable("HTTP \(code)")
-            }
         } catch {
-            if Task.isCancelled || Self.isCancellation(error) { throw .cancelled }
-            if Self.underlying(error) as? BackendError == .signedOut { throw .signedOut }
-            throw .unavailable(error.localizedDescription)
+            throw CloudTranscriptionError(error)
         }
-    }
-
-    /// What URLSession or the token threw, which `EdgeFunctionClient` wraps.
-    private static func underlying(_ error: any Error) -> any Error {
-        if case EdgeFunctionError.transport(let inner) = error { inner } else { error }
-    }
-
-    /// What they throw when the request's task is cancelled.
-    private static func isCancellation(_ error: any Error) -> Bool {
-        let cause = underlying(error)
-        return cause is CancellationError || (cause as? URLError)?.code == .cancelled
     }
 }

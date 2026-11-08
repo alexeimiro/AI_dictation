@@ -46,6 +46,9 @@ private final class SignedOutTranscriber: Transcriber, UtteranceTimingProviding,
         guard let transcript else { throw fallbackFailure ?? refusal }
         return transcript
     }
+    func finishUtterance(translation: TranslationRequest) async throws -> UtteranceOutput {
+        UtteranceOutput(transcript: try await finishUtterance())
+    }
     func cancelUtterance() async {}
     func abandonUtterance() {}
     func shutdown() async {}

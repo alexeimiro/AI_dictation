@@ -28,6 +28,12 @@ protocol Transcriber: AnyObject, Sendable {
     /// Ends the dictation and returns the final transcript.
     func finishUtterance() async throws -> String
 
+    /// Ends a dictation to translate. A transcriber that can translate in the request that
+    /// transcribes (`OpenAITranscriber` with `dictate`) returns the translation too; the others
+    /// return the transcript alone, and the pipeline translates it. No default: a transcriber that
+    /// wraps another must pass the request on.
+    func finishUtterance(translation: TranslationRequest) async throws -> UtteranceOutput
+
     func cancelUtterance() async
 
     /// Drops the current dictation at once, from any context, and tears it down in the
@@ -40,12 +46,25 @@ protocol Transcriber: AnyObject, Sendable {
     func shutdown() async
 }
 
+/// A finished dictation's transcript, and its translation when the transcriber made it in the same
+/// request.
+struct UtteranceOutput: Sendable {
+    var transcript: String
+    /// Nil when only transcribed: the pipeline translates the transcript itself.
+    var translation: Result<CleanupClient.Response, CleanupClient.Failure>?
+
+    init(transcript: String, translation: Result<CleanupClient.Response, CleanupClient.Failure>? = nil) {
+        self.transcript = transcript
+        self.translation = translation
+    }
+}
+
 /// What a cloud transcriber measured for one dictation, for `DictationTimings`.
 struct UtteranceTimings: Sendable, Equatable {
     /// Compressing the audio after stop.
     var encodeMs: Int?
     var audioBytes: Int?
-    /// The `transcribe` request; empty when the cloud was skipped or the request failed.
+    /// The `transcribe` or `dictate` request; empty when the cloud was skipped or the request failed.
     var requests: [RequestTiming] = []
     /// The transcript is the cloud's; false when the fallback made it.
     var cloudTranscript = false
@@ -152,6 +171,11 @@ final class StubTranscriber: Transcriber, @unchecked Sendable {
     func finishUtterance() async throws -> String {
         let (count, seconds, tag) = lock.withLock { (utteranceCount, Double(frames) / sampleRate, language?.tag ?? "?") }
         return String(format: "Test dictation number %d in %@, %.1f seconds of audio.", count, tag, seconds)
+    }
+
+    /// The test sentence, for the pipeline to translate.
+    func finishUtterance(translation: TranslationRequest) async throws -> UtteranceOutput {
+        UtteranceOutput(transcript: try await finishUtterance())
     }
 
     func cancelUtterance() async {}

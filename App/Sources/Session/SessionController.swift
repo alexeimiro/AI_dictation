@@ -42,6 +42,10 @@ final class SessionController {
     @ObservationIgnored private let pipeline: DictationPipeline
     @ObservationIgnored private let assets: SpeechAssetManager
     @ObservationIgnored private let transcription: (any CloudTranscribing)?
+    /// Translates a cloud dictation in the request that transcribes it.
+    @ObservationIgnored private let dictate: (any Dictating)?
+    /// Gets the token and `dictate` ready while the user speaks.
+    @ObservationIgnored private let warmup: BackendWarmup?
     /// This session transcribes with OpenAI (decided when it starts).
     @ObservationIgnored private var usesCloud = false
     /// In the cloud, the on-device languages already installed, for when a request fails.
@@ -97,13 +101,15 @@ final class SessionController {
     static let reconnectDelays: [Duration] = [.zero, .milliseconds(500), .seconds(1), .seconds(2)]
 
     init(transport: IPCTransport, pipeline: DictationPipeline, assets: SpeechAssetManager, history: any TranscriptSink,
-         transcription: (any CloudTranscribing)? = nil, timingsLog: TimingsLog? = nil,
-         settings: SharedSettings = .shared) {
+         transcription: (any CloudTranscribing)? = nil, dictate: (any Dictating)? = nil,
+         warmup: BackendWarmup? = nil, timingsLog: TimingsLog? = nil, settings: SharedSettings = .shared) {
         self.transport = transport
         self.publisher = HotStatePublisher(transport: transport)
         self.pipeline = pipeline
         self.assets = assets
         self.transcription = transcription
+        self.dictate = dictate
+        self.warmup = warmup
         self.history = history
         self.timingsLog = timingsLog
         self.settings = settings
@@ -220,7 +226,7 @@ final class SessionController {
     private func makeTranscriber() -> Transcriber {
         if TranscriberEngine.current == .stub { return StubTranscriber() }
         guard usesCloud, let transcription else { return AppleSpeechTranscriber() }
-        return OpenAITranscriber(client: transcription, fallback: AppleSpeechTranscriber(),
+        return OpenAITranscriber(client: transcription, dictation: dictate, fallback: AppleSpeechTranscriber(),
                                  fallbackLanguages: onDeviceFallbacks)
     }
 
@@ -476,6 +482,8 @@ final class SessionController {
         publisher.set(.recording, requestTag: requestId.tag16)
         transport.post(.stateChanged)
         playSound(.start)
+        // After the acknowledgement: nothing here may delay it.
+        warmup?.dictationDidStart(requestId, translating: translationTargetLanguage != nil && usesCloud)
         liveActivity.update(.recording, since: Date())
         capTask?.cancel()
         capTask = Task { [weak self] in
@@ -536,7 +544,10 @@ final class SessionController {
             // The keyboard first, then history and the timings, so saving never delays the insertion.
             deliver(outcome.result)
             history.record(outcome.transcript)
-            if let timings = outcome.timings { timingsLog?.append(timings) }
+            if var timings = outcome.timings {
+                timings.warmup = warmup?.takeTiming(for: dictation.requestId)
+                timingsLog?.append(timings)
+            }
             becomeReady()
             // Not while a dictation the keyboard asked for in the meantime has just begun.
             if settings.disableAfter == .immediately, active == nil {
