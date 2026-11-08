@@ -6,7 +6,7 @@ import { type CleanupOutcome, describeCleanupError, runCleanup } from "./cleanup
 import type { DictateConfig } from "./config.ts";
 import { type Caller, clientInfo, corsHeaders, json } from "./http.ts";
 import type { Preflight } from "./preflight.ts";
-import { countWords } from "./text.ts";
+import { countWords, primarySubtag } from "./text.ts";
 import { beginRequest, Phases, type RequestStart, type ServerTimings } from "./timing.ts";
 import {
   cleanKeywords,
@@ -52,8 +52,8 @@ export interface DictateDeps {
   apiKey: string | undefined;
   /** The caller of the bearer token, or null (401). */
   authenticate(request: Request): Promise<Caller | null>;
-  /** `dictation_preflight` for this dictation; throws when the RPC fails (503). */
-  preflight(caller: Caller, dictationId: string, perMinute: number): Promise<Preflight>;
+  /** `dictation_preflight` in the scope and for the dictation `preflightFor` picks; throws when the RPC fails (503). */
+  preflight(caller: Caller, scope: PreflightScope, dictationId: string | null, perMinute: number): Promise<Preflight>;
   /** Warm mode's read-only `quota_status`. */
   readQuota(caller: Caller, signal: AbortSignal): Promise<void>;
   /** `record_usage`, handed to `background`. */
@@ -65,10 +65,12 @@ export interface DictateDeps {
   /** The handler's clock in ms (`performance.now`): the phases, the audio budget and the warm memo. */
   now?: () => number;
   /**
-   * The signal of an OpenAI call bounded by `ms`. By default it also fires when the phone gives
-   * up on the request, so the spend stops with it. Tests pass signals that never fire.
+   * The signal of an OpenAI call bounded by `ms`. Given the request, it also fires when the phone
+   * hangs up, wherever the runtime passes that on: the local edge runtime (1.77.4) never does and
+   * hosted is unchecked, so a dictation the app gives up on may run to its deadlines. Warm-ups pass
+   * no request: they finish whether or not the caller waits. Tests pass signals that never fire.
    */
-  signal?(ms: number, request: Request): AbortSignal;
+  signal?(ms: number, request?: Request): AbortSignal;
   /** Counts the request against the worker (`beginRequest`). */
   worker?: () => RequestStart;
   /** Where a request's one JSON log line goes (console.log). */
@@ -157,6 +159,19 @@ function withTarget(request: CleanupRequest): TranslationRequest | null {
 
 function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1;
+}
+
+/** The scopes `dictate` checks its calls in. */
+export type PreflightScope = "dictate" | "transcribe";
+
+/**
+ * Where a call is checked. A text call shares its dictation's attempts in `dictate`'s scope: only
+ * the dictation's first takes from the minute bucket, so speculative translations don't drain it.
+ * An audio call takes from `transcribe`'s bucket every time, as a legacy transcription does, so
+ * the two functions together transcribe no more for an account than `transcribe` alone would.
+ */
+function preflightFor(mode: DictateBody["mode"], dictationId: string): { scope: PreflightScope; dictationId: string | null } {
+  return mode === "audio" ? { scope: "transcribe", dictationId: null } : { scope: "dictate", dictationId };
 }
 
 /** The mode a Content-Type selects, or null for any other type. */
@@ -312,15 +327,17 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
   const begin = deps.worker ?? (() => beginRequest());
   const log = deps.log ?? ((line: string) => console.log(line));
   const signal = deps.signal ??
-    ((ms: number, request: Request) => AbortSignal.any([request.signal, AbortSignal.timeout(ms)]));
+    ((ms: number, request?: Request) =>
+      request ? AbortSignal.any([request.signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms));
   /** When this isolate last made each warm-up round trip. */
   const warmedAt = { openai: -Infinity, database: -Infinity };
 
   const perMinute = (caller: Caller) => caller.isAnonymous ? config.anonymousPerMinute : config.perMinute;
 
   /**
-   * Everything before OpenAI. The token and the preflight are checked from the headers while the
-   * body is still uploading, and the request is admitted only once all three are through.
+   * Everything before OpenAI. The token is checked from the headers; once it names a caller, the
+   * preflight runs while the body is read, and the request is admitted only once all three are
+   * through. A request without a caller never has its body read.
    */
   async function admit(
     request: Request,
@@ -337,29 +354,26 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
       ? "body too large"
       : null;
 
-    // Null when there is no caller, which gets its 401 first.
-    const preflight = headerError ? null : settle(auth.then((result) =>
-      result.ok && result.value
-        ? phases.mark("preflightMs", deps.preflight(result.value, dictationId, perMinute(result.value)))
-        : null
-    ));
-    const body = headerError || !mode ? null : phases.mark("bodyMs", readBody(request, mode));
-
     const caller = await auth;
     if (!caller.ok) {
       console.error("authentication failed", errorName(caller.error));
       return unavailable();
     }
     if (!caller.value) return json({ error: "unauthorized" }, 401);
-    if (headerError || !body || !preflight) return badRequest(headerError ?? "bad request");
+    if (headerError || !mode) return badRequest(headerError ?? "bad request");
+    const user = caller.value;
 
-    const parsed = await body;
+    const checks = preflightFor(mode, dictationId);
+    const preflight = settle(
+      phases.mark("preflightMs", deps.preflight(user, checks.scope, checks.dictationId, perMinute(user))),
+    );
+    const parsed = await phases.mark("bodyMs", readBody(request, mode));
     if (!parsed.ok) return badRequest(parsed.error);
     const { translation } = parsed.value;
     if (translation.dictationId.toLowerCase() !== dictationId.toLowerCase()) {
       return badRequest("dictationId must match x-murmur-dictation");
     }
-    if (parsed.value.mode === "text" && translation.transcript.length > transcriptLimit(caller.value)) {
+    if (parsed.value.mode === "text" && translation.transcript.length > transcriptLimit(user)) {
       return badRequest("transcript too long");
     }
 
@@ -369,14 +383,13 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
       console.error("preflight failed", errorMessage(checked.error));
       return unavailable();
     }
-    if (!checked.value) return json({ error: "unauthorized" }, 401);
     const { allowed, reason } = checked.value;
     if (!allowed) {
       if (reason && Object.hasOwn(REFUSALS, reason)) return json({ error: reason }, REFUSALS[reason]);
       console.error("preflight refused without a known reason", reason);
       return unavailable();
     }
-    return { caller: caller.value, body: parsed.value, preflight: checked.value };
+    return { caller: user, body: parsed.value, preflight: checked.value };
   }
 
   function noKey(): Response {
@@ -488,13 +501,16 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
       return json({ error: "transcription_unavailable" }, 502);
     }
 
-    // With an automatic source, the language the transcription heard first is the source: the
-    // prompt names it, and the guard checks the output against it.
+    // With an automatic source (none, or "und" as the app's Auto-detect sends it), the language the
+    // transcription heard first is the source: the prompt names it, and the guard checks the
+    // output against it.
     const transcript = d.heard.text;
+    const declared = body.translation.language;
+    const automatic = !declared || primarySubtag(declared) === "und";
     d.translation = {
       ...body.translation,
       transcript,
-      language: body.translation.language ?? detectedLanguage(d.heard.languages),
+      language: automatic ? detectedLanguage(d.heard.languages) ?? declared : declared,
     };
     if (countWords(transcript, d.translation.language) === 0) return reply(d, EMPTY);
     if (transcript.length > transcriptLimit(d.caller)) {
@@ -565,9 +581,9 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
     const [openai, database] = await Promise.all([
       // Free: it opens TLS and HTTP/2 to OpenAI in the isolate's pool, and a misconfigured
       // translation model shows in the log before a dictation needs it.
-      warmUp("openai", apiKey ? () => pingOpenAI(request, apiKey) : null),
+      warmUp("openai", apiKey ? () => pingOpenAI(apiKey) : null),
       // Read only: it opens the isolate's connection to the database API. No writes.
-      warmUp("database", () => pingDatabase(request, user)),
+      warmUp("database", () => pingDatabase(user)),
     ]);
     const { authMs, totalMs } = phases.toJSON();
     const timings = {
@@ -604,12 +620,14 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
     return { state: ok ? "ok" : "failed", ms: Math.round(now() - started) };
   }
 
-  async function pingOpenAI(request: Request, key: string): Promise<boolean> {
+  // The pings' signals leave out the request: a caller hanging up would fail them, and a failed
+  // round trip clears the memo, so each hung-up warm-up could make them again.
+  async function pingOpenAI(key: string): Promise<boolean> {
     const model = config.translation.model;
     try {
       const response = await fetcher(`https://api.openai.com/v1/models/${encodeURIComponent(model)}`, {
         headers: { Authorization: `Bearer ${key}` },
-        signal: signal(WARM_FETCH_MS, request),
+        signal: signal(WARM_FETCH_MS),
       });
       // Read to the end, so the connection goes back to the pool.
       await response.arrayBuffer();
@@ -621,9 +639,9 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
     }
   }
 
-  async function pingDatabase(request: Request, caller: Caller): Promise<boolean> {
+  async function pingDatabase(caller: Caller): Promise<boolean> {
     try {
-      await deps.readQuota(caller, signal(WARM_FETCH_MS, request));
+      await deps.readQuota(caller, signal(WARM_FETCH_MS));
       return true;
     } catch (error) {
       console.error("warm-up: quota_status failed", errorMessage(error));

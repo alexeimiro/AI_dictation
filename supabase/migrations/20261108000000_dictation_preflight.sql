@@ -1,15 +1,18 @@
 -- One round trip before each `dictate` call: per-dictation attempts, a per-minute bucket for the
 -- scope and the weekly quota. Service role only. `transcribe` and `cleanup` keep their RPCs, and
--- `record_usage` keeps its signature, so old builds are unaffected.
+-- `record_usage` keeps its signature, so old builds' calls and replies are unchanged; only a
+-- Regenerate that comes back with more words now raises its dictation's count.
 
 -- ---------------------------------------------------------------------------
 -- Tables and indexes
 -- ---------------------------------------------------------------------------
 
--- Allowed calls per dictation and scope. Speculative translations, the final one and retries share
--- one dictation id, so only its first call takes from the scope's bucket. That lasts 10 minutes
--- from the first allowed call (a dictation is at most 5): then the next call starts over, so calls
--- that skip the bucket can't be saved up.
+-- Allowed calls per dictation and scope. Callers pass a dictation only for calls meant to share
+-- one: `dictate`'s text calls (speculative translations, the final one, retries), not its audio
+-- calls. Only a dictation's first call takes from the scope's bucket, for 10 minutes from its first
+-- allowed call (a dictation is at most 5); then its next call starts over. So a dictation can't
+-- keep its skipped calls longer, though those of every dictation opened in the 10 minutes can be
+-- sent at once.
 create table public.dictation_attempts (
   user_id uuid not null references auth.users (id) on delete cascade,
   scope text not null,

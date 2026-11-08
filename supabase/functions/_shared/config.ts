@@ -77,7 +77,10 @@ export interface DictateConfig {
   deadlineMs: number;
   /** Kill switch: answers 404 dictate_disabled, so the app goes back to transcribe + cleanup. */
   disabled: boolean;
-  /** Dictations a minute; only a dictation's first call counts (`dictation_preflight`). */
+  /**
+   * Calls a minute: every audio call, and a text dictation's first (`dictation_preflight`). Audio
+   * calls share `transcribe`'s bucket, so both limits must stay equal to its own.
+   */
   perMinute: number;
   /** Anonymous (trial) callers get the tighter limit `transcribe` and `cleanup` give them. */
   anonymousPerMinute: number;

@@ -75,7 +75,7 @@ function setup(options: Setup = {}) {
   const recorded = {
     events: [] as string[],
     fetches: [] as Fetched[],
-    preflights: [] as { caller: Caller; dictationId: string; perMinute: number }[],
+    preflights: [] as { caller: Caller; scope: string; dictationId: string | null; perMinute: number }[],
     usage: [] as { caller: Caller; dictationId: string; words: number }[],
     quotas: [] as Caller[],
     signals: [] as number[],
@@ -105,6 +105,7 @@ function setup(options: Setup = {}) {
     recorded.fetches.push({ path, init, json: typeof init.body === "string" ? JSON.parse(init.body) : undefined });
     const route = routes[path.startsWith("/v1/models/") ? "/v1/models" : path];
     if (!route) throw new Error(`unexpected fetch ${path}`);
+    init.signal?.throwIfAborted();
     // A real call answers later: the caller's phase has started timing by the time it does.
     await Promise.resolve();
     return await route(init, clock);
@@ -118,16 +119,16 @@ function setup(options: Setup = {}) {
       const token = request.headers.get("Authorization");
       return Promise.resolve(token === "Bearer user" ? USER : token === "Bearer guest" ? GUEST : null);
     },
-    preflight: async (caller, dictationId, perMinute) => {
+    preflight: async (caller, scope, dictationId, perMinute) => {
       recorded.events.push("preflight");
-      recorded.preflights.push({ caller, dictationId, perMinute });
+      recorded.preflights.push({ caller, scope, dictationId, perMinute });
       const answer = typeof options.preflight === "function" ? await options.preflight() : options.preflight;
       if (answer instanceof Error) throw answer;
       return { ...ALLOWED, attempt: recorded.preflights.length, ...answer };
     },
-    readQuota: (caller) => {
+    readQuota: (caller, signal) => {
       recorded.quotas.push(caller);
-      return Promise.resolve();
+      return signal.aborted ? Promise.reject(signal.reason) : Promise.resolve();
     },
     recordUsage: (caller, dictationId, words) => {
       recorded.usage.push({ caller, dictationId, words });
@@ -136,9 +137,10 @@ function setup(options: Setup = {}) {
     background: (work) => void recorded.background.push(work),
     fetcher,
     now: () => now,
-    signal: (ms) => {
+    // A request's own signal (the phone hanging up), but never a deadline.
+    signal: (ms, request) => {
       recorded.signals.push(ms);
-      return NEVER;
+      return request?.signal ?? NEVER;
     },
     worker: () => ({ cold: served++ === 0, workerAgeMs: 41210, region: "eu-central-1", executionId: EXECUTION_ID }),
     log: (line) => void recorded.logs.push(JSON.parse(line)),
@@ -200,13 +202,21 @@ async function quietly<T>(work: () => Promise<T>): Promise<T> {
   }
 }
 
-Deno.test("no caller → 401, with no preflight and no OpenAI call", async () => {
+Deno.test("no caller → 401, with no preflight, no OpenAI call and the body left unread", async () => {
   const { handler, recorded } = setup();
-  for (const request of [audioRequest(metadata, { token: null }), textRequest(textBody, { token: "expired" }), warmRequest("expired")]) {
+  let pulls = 0;
+  const unread = new Request(ENDPOINT, {
+    method: "POST",
+    body: new ReadableStream<Uint8Array>({ pull: () => void pulls++ }, { highWaterMark: 0 }),
+    headers: { ...headersFor({ token: null }), "content-type": "multipart/form-data; boundary=murmur" },
+  });
+  for (const request of [unread, textRequest(textBody, { token: "expired" }), warmRequest("expired")]) {
     const response = await handler(request);
     assertEquals(response.status, 401);
     assertEquals(await response.json(), { error: "unauthorized" });
   }
+  for (let i = 0; i < 5; i++) await tick();
+  assertEquals(pulls, 0, "no byte of the body is asked for");
   assertEquals(recorded.preflights, []);
   assertEquals(recorded.fetches, []);
   assertEquals(recorded.quotas, []);
@@ -229,7 +239,7 @@ Deno.test("the preflight starts before the body has arrived, and OpenAI only onc
   let answered = false;
   const responding = handler(request).finally(() => void (answered = true));
   for (let i = 0; i < 50 && recorded.preflights.length === 0; i++) await tick();
-  assertEquals(recorded.preflights, [{ caller: USER, dictationId: DICTATION, perMinute: 40 }], "from the headers alone");
+  assertEquals(recorded.preflights, [{ caller: USER, scope: "transcribe", dictationId: null, perMinute: 40 }], "from the headers alone");
   assertFalse(answered);
 
   recorded.events.push("rest of the body");
@@ -250,6 +260,18 @@ Deno.test("the preflight starts before the body has arrived, and OpenAI only onc
     "preflight passed",
     "fetch /v1/audio/transcriptions",
     "fetch /v1/responses",
+  ]);
+});
+
+Deno.test("every audio call is rate limited as a transcription; a dictation's text calls share its attempts", async () => {
+  const { handler, recorded } = setup();
+  for (const request of [audioRequest(), textRequest(), audioRequest(metadata, { token: "guest" })]) {
+    assertEquals((await handler(request)).status, 200);
+  }
+  assertEquals(recorded.preflights, [
+    { caller: USER, scope: "transcribe", dictationId: null, perMinute: 40 },
+    { caller: USER, scope: "dictate", dictationId: DICTATION, perMinute: 40 },
+    { caller: GUEST, scope: "transcribe", dictationId: null, perMinute: 10 },
   ]);
 });
 
@@ -384,22 +406,25 @@ Deno.test("an empty transcript is answered without a translation", async () => {
 
 Deno.test("an automatic source is the language the transcription heard first", async () => {
   const heard = (text: string) => () => Response.json({ text, languages: [{ code: "ru" }, { code: "en" }] });
-  const { handler, recorded } = setup({ transcription: heard(TRANSCRIPT) });
-  assertEquals((await handler(audioRequest({ ...metadata, language: null }))).status, 200);
-  const form = recorded.fetches[0].init.body as FormData;
-  assertEquals(form.getAll("languages[]"), [], "the transcription detects the language");
-  assertStringIncludes(recorded.fetches[1].json!.instructions as string, "Source language: Russian [ru].");
-  assertEquals(recorded.logs[0].sourceTag, "ru");
+  // No language, or the app's Auto-detect.
+  for (const language of [null, "und"]) {
+    const { handler, recorded } = setup({ transcription: heard(TRANSCRIPT) });
+    assertEquals((await handler(audioRequest({ ...metadata, language }))).status, 200);
+    const form = recorded.fetches[0].init.body as FormData;
+    assertEquals(form.getAll("languages[]"), [], "the transcription detects the language");
+    assertStringIncludes(recorded.fetches[1].json!.instructions as string, "Source language: Russian [ru].");
+    assertEquals(recorded.logs[0].sourceTag, "ru", String(language));
 
-  // The guard checks against it too: Russian "translated" into Ukrainian but left Russian.
-  const plan = "я думаю что мы должны встретиться завтра утром чтобы обсудить проект";
-  const unchanged = "Я думаю, что мы должны встретиться завтра утром, чтобы обсудить проект.";
-  const russian = setup({
-    transcription: heard(plan),
-    responses: () => Response.json(responsesReply(unchanged)),
-  });
-  const reply = await (await russian.handler(audioRequest({ ...metadata, language: null, targetLanguage: "uk-UA" }))).json();
-  assertEquals([reply.status, reply.reason, reply.text], ["raw", "untranslated", ""]);
+    // The guard checks against it too: Russian "translated" into Ukrainian but left Russian.
+    const plan = "я думаю что мы должны встретиться завтра утром чтобы обсудить проект";
+    const unchanged = "Я думаю, что мы должны встретиться завтра утром, чтобы обсудить проект.";
+    const russian = setup({
+      transcription: heard(plan),
+      responses: () => Response.json(responsesReply(unchanged)),
+    });
+    const reply = await (await russian.handler(audioRequest({ ...metadata, language, targetLanguage: "uk-UA" }))).json();
+    assertEquals([reply.status, reply.reason, reply.text], ["raw", "untranslated", ""], String(language));
+  }
 });
 
 Deno.test("an anonymous transcript over the trial limit comes back raw, untranslated", async () => {
@@ -500,6 +525,21 @@ Deno.test("warm mode: the token, then OpenAI and the database once a minute; no 
   assertEquals(recorded.background, []);
   assertEquals((await handler(warmRequest("expired"))).status, 401);
   assertEquals(recorded.fetches.length, 2);
+});
+
+Deno.test("a warm-up the caller hangs up on still finishes, so the next one within a minute skips it", async () => {
+  const { handler, recorded } = setup();
+  const hangUp = new AbortController();
+  hangUp.abort();
+  const abandoned = new Request(ENDPOINT, {
+    method: "POST",
+    signal: hangUp.signal,
+    headers: headersFor({ dictation: null, headers: { "x-murmur-warm": "1" } }),
+  });
+  await (await handler(abandoned)).json();
+  await (await handler(warmRequest())).json();
+  assertEquals(recorded.logs.map((line) => [line.openai, line.database]), [["ok", "ok"], ["memoized", "memoized"]]);
+  assertEquals([recorded.fetches.length, recorded.quotas.length], [1, 1]);
 });
 
 Deno.test("warm mode retries a round trip that failed, and skips OpenAI without a key", async () => {

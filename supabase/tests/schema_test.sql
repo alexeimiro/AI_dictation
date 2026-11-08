@@ -1,6 +1,6 @@
 -- pgTAP tests for RLS, quota, the dictation preflight and sign-up helpers. Run with `supabase test db`.
 begin;
-select plan(57);
+select plan(61);
 
 -- Two users (the auth trigger creates their profile, trial entitlement and referral code).
 insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at, aud, role)
@@ -96,9 +96,11 @@ end;
 $$;
 select ok((select allowed from public.dictation_preflight('33333333-3333-3333-3333-333333333333', 'dictate')),
           'the 40th dictate call is allowed');
-select is((select reason from public.dictation_preflight(
-             '33333333-3333-3333-3333-333333333333', 'dictate', 'cccccccc-0000-0000-0000-000000000002')),
-          'rate_limited', 'the 41st dictate call in a minute is rate limited');
+select results_eq(
+  $$ select reason, attempt from public.dictation_preflight(
+       '33333333-3333-3333-3333-333333333333', 'dictate', 'cccccccc-0000-0000-0000-000000000002') $$,
+  $$ values ('rate_limited'::text, null::int) $$,
+  'the 41st dictate call in a minute is rate limited, and not numbered');
 
 -- Later calls of an allowed dictation skip the full bucket, up to 6 calls in all.
 select results_eq(
@@ -117,22 +119,30 @@ $$;
 select is((select attempt from public.dictation_preflight(
              '33333333-3333-3333-3333-333333333333', 'dictate', 'cccccccc-0000-0000-0000-000000000001')),
           6, 'calls are numbered per dictation');
-select is((select reason from public.dictation_preflight(
-             '33333333-3333-3333-3333-333333333333', 'dictate', 'cccccccc-0000-0000-0000-000000000001')),
-          'too_many_attempts', 'a dictation''s 7th call is refused');
+select results_eq(
+  $$ select reason, attempt from public.dictation_preflight(
+       '33333333-3333-3333-3333-333333333333', 'dictate', 'cccccccc-0000-0000-0000-000000000001') $$,
+  $$ values ('too_many_attempts'::text, null::int) $$,
+  'a dictation''s 7th call is refused, and not numbered');
 select is((select count from public.request_buckets where key = 'dictate:33333333-3333-3333-3333-333333333333'),
           41, 'only a dictation''s first call counts against the bucket');
 
 -- The rate-limited first call of dictation 2 wasn't counted: with room in the bucket it is attempt 1.
+-- Its row dates from that refusal, here 9 minutes ago; the 10 minutes start at the allowed call.
+update public.dictation_attempts set window_start = now() - interval '9 minutes'
+where dictation_id = 'cccccccc-0000-0000-0000-000000000002' and scope = 'dictate';
 select results_eq(
   $$ select allowed, attempt from public.dictation_preflight(
        '33333333-3333-3333-3333-333333333333', 'dictate', 'cccccccc-0000-0000-0000-000000000002',
        p_per_minute => 100) $$,
   $$ values (true, 1) $$,
   'a rate-limited call is not counted as an attempt');
+select is((select window_start from public.dictation_attempts
+           where dictation_id = 'cccccccc-0000-0000-0000-000000000002' and scope = 'dictate'),
+          now(), 'a dictation''s 10 minutes start at its first allowed call, not at a refused one');
 
 -- Dictation 1's later calls skip the bucket for 10 minutes from its first allowed call. After that
--- its next call starts over, so calls that skip the bucket can't be saved up.
+-- its next call starts over, so a dictation can't keep its skipped calls longer.
 update public.dictation_attempts set window_start = now() - interval '9 minutes'
 where dictation_id = 'cccccccc-0000-0000-0000-000000000001' and scope = 'dictate';
 select is((select reason from public.dictation_preflight(
@@ -152,6 +162,39 @@ select is((select count from public.request_buckets where key = 'dictate:3333333
 select is((select attempt from public.dictation_preflight(
              '33333333-3333-3333-3333-333333333333', 'dictate', 'cccccccc-0000-0000-0000-000000000001')),
           2, 'the 10 minutes restart at that call');
+-- Later calls don't move the start: the 10 minutes don't slide.
+update public.dictation_attempts set window_start = now() - interval '5 minutes'
+where dictation_id = 'cccccccc-0000-0000-0000-000000000001' and scope = 'dictate';
+do $$
+begin
+  perform public.dictation_preflight('33333333-3333-3333-3333-333333333333', 'dictate',
+                                     'cccccccc-0000-0000-0000-000000000001');
+end;
+$$;
+select is((select window_start from public.dictation_attempts
+           where dictation_id = 'cccccccc-0000-0000-0000-000000000001' and scope = 'dictate'),
+          now() - interval '5 minutes', 'a dictation''s later calls don''t move the start of its 10 minutes');
+
+-- 2% of calls with a dictation delete the attempts whose 10 minutes are up. In PostgreSQL 17 the
+-- first random() after this seed is 0.0047, so the next call runs the cleanup.
+insert into public.dictation_attempts (user_id, scope, dictation_id, calls, window_start)
+values
+  ('33333333-3333-3333-3333-333333333333', 'dictate', 'cccccccc-0000-0000-0000-000000000009', 3,
+   now() - interval '11 minutes'),
+  ('33333333-3333-3333-3333-333333333333', 'dictate', 'cccccccc-0000-0000-0000-000000000010', 3,
+   now() - interval '9 minutes');
+select setseed(-0.9117);
+do $$
+begin
+  perform public.dictation_preflight('33333333-3333-3333-3333-333333333333', 'dictate',
+                                     'cccccccc-0000-0000-0000-000000000003', p_per_minute => 100);
+end;
+$$;
+select results_eq(
+  $$ select dictation_id from public.dictation_attempts
+     where dictation_id in ('cccccccc-0000-0000-0000-000000000009', 'cccccccc-0000-0000-0000-000000000010') $$,
+  $$ values ('cccccccc-0000-0000-0000-000000000010'::uuid) $$,
+  'the cleanup deletes attempts whose 10 minutes are up and keeps the rest');
 
 -- Scopes have their own buckets and attempt counts, and `transcribe` uses the transcribe function's keys.
 select ok((select allowed from public.dictation_preflight('33333333-3333-3333-3333-333333333333', 'transcribe')),
@@ -210,9 +253,9 @@ end;
 $$;
 select public.record_usage('44444444-4444-4444-4444-444444444444', 'dddddddd-0000-0000-0000-000000000003', 250);
 select results_eq(
-  $$ select allowed, reason, remaining from public.dictation_preflight(
+  $$ select allowed, reason, remaining, attempt from public.dictation_preflight(
        '44444444-4444-4444-4444-444444444444', 'dictate', 'dddddddd-0000-0000-0000-000000000004') $$,
-  $$ values (false, 'limit_reached'::text, 0) $$,
+  $$ values (false, 'limit_reached'::text, 0, null::int) $$,
   'the dictation preflight blocks when the weekly limit is used up');
 select is((select reason from public.dictation_preflight(
              '44444444-4444-4444-4444-444444444444', 'dictate', 'dddddddd-0000-0000-0000-000000000005')),
@@ -220,6 +263,16 @@ select is((select reason from public.dictation_preflight(
 select is((select reason from public.dictation_preflight(
              '44444444-4444-4444-4444-444444444444', 'dictate', 'dddddddd-0000-0000-0000-000000000006')),
           'too_many_attempts', 'the attempt cap is checked before the quota');
+-- With a limit of 1, the first call takes the slot and is refused for the quota; the second finds
+-- the bucket full.
+do $$
+begin
+  perform public.dictation_preflight('44444444-4444-4444-4444-444444444444', 'live-token', p_per_minute => 1);
+end;
+$$;
+select is((select reason from public.dictation_preflight(
+             '44444444-4444-4444-4444-444444444444', 'live-token', p_per_minute => 1)),
+          'rate_limited', 'the rate limit is checked before the quota');
 
 -- With words left again, dictation 4's first allowed call is attempt 1: its refusal wasn't counted.
 delete from public.usage_events where dictation_id = 'dddddddd-0000-0000-0000-000000000003';

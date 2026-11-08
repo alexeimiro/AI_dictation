@@ -2,13 +2,17 @@
 // One request per translated dictation; the handler is _shared/dictate.ts. Three modes:
 //   audio: multipart/form-data with a "metadata" JSON part { dictationId, format: "m4a" | "wav",
 //          language: BCP-47 | null, keywords?, targetLanguage, style?, dictionary?, snippets? } and an
-//          "audio" file part of raw bytes. Transcribes, then translates on the same worker.
+//          "audio" file part of raw bytes. The audio part needs a filename (any) in its
+//          Content-Disposition: without one it arrives as text, and gets 400. Transcribes, then
+//          translates on the same worker; a null or "und" language is the one it hears first.
 //   text:  application/json, a CleanupRequest with targetLanguage (see _shared/types.ts), plus
 //          speculative?: boolean and attempt?: integer, which are only logged.
 //   warm:  the header x-murmur-warm: 1 and no body. Checks the token and opens the connections to
 //          OpenAI and the database while the user speaks; no writes.
-// Audio and text mode need x-murmur-dictation: <the body's dictationId>, so the token and the
-// preflight (attempts, rate limit, quota) are checked from the headers while the body uploads.
+// Audio and text mode need x-murmur-dictation: <the body's dictationId>, so the preflight
+// (attempts, rate limit, quota) is checked from the headers while the body uploads. Every audio
+// call takes from `transcribe`'s rate limit, as a legacy transcription does; a dictation's text
+// calls take one slot of dictate's, for up to 6 calls in 10 minutes.
 // Responses:
 //   200 { transcript, languages, transcribeModel, text, status: "cleaned" | "raw" | "unavailable",
 //         reason, targetLanguage, words, model, ttftMs, totalMs, remaining, timings }
@@ -37,7 +41,7 @@ Deno.serve(createDictateHandler({
   config: dictateConfig(),
   apiKey: Deno.env.get("OPENAI_API_KEY"),
   authenticate: (request) => authenticate(request, admin),
-  preflight: (caller, dictationId, perMinute) => dictationPreflight(admin, caller, "dictate", dictationId, perMinute),
+  preflight: (caller, scope, dictationId, perMinute) => dictationPreflight(admin, caller, scope, dictationId, perMinute),
   readQuota: (caller, signal) => readQuota(admin, caller, signal),
   recordUsage: (caller, dictationId, words) => recordUsage(admin, caller, dictationId, words),
   background,

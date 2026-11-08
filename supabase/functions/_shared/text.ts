@@ -141,7 +141,7 @@ function keptWords(transcript: string, output: string): boolean {
   return overlap !== null && overlap >= 0.8;
 }
 
-function primarySubtag(tag: string): string {
+export function primarySubtag(tag: string): string {
   return tag.split("-")[0].toLowerCase();
 }
 
