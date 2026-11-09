@@ -8,16 +8,22 @@ import UIKit
 @MainActor
 enum HostAppOpener {
     static func open(_ url: URL, from responder: UIResponder, completion: ((Bool) -> Void)? = nil) {
+        guard let application = application(from: responder) else {
+            completion?(false)
+            return
+        }
+        application.open(url, options: [:]) { success in
+            completion?(success)
+        }
+    }
+
+    /// The extension's application object, found on the responder chain.
+    static func application(from responder: UIResponder) -> UIApplication? {
         var current: UIResponder? = responder
         while let candidate = current {
-            if let application = candidate as? UIApplication {
-                application.open(url, options: [:]) { success in
-                    completion?(success)
-                }
-                return
-            }
+            if let application = candidate as? UIApplication { return application }
             current = candidate.next
         }
-        completion?(false)
+        return nil
     }
 }

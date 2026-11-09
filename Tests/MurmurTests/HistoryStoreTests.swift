@@ -121,7 +121,7 @@ struct HistoryStoreTests {
     @Test func regenerateUpdatesOnlyOnSuccess() async throws {
         let cleanup = FakeCleanup()
         let pipeline = DictationPipeline(cleanup: cleanup)
-        let transcript = Transcript(id: UUID(), language: "en-US", style: .formal, rawText: "hello there friend",
+        let transcript = Transcript(id: UUID(), language: "en-US", style: .grammar, rawText: "hello there friend",
                                     status: .raw)
 
         var updated = try await pipeline.recleanup(transcript)

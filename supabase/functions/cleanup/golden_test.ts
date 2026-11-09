@@ -25,7 +25,7 @@ function golden(name: string, defaults: Partial<CleanupRequest>, fn: (clean: Cle
         const outcome = await runCleanup({
           dictationId: crypto.randomUUID(),
           transcript: "",
-          style: "casual",
+          style: "grammar",
           ...defaults,
           ...partial,
         }, { model, effort, apiKey, deadlineMs: 30_000 });
@@ -91,9 +91,16 @@ english("emits snippet placeholders", async (clean) => {
   assert(text.includes("⟦s:1a2b3c4d⟧"), text);
 });
 
-english("very casual style is lowercase", async (clean) => {
-  const { text } = await clean({ transcript: "Sounds good see you tonight", style: "veryCasual" });
-  assertEquals(text, text.toLowerCase());
+english("improve my grammar fixes agreement and keeps the words", async (clean) => {
+  const { text } = await clean({ transcript: "me and him was going to the store yesterday and we buyed some apples" });
+  assert(/\bhe and I were\b/i.test(text), text);
+  assert(/\bbought\b/i.test(text), text);
+  assert(/\bapples\b/i.test(text), text);
+});
+
+english("word for word keeps hedges and self-corrections", async (clean) => {
+  const { text } = await clean({ transcript: "so I think we should actually ship it on monday no wait tuesday", style: "verbatim" });
+  assert(/actually/i.test(text) && /monday/i.test(text) && /tuesday/i.test(text), text);
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -167,10 +174,10 @@ russian("loanwords stay Cyrillic, brands become Latin", async (clean) => {
   assertFalse(/гитхаб|телеграм|джейсон/i.test(text), text);
 });
 
-russian("very casual style is lowercase", async (clean) => {
-  const { text } = await clean({ transcript: "Отлично увидимся вечером в четверг", style: "veryCasual" });
-  assertEquals(text, text.toLowerCase());
-  assertFalse(text.endsWith("."), text);
+russian("improve my grammar fixes case endings", async (clean) => {
+  const { text } = await clean({ transcript: "я вчера купил две яблоки и один груша" });
+  assert(/два яблока/i.test(text), text);
+  assert(/одну грушу/i.test(text), text);
 });
 
 russian("«ёлочки» and the em dash", async (clean) => {

@@ -11,6 +11,7 @@ struct DebugView: View {
     @State private var latencyKind = DictationTimings.Kind.translation
     @State private var tokenSigning = "—"
     @State private var keyboardPeak = 0
+    @State private var keyboardDemo: KeyboardDemo?
 
     var body: some View {
         @Bindable var settings = model.settings
@@ -32,6 +33,7 @@ struct DebugView: View {
             }
             Section {
                 Toggle("Return to the app automatically", isOn: $settings.autoReturn)
+                Toggle("Keep the screen on while dictating", isOn: $settings.keepScreenAwake)
                     .tint(Palette.toggleGreen)
                 LabeledContent("Last time", value: model.hostReturn.lastOutcome
                     ?? (model.hostReturn.isAvailable ? "—" : "Not available on this iOS"))
@@ -83,7 +85,7 @@ struct DebugView: View {
                     Text(verbatim: tokenSigning)
                 }
                 #if DEBUG
-                Toggle("Translate in one request", isOn: $settings.translateInOneRequest)
+                Toggle("Translate and fix grammar in one request", isOn: $settings.translateInOneRequest)
                     .tint(Palette.toggleGreen)
                 if let export = model.timingsLog.exportURL {
                     ShareLink("Export timings", item: export)
@@ -104,6 +106,25 @@ struct DebugView: View {
             } footer: {
                 Text("Only dictations with a cloud transcript count, not the on-device fallback or failures. Upload, wait and the server rows add up a dictation's requests: transcribe then cleanup, or one dictate for a translation. Inserts more than 10 s after the result are left out, from the tap too: those are taps on Insert last dictation.")
             }
+            #if DEBUG
+            Section {
+                Picker("State", selection: demoState) {
+                    Text("Off").tag(KeyboardDemo.State?.none)
+                    ForEach(KeyboardDemo.State.allCases, id: \.self) { Text(verbatim: $0.rawValue).tag(Optional($0)) }
+                }
+                Picker("Layout", selection: demoLayout) {
+                    Text("As set").tag(KeyboardLayoutPreference?.none)
+                    Text("Voice").tag(Optional(KeyboardLayoutPreference.voice))
+                    Text("Numbers first").tag(Optional(KeyboardLayoutPreference.numbers))
+                    Text("QWERTY").tag(Optional(KeyboardLayoutPreference.qwerty))
+                }
+                .disabled(keyboardDemo == nil)
+            } header: {
+                Text("Keyboard demo")
+            } footer: {
+                Text("The keyboard shows this state instead of the live one, for screenshots. It ends after 15 minutes or when Murmur next launches.")
+            }
+            #endif
             Section("Housekeeping") {
                 Button("Reconcile insertions") {
                     model.history.reconcileInsertions(payloads: model.transport.payloads)
@@ -136,9 +157,31 @@ struct DebugView: View {
                 model.timingsLog.recordClaims(from: model.transport.payloads)
                 memory = "\(os_proc_available_memory() / 1_048_576) MB free"
                 keyboardPeak = SharedSettings.shared.debugKeyboardPeakFootprint
+                keyboardDemo = SharedSettings.shared.debugKeyboardDemo
                 try? await Task.sleep(for: .seconds(2))
             }
         }
+    }
+
+    private var demoState: Binding<KeyboardDemo.State?> {
+        Binding {
+            keyboardDemo?.state
+        } set: { state in
+            setKeyboardDemo(state.map { KeyboardDemo(state: $0, layout: keyboardDemo?.layout) })
+        }
+    }
+
+    private var demoLayout: Binding<KeyboardLayoutPreference?> {
+        Binding {
+            keyboardDemo?.layout
+        } set: { layout in
+            setKeyboardDemo(keyboardDemo.map { KeyboardDemo(state: $0.state, layout: layout) })
+        }
+    }
+
+    private func setKeyboardDemo(_ demo: KeyboardDemo?) {
+        keyboardDemo = demo
+        SharedSettings.shared.debugKeyboardDemo = demo
     }
 
     private func metricsRow(_ title: String, _ summary: MetricsSummary) -> some View {

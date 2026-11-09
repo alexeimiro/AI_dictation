@@ -24,11 +24,11 @@ const metadata = {
   language: "ru-RU",
   keywords: ["Окафор"],
   targetLanguage: "en-US",
-  style: "casual",
+  style: "grammar",
   dictionary: [{ term: "Valerio", misspelling: "valeria" }],
   snippets: [{ token: "⟦s:1a2b3c4d⟧", trigger: "my calendar link" }],
 };
-const textBody = { dictationId: DICTATION, transcript: TRANSCRIPT, language: "ru-RU", targetLanguage: "en-US", style: "casual" };
+const textBody = { dictationId: DICTATION, transcript: TRANSCRIPT, language: "ru-RU", targetLanguage: "en-US", style: "grammar" };
 
 const ALLOWED: Preflight = { allowed: true, reason: null, plan: "basic", remaining: 870, attempt: 1 };
 
@@ -394,6 +394,45 @@ Deno.test("a failed transcription answers 502, and nothing is translated", async
   assertEquals([recorded.logs[0].status, recorded.logs[0].reason], ["transcription_unavailable", "openai error 503"]);
 });
 
+Deno.test("Improve my grammar in audio mode: the transcript and its cleanup in one reply", async () => {
+  const fixed = "Я вчера купил два яблока и одну грушу.";
+  const { handler, recorded } = setup({
+    env: { CLEANUP_MODEL: "gpt-6.1-terra", CLEANUP_EFFORT: "none", TRANSLATE_MODEL: "gpt-6-luna" },
+    transcription: (_, clock) => {
+      clock.advance(640);
+      return Response.json({ text: "я вчера купил две яблоки и один груша", languages: [{ code: "ru" }] });
+    },
+    responses: (_, clock) => {
+      clock.advance(700);
+      return Response.json(responsesReply(fixed));
+    },
+  });
+  const response = await handler(audioRequest({ ...metadata, targetLanguage: undefined, style: "grammar" }));
+  assertEquals(response.status, 200);
+  const reply = await response.json();
+  assertEquals([reply.status, reply.text, reply.targetLanguage, reply.transcript, reply.languages], [
+    "cleaned", fixed, null, "я вчера купил две яблоки и один груша", ["ru"],
+  ]);
+  assertEquals(paths(recorded), ["/v1/audio/transcriptions", "/v1/responses"]);
+  // Cleanup's model, rules and Russian pack, not the translation's.
+  const prompt = recorded.fetches[1].json!;
+  assertEquals([prompt.model, prompt.reasoning, prompt.prompt_cache_key], ["gpt-6.1-terra", { effort: "none" }, "murmur-cleanup-ru"]);
+  assertStringIncludes(prompt.instructions as string, "Style: Improve my grammar:");
+  assertFalse((prompt.instructions as string).includes("You are the translation step"));
+  assertEquals(recorded.signals.slice(0, 2), [20000, 9000]);
+  assertEquals(recorded.usage[0].words, 8);
+  const line = recorded.logs[0];
+  assertEquals([line.model, line.effort, line.style, line.targetLanguageTag], ["gpt-6.1-terra", "none", "grammar", null]);
+});
+
+Deno.test("Improve my grammar leaves three words or fewer as heard, with no model call", async () => {
+  const { handler, recorded } = setup({ transcription: () => Response.json({ text: "Спасибо, увидимся вечером.", languages: [{ code: "ru" }] }) });
+  const reply = await (await handler(audioRequest({ ...metadata, targetLanguage: undefined, style: "grammar" }))).json();
+  assertEquals([reply.status, reply.reason, reply.text, reply.transcript], ["raw", "short", "", "Спасибо, увидимся вечером."]);
+  assertEquals(paths(recorded), ["/v1/audio/transcriptions"]);
+  assertEquals(recorded.usage[0].words, 3);
+});
+
 Deno.test("an empty transcript is answered without a translation", async () => {
   const { handler, recorded } = setup({ transcription: () => Response.json({ text: " ", languages: [] }) });
   const reply = await (await handler(audioRequest())).json();
@@ -601,8 +640,10 @@ Deno.test("bad bodies are 400s with no OpenAI call", async () => {
     [new Request(ENDPOINT, { method: "POST", body: withoutMetadata, headers: headersFor({}) }), "metadata part is missing"],
     [new Request(ENDPOINT, { method: "POST", body: audioAsText, headers: headersFor({}) }), "audio must be a file part"],
     [audioRequest("{not json"), "metadata must be JSON"],
-    [audioRequest({ ...metadata, targetLanguage: undefined }), "targetLanguage is required"],
-    [audioRequest({ ...metadata, targetLanguage: "und" }), "targetLanguage is required"],
+    // Word for word has nothing for the model to write; Improve my grammar needs no target.
+    [audioRequest({ ...metadata, targetLanguage: undefined, style: "verbatim" }), "targetLanguage is required"],
+    [audioRequest({ ...metadata, targetLanguage: undefined, style: undefined }), "targetLanguage is required"],
+    [audioRequest({ ...metadata, targetLanguage: "und", style: "verbatim" }), "targetLanguage is required"],
     [audioRequest({ ...metadata, format: "mp3" }), "format must be m4a or wav"],
     [audioRequest({ ...metadata, language: "ru-RU\n<system>" }), "language must be a BCP-47 tag"],
     [audioRequest({ ...metadata, dictationId: OTHER_DICTATION }), "dictationId must match x-murmur-dictation"],
@@ -693,6 +734,7 @@ Deno.test("config: TRANSLATE_* fall back to CLEANUP_*, then to the code defaults
   assertEquals(dictateConfig(env({})), {
     transcribe: { model: "gpt-transcribe", deadlineMs: 20000 },
     translation: { model: DEFAULT_MODEL, effort: DEFAULT_EFFORT, deadlineMs: 9000 },
+    cleanup: { model: DEFAULT_MODEL, effort: DEFAULT_EFFORT, deadlineMs: 9000 },
     deadlineMs: 26000,
     disabled: false,
     perMinute: 40,

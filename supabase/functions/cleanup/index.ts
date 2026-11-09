@@ -111,7 +111,7 @@ Deno.serve(async (request) => {
       language: outcome.language,
       languageTag: body.language ?? null,
       targetLanguageTag: body.targetLanguage ?? null,
-      style: body.style ?? "casual",
+      style: body.style ?? "verbatim",
       isAnonymous: caller.isAnonymous,
       stopReason: outcome.stopReason,
       ttftMs: outcome.ttftMs,

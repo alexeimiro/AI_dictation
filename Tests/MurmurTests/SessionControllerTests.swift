@@ -15,7 +15,7 @@ private final class SpokenTranscriber: Transcriber, @unchecked Sendable {
     func beginUtterance() {}
     func append(_ buffer: AVAudioPCMBuffer) {}
     func finishUtterance() async throws -> String { "see you at five" }
-    func finishUtterance(translation: TranslationRequest) async throws -> UtteranceOutput {
+    func finishUtterance(model request: ModelRequest?) async throws -> UtteranceOutput {
         UtteranceOutput(transcript: try await finishUtterance())
     }
     func cancelUtterance() async {}
@@ -171,6 +171,28 @@ struct SessionControllerTests {
         let entry = try #require(harness.log.all().first)
         #expect(entry.requestId == requestId)
         #expect(entry.stopRequestedAt == nil && entry.tapToStopMs == nil)
+    }
+
+    /// The keyboard went off screen with the dictation running (the screen locked): its heartbeats
+    /// stop, and the app records on instead of finishing it after 4 s, until the keyboard is back.
+    @Test func anAwayDictationOutlivesItsHeartbeats() async throws {
+        let harness = makeHarness()
+        let requestId = UUID()
+        try harness.send(.start, requestId)
+        #expect(await waitUntil { harness.session.phase == .recording(requestId) })
+        let startedAt = Date()
+        try harness.transport.payloads.write(keyboardStatus: KeyboardStatus(
+            fullAccessAt: startedAt, lastSeenAt: startedAt, listeningRequestId: requestId, listeningHeartbeatAt: startedAt))
+        try await Task.sleep(for: .seconds(1.5))
+        try harness.transport.payloads.write(keyboardStatus: KeyboardStatus(
+            fullAccessAt: startedAt, lastSeenAt: startedAt, hiddenAt: Date(), awayRequestId: requestId,
+            awayListeningSince: startedAt))
+
+        try await Task.sleep(for: .seconds(5.5))
+
+        #expect(harness.session.phase == .recording(requestId))
+        try harness.send(.stop, requestId)
+        #expect(await waitUntil { harness.transport.payloads.readResult(requestId) != nil })
     }
 
     /// X, then the mic again straight away: the second dictation records and is delivered. The

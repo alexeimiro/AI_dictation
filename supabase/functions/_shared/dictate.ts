@@ -1,5 +1,6 @@
 // The `dictate` function's handler; the contract is in dictate/index.ts. Audio mode transcribes and
-// translates on one worker, text mode translates a transcript the app already has, and warm mode
+// then translates or improves the grammar on one worker, text mode translates a transcript the app
+// already has, and warm mode
 // opens the connections a dictation needs while the user is still speaking. Everything the handler
 // talks to is injected (`DictateDeps`), so the tests drive it offline.
 import { type CleanupOutcome, describeCleanupError, runCleanup } from "./cleanup.ts";
@@ -29,10 +30,14 @@ import {
 /** A translation request: `cleanup`'s body, with the target it must have here. */
 export type TranslationRequest = CleanupRequest & { targetLanguage: string };
 
-/** Audio mode: the translation as `cleanup` takes it (its transcript still to come) and the transcription as `transcribe` takes it. */
+/**
+ * Audio mode: what the model writes from the transcript, as `cleanup` takes it (its transcript
+ * still to come): a translation, or with no target Improve my grammar. And the transcription as
+ * `transcribe` takes it.
+ */
 export interface AudioBody {
   mode: "audio";
-  translation: TranslationRequest;
+  translation: CleanupRequest;
   transcription: TranscribeRequest;
 }
 
@@ -83,8 +88,10 @@ export interface DictateDeps {
  * limit when it has none.
  */
 const MAX_BODY_BYTES = TRANSCRIBE_LIMITS.maxAudioBytes;
-/** Audio mode skips the translation when less than this is left of its budget. */
-const MIN_TRANSLATION_MS = 1000;
+/** Audio mode skips the model call when less than this is left of its budget. */
+const MIN_MODEL_MS = 1000;
+/** Improve my grammar leaves a dictation of this many words or fewer as it was heard, as the app does. */
+const SHORT_WORDS = 3;
 /** Each warm-up fetch is bounded by this, below the app's 5 s warm-up timeout. */
 const WARM_FETCH_MS = 3000;
 /** A warm-up round trip stays warm this long for the isolate, so the next warm-ups skip it. */
@@ -106,8 +113,9 @@ function settle<T>(work: Promise<T>): Promise<Settled<T>> {
 
 /**
  * Audio mode's "metadata" part: { dictationId, format: "m4a" | "wav", language: BCP-47 | null,
- * keywords?, targetLanguage, style?, dictionary?, snippets? }. `cleanup`'s and `transcribe`'s own
- * validators check it; `audio` is the "audio" part's bytes.
+ * keywords?, targetLanguage?, style?, dictionary?, snippets? }, with a targetLanguage unless the
+ * style is "grammar". `cleanup`'s and `transcribe`'s own validators check it; `audio` is the
+ * "audio" part's bytes.
  */
 export function parseDictateMetadata(raw: unknown, audio: Uint8Array<ArrayBuffer>): Parsed<AudioBody> {
   if (typeof raw !== "object" || raw === null) return { ok: false, error: "metadata must be a JSON object" };
@@ -115,8 +123,11 @@ export function parseDictateMetadata(raw: unknown, audio: Uint8Array<ArrayBuffer
   // The transcript comes from the audio; everything else is checked as `cleanup` checks it.
   const parsed = parseCleanupRequest({ ...fields, transcript: "" });
   if (!parsed.ok) return parsed;
-  const translation = withTarget(parsed.value);
-  if (!translation) return { ok: false, error: "targetLanguage is required" };
+  const translation = parsed.value;
+  // A Word for word dictation has nothing for the model to write: it goes to `transcribe`.
+  if (!translation.targetLanguage && translation.style !== "grammar") {
+    return { ok: false, error: "targetLanguage is required" };
+  }
   if (fields.format !== "m4a" && fields.format !== "wav") return { ok: false, error: "format must be m4a or wav" };
   if (audio.length === 0) return { ok: false, error: "audio is empty" };
   if (audio.length > TRANSCRIBE_LIMITS.maxAudioBytes) return { ok: false, error: "audio too large" };
@@ -308,14 +319,17 @@ function unavailableResult(reason: string): Translated {
   return { status: "unavailable", reason, text: "", usage: null, outcome: null };
 }
 
-/** A translation's answer, or the transcript it kept as "raw" when the model's output was unusable. */
-function translated(outcome: CleanupOutcome, target: string): Translated {
+/**
+ * The model's answer, or the transcript it kept as "raw" when the output was unusable. `written`:
+ * the language the output is in (the target, else the spoken language).
+ */
+function translated(outcome: CleanupOutcome, written: string | undefined): Translated {
   return {
     status: outcome.status,
     reason: outcome.reason ?? null,
     text: outcome.status === "cleaned" ? outcome.text : "",
-    // What `cleanup` counts: the translation, or the transcript it fell back to.
-    usage: countWords(outcome.text, target),
+    // What `cleanup` counts: the output, or the transcript it fell back to.
+    usage: countWords(outcome.text, written),
     outcome,
   };
 }
@@ -333,6 +347,8 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
   const warmedAt = { openai: -Infinity, database: -Infinity };
 
   const perMinute = (caller: Caller) => caller.isAnonymous ? config.anonymousPerMinute : config.perMinute;
+  /** A translation runs as `cleanup` translates; Improve my grammar as it cleans up. */
+  const modelConfig = (request: CleanupRequest) => request.targetLanguage ? config.translation : config.cleanup;
 
   /**
    * Everything before OpenAI. The token is checked from the headers; once it names a caller, the
@@ -412,14 +428,14 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
       mode: body.mode,
       status,
       reason,
-      model: config.translation.model,
-      effort: config.translation.effort,
+      model: modelConfig(body.translation).model,
+      effort: modelConfig(body.translation).effort,
       transcribeModel: body.mode === "audio" ? config.transcribe.model : null,
       languageTag: body.translation.language ?? null,
       sourceTag: translation.language ?? null,
-      targetLanguageTag: body.translation.targetLanguage,
+      targetLanguageTag: body.translation.targetLanguage ?? null,
       detected: heard?.languages ?? null,
-      style: body.translation.style ?? "casual",
+      style: body.translation.style ?? "verbatim",
       speculative: body.mode === "text" && body.speculative,
       // The server's count of this dictation's calls, and the app's own number for a text call.
       attempt: preflight.attempt,
@@ -466,7 +482,7 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
       text: result.text,
       status: result.status,
       reason: result.reason,
-      targetLanguage: body.translation.targetLanguage,
+      targetLanguage: body.translation.targetLanguage ?? null,
       words,
       model: outcome?.model ?? null,
       ttftMs: outcome?.ttftMs ?? null,
@@ -477,7 +493,10 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
     });
   }
 
-  /** Audio mode: transcribe, then translate in what is left of the 26 s budget (the app waits 30 s). */
+  /**
+   * Audio mode: transcribe, then translate or improve the grammar in what is left of the 26 s
+   * budget (the app waits 30 s).
+   */
   async function dictateAudio(d: Dictation & { body: AudioBody }): Promise<Response> {
     if (!apiKey) return noKey();
     const { request, phases, body } = d;
@@ -512,27 +531,34 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
       transcript,
       language: automatic ? detectedLanguage(d.heard.languages) ?? declared : declared,
     };
-    if (countWords(transcript, d.translation.language) === 0) return reply(d, EMPTY);
+    // Words are counted in the language the output is written in.
+    const written = body.translation.targetLanguage ?? d.translation.language;
+    const words = countWords(transcript, d.translation.language);
+    if (words === 0) return reply(d, EMPTY);
     if (transcript.length > transcriptLimit(d.caller)) {
-      // Longer than `cleanup` would translate for this caller; the app keeps the transcript.
-      const usage = countWords(transcript, body.translation.targetLanguage);
+      // Longer than `cleanup` would take for this caller; the app keeps the transcript.
+      const usage = countWords(transcript, written);
       return reply(d, { status: "raw", reason: "transcript_too_long", text: "", usage, outcome: null });
     }
+    if (!body.translation.targetLanguage && words <= SHORT_WORDS) {
+      return reply(d, { status: "raw", reason: "short", text: "", usage: words, outcome: null });
+    }
 
-    const budgetMs = Math.min(config.translation.deadlineMs, config.deadlineMs - (now() - d.startedAt));
-    if (budgetMs < MIN_TRANSLATION_MS) return reply(d, unavailableResult("deadline"), { budgetMs });
+    const model = modelConfig(body.translation);
+    const budgetMs = Math.min(model.deadlineMs, config.deadlineMs - (now() - d.startedAt));
+    if (budgetMs < MIN_MODEL_MS) return reply(d, unavailableResult("deadline"), { budgetMs });
     try {
       const outcome = await phases.mark(
         "modelMs",
         runCleanup(d.translation, {
-          ...config.translation,
+          ...model,
           deadlineMs: budgetMs,
           apiKey,
           signal: signal(budgetMs, request),
           fetcher,
         }),
       );
-      return reply(d, translated(outcome, body.translation.targetLanguage), { budgetMs });
+      return reply(d, translated(outcome, written), { budgetMs });
     } catch (error) {
       // The transcript is kept, so the app can retry the translation alone; nothing is counted.
       const label = describeCleanupError(error);

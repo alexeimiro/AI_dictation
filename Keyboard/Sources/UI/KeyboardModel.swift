@@ -2,7 +2,16 @@ import MurmurCore
 import Observation
 import SwiftUI
 
-/// Observable state behind the SwiftUI parts of the keyboard (toolbar, listening panel).
+/// What opens over the keyboard, under the toolbar.
+enum KeyboardOverlay {
+    case style
+    case settings
+    /// The language sheet of the key layouts; the voice keyboard has the translate row instead.
+    case languages
+}
+
+/// Observable state behind the SwiftUI parts of the keyboard (toolbar, voice pad, listening panel,
+/// overlays).
 @MainActor
 @Observable
 final class KeyboardModel {
@@ -11,7 +20,7 @@ final class KeyboardModel {
     var pendingResult: DictationResult?
     var hasFullAccess = false
     /// The app's Default style, which the style pill changes too.
-    var style: StylePreset = .casual
+    var style: StylePreset = .verbatim
     var primaryLanguage = DictationLanguage.englishUS
     /// Set only when a verified secondary language exists; shows the language pill.
     var secondaryLanguage: DictationLanguage?
@@ -19,19 +28,27 @@ final class KeyboardModel {
     var translationEnabled = false
     var targetLanguage = DictationLanguage.englishUS
     var recentLanguages: [DictationLanguage] = []
-    var showsLanguageSelector = false
+    var overlay: KeyboardOverlay?
     /// Recent mic levels for the waveform, oldest first.
     var levels: [Double] = Array(repeating: 0.06, count: 30)
     /// Debug builds: the extension's memory, shown in the toolbar.
     var debugMemory: String?
-    /// The voice layout's pad is up; the toolbar drops its mic, since the pad has the big one.
+    /// The voice keyboard is up: its toolbar has Delete where the key layouts have the mic and the
+    /// language pill.
     var showsVoicePad = false
+    /// Landscape: the voice keyboard is as tall as the key layouts, with a smaller talk button.
+    var compactHeight = false
     /// The field's return key title ("return", "send", …), for the pad's return button.
     var returnTitle = "return"
     /// Words in the last dictation, while it can still be undone.
     var undoableWords: Int?
     /// A vibration will say when the text is ready, so the pad's hint can promise it.
     var announcesReady = false
+    /// The settings sheet's switches, mirrored from `SharedSettings` when the keyboard appears.
+    var keyboardFeedback = true
+    var readyHaptic = true
+    var interactionSounds = true
+    var appearance = KeyboardAppearancePreference.automatic
 
     @ObservationIgnored var actions = Actions()
 
@@ -45,11 +62,15 @@ final class KeyboardModel {
         var openApp: () -> Void = {}
         var setStyle: (StylePreset) -> Void = { _ in }
         var setLanguage: (DictationLanguage?) -> Void = { _ in }
-        var showLanguageSelector: () -> Void = {}
-        var hideLanguageSelector: () -> Void = {}
+        var showOverlay: (KeyboardOverlay) -> Void = { _ in }
+        var hideOverlay: () -> Void = {}
         var setTranslationEnabled: (Bool) -> Void = { _ in }
         var setTargetLanguage: (DictationLanguage) -> Void = { _ in }
         var swapLanguages: () -> Void = {}
+        var setKeyboardFeedback: (Bool) -> Void = { _ in }
+        var setReadyHaptic: (Bool) -> Void = { _ in }
+        var setInteractionSounds: (Bool) -> Void = { _ in }
+        var setAppearance: (KeyboardAppearancePreference) -> Void = { _ in }
         var deleteDown: () -> Void = {}
         var deleteUp: () -> Void = {}
         var deleteWord: () -> Void = {}
@@ -106,23 +127,22 @@ final class KeyboardModel {
         translationEnabled ? "\(effectiveLanguage.shortCode) → \(targetLanguage.shortCode)" : effectiveLanguage.shortCode
     }
 
-    /// Kept compact enough for the keyboard while making it clear which language the recognizer
-    /// is listening for. In translation mode the output language is shown too, so a user can
-    /// catch a reversed language pair before finishing the dictation.
-    var recognitionDirection: String {
-        translationEnabled
-            ? "\(effectiveLanguage.shortCode) → \(targetLanguage.shortCode)"
-            : effectiveLanguage.shortCode
-    }
-
     var idleHint: String {
         guard translationEnabled else { return "Speak to type" }
-        return "Speak \(effectiveLanguage.localizedName) → Type in \(targetLanguage.localizedName)"
+        let spoken = effectiveLanguage.isAutomatic ? "any language" : effectiveLanguage.localizedName
+        return "Speak \(spoken) → Type in \(targetLanguage.localizedName)"
+    }
+
+    /// After stop, what the dictation is waiting for. The options are locked while it runs, so they
+    /// are the ones it started with.
+    var stageText: String {
+        let stage = translationEnabled ? "Translating to \(targetLanguage.localizedName)" : "Transcribing"
+        return announcesReady ? "\(stage) · we'll tap when it's ready" : "\(stage)…"
     }
 
     /// Every language OpenAI's speech-to-text and GPT translation support (the Whisper language
     /// list). Recognition reaches them through the cloud even when no on-device speech model is
-    /// installed. English stays first: it is the fallback target. Menus show `menuLanguages`.
+    /// installed. Menus show `menuLanguages`.
     static let commonLanguages: [DictationLanguage] = [
         "en-US", "af-ZA", "ar-SA", "hy-AM", "az-AZ", "be-BY", "bs-BA", "bg-BG", "ca-ES", "zh-CN",
         "hr-HR", "cs-CZ", "da-DK", "nl-NL", "et-EE", "fi-FI", "fr-FR", "gl-ES", "de-DE", "el-GR",

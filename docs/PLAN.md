@@ -83,7 +83,7 @@ Keyboard ext ── Darwin post + command file (one-time token) ──► Murmur
    - `DictationTranscriber` covers locales SpeechTranscriber lacks. Only it honors `AnalysisContext.contextualStrings` (at most 100 phrases).
 2. **Cleanup.**
    - Dictations of 3 words or fewer skip Claude.
-   - So do transcripts `CleanupGate` finds already clean: no spoken punctuation, self-correction, list, spelled-out address or number, repeated word, or leftover filler, in the casual or formal style. They get `LocalFormatter` only.
+   - So do Word for word transcripts `CleanupGate` finds nothing to write differently in: punctuated (in any script), with no spoken punctuation command or spelled-out address. They get `LocalFormatter` only. Improve my grammar always asks the model.
    - Otherwise `CleanupClient` calls `cleanup` with an 8 s timeout.
    - Snippet triggers come back from Claude as `⟦s:<id>⟧` placeholders, and the app substitutes the expansion. Expansions never go to the server, and nothing is expanded twice.
 3. **`TextJoiner`.**
@@ -117,7 +117,7 @@ supabase/   config.toml, migrations/, functions/{cleanup,auth-lookup,signup-stat
 ```
 **`project.yml` essentials:**
 - **Bundle IDs and Team:** `com.antonmironenko.murmur` with `.keyboard` and `.widgets`. `DEVELOPMENT_TEAM` is set in Phase 0, read from the OU of the Apple Development certificate and confirmed with you.
-- **Keyboard `NSExtension`:** `com.apple.keyboard-service`, principal class `$(PRODUCT_MODULE_NAME).KeyboardViewController`, `RequestsOpenAccess=YES`, `IsASCIICapable=YES`, `PrimaryLanguage=en-US`.
+- **Keyboard `NSExtension`:** `com.apple.keyboard-service`, principal class `$(PRODUCT_MODULE_NAME).KeyboardViewController`, `RequestsOpenAccess=YES`, `IsASCIICapable=YES`, `PrimaryLanguage=mul`.
 - **Embedding:** the app embeds both extensions.
 - **Entitlements:** `application-groups: group.com.antonmironenko.murmur` on all three targets. Sign in with Apple on the app.
 - **App Info.plist:**
@@ -228,7 +228,7 @@ supabase/   config.toml, migrations/, functions/{cleanup,auth-lookup,signup-stat
 - **Snippets:**
   - Fields: Snippet (under 60 characters) and Expansion.
   - Errors: "Please enter a snippet", "Snippet too long", "Snippet already exists".
-- **Style:** "Your default style": Formal. / Casual / very casual / Excited! / Word for word (exact words, literal translation), with a per-dictation pill on the keyboard. Since iOS 26.4 there's no per-app context.
+- **Style:** "Your default style": Word for word (exact words, literal translation; the default) or Improve my grammar (the same words and tone, grammatically correct), with a pill on the keyboard that sets it. The four earlier styles were removed in November 2026. Since iOS 26.4 there's no per-app context.
 - **Scratchpad:**
   - Notes by date, empty state "Create a note".
   - In-app mic: the app is in the foreground, so it records directly.
@@ -250,25 +250,35 @@ supabase/   config.toml, migrations/, functions/{cleanup,auth-lookup,signup-stat
 **Settings:**
 - Languages
 - Disable after
-- Keyboard feedback
-- Interaction sounds ("Turning off audio")
+- Haptic feedback
+- Start and stop sounds ("Turning off audio")
 - Use built-in mic
-- Show full QWERTY
+- Keyboard layout: Voice (the default), Numbers first or QWERTY
+- Keyboard appearance: Auto, Light or Dark
 - AI cleanup on/off
 - Notifications
 - Live Activities
 - Privacy: data sharing, auto-delete transcripts, cloud sync
 
 **Keyboard:**
-- **Typing without Full Access:** works fully. "Almost there!" is a banner over working keys.
-- **Layouts and keys:**
-  - Numbers-first `123` / `#+=` by default, with optional QWERTY.
+- **Typing without Full Access:** works fully. "Almost there!" is a banner over working keys, and
+  the keyboard shows Numbers first even when Voice is picked, since the voice keyboard has no
+  letters and can't dictate without Full Access.
+- **Layouts and keys** (Anton's November 2026 design):
+  - The voice keyboard by default: the translate row, a big talk button, space and return; 320 pt
+    tall, 272 in landscape.
+  - Numbers-first `123` / `#+=` and QWERTY as options, 272 pt.
   - Space, return labeled from `returnKeyType`, delete that speeds up from characters to words.
   - Globe only when `needsInputModeSwitchKey` (via `handleInputModeList`).
   - `hasDictationKey = true`.
-- **Toolbar:** settings, undo last dictation, add to dictionary, style pill, "Start Murmur".
-- **Listening:** X, live timer, level bars, ✓ "Stop transcribing".
-- **Processing:** tap to cancel.
+- **Toolbar:**
+  - Settings: an in-keyboard sheet with haptics, the ready vibration, start and stop sounds, the
+    appearance, and a link to Murmur's Settings.
+  - The style pill and its menu.
+  - Delete on the voice keyboard; the language pill and the mic on the key layouts.
+- **Listening:** the talk button turns red with a stop square and pulse rings, with a waveform and
+  "Listening 0:12 · tap to stop" under it and ✕ beside it. Space and return dim.
+- **Processing:** a spinner and "Translating to English…" or "Transcribing…"; ✕ cancels.
 - **States:** limit reached, no network, logged out, Reconnect.
 - **Feedback:** haptics and key clicks, which need Full Access.
 

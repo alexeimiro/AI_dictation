@@ -108,7 +108,7 @@ public struct Transcript: Identifiable, Codable, Sendable, Hashable {
 
     public init(
         id: UUID = UUID(), createdAt: Date = Date(), language: String? = nil,
-        style: StylePreset = .casual, rawText: String, cleanedText: String? = nil,
+        style: StylePreset = .verbatim, rawText: String, cleanedText: String? = nil,
         status: TranscriptStatus, errorReason: String? = nil,
         metrics: TranscriptMetrics = TranscriptMetrics(audioSeconds: 0, words: 0),
         cleanupModel: String? = nil, insertedAt: Date? = nil, regeneratedAt: Date? = nil,

@@ -44,7 +44,7 @@ struct OnboardingReducerTests {
             .next,
             .selectDataChoice(.doNotShare, at: now), .next,
             .setLanguages(["en-US", "ru-RU"]), .next,
-            .selectStyle(.formal), .next,
+            .selectStyle(.grammar), .next,
             .permissionChanged(.notifications, .denied), .next,
             .desktopLinkDeclined,
             .selectReferral(.searchEngine), .next,
@@ -62,7 +62,7 @@ struct OnboardingReducerTests {
         #expect(state.practiceCommittedAt == now)
         #expect(state.answers.authMethod == .email)
         #expect(state.answers.languages == ["en-US", "ru-RU"])
-        #expect(state.answers.style == .formal)
+        #expect(state.answers.style == .grammar)
         #expect(state.answers.referralDetail == "DuckDuckGo")
     }
 
@@ -91,7 +91,7 @@ struct OnboardingReducerTests {
         #expect(reduce(record(at: .keyboardInstructions) { $0.permissions.keyboardAdded = true }, .next)?.step == .practiceIntro)
         #expect(reduce(record(at: .dataChoice), .selectDataChoice(.improveModel, at: now), .next)?.step == .languages)
         #expect(reduce(record(at: .languages), .setLanguages(["de-DE"]), .next)?.step == .defaultStyle)
-        #expect(reduce(record(at: .defaultStyle), .selectStyle(.excited), .next)?.step == .notifications)
+        #expect(reduce(record(at: .defaultStyle), .selectStyle(.grammar), .next)?.step == .notifications)
         #expect(reduce(record(at: .notifications), .permissionChanged(.notifications, .granted), .next)?.step == .desktopOffer)
         #expect(reduce(record(at: .trialOffer), .offerResolved(.free), .next)?.step == .complete)
     }
@@ -111,7 +111,7 @@ struct OnboardingReducerTests {
 
     @Test func answersOnlyChangeOnTheirOwnScreen() {
         #expect(reduce(record(at: .languages), .toggleUseCase(.emails)) == nil)
-        #expect(reduce(record(at: .useCases), .selectStyle(.formal)) == nil)
+        #expect(reduce(record(at: .useCases), .selectStyle(.grammar)) == nil)
         #expect(reduce(record(at: .dataChoice), .setLanguages(["en-US"])) == nil)
         #expect(reduce(record(at: .signIn), .showEmailSignIn) == nil)
         #expect(reduce(record(at: .setupIntro), .authenticated(.apple)) == nil)

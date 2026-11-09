@@ -79,7 +79,7 @@ enum HistorySchemaV1: VersionedSchema {
                 id: id,
                 createdAt: createdAt,
                 language: language,
-                style: StylePreset(rawValue: style) ?? .casual,
+                style: StylePreset(stored: style),
                 rawText: rawText,
                 cleanedText: cleanedText,
                 status: TranscriptStatus(rawValue: status) ?? .raw,

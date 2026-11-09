@@ -1,49 +1,87 @@
 import MurmurCore
 import SwiftUI
 
-/// The mic and ✓ buttons: an ink circle with a white glyph, swapped on a dark keyboard, where an
-/// ink circle disappears into the backdrop.
-let actionFill = KeyboardChrome.accent
-let actionGlyph = KeyboardChrome.accentGlyph
-
-/// The row above the keys: app button, status / style pill / banners, and the mic.
+/// The row above the keys. The voice keyboard's (Anton's mock): settings, the style pill and
+/// Delete. The key layouts': settings, then the style and language pills (or a notice, a caption
+/// or the last dictation in their place), then the mic.
 struct KeyboardToolbar: View {
     let model: KeyboardModel
 
     var body: some View {
-        HStack(spacing: 8) {
-            Button(action: model.actions.openApp) {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 34, height: 34)
-                    .background { KeyboardSurface(shape: Circle()) }
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.keyboardPress)
-            .accessibilityLabel("Settings")
-
-            center
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            if let memory = model.debugMemory {
-                Text(memory)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-            if !model.showsVoicePad {
-                micButton
+        Group {
+            if model.showsVoicePad {
+                voiceBar
+            } else {
+                keysBar
             }
         }
         .foregroundStyle(.primary)
-        .padding(.horizontal, 6)
-        .frame(height: 50)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(KeyboardChrome.border).frame(height: 0.5)
+            Rectangle().fill(KeyboardChrome.border).frame(height: 1)
+        }
+    }
+
+    private var voiceBar: some View {
+        HStack(spacing: 8) {
+            settingsButton
+            StylePill(model: model)
+            Spacer(minLength: 0)
+            memoryReadout
+            DeleteKey(model: model)
+        }
+        .padding(.horizontal, 12)
+    }
+
+    private var keysBar: some View {
+        HStack(spacing: 6) {
+            settingsButton
+            keysCenter
+                .frame(maxWidth: .infinity, alignment: .leading)
+            memoryReadout
+            if !model.isCapturing {
+                MicButton(model: model, size: 40, ringed: false)
+                    .frame(width: 44, height: 44)
+            }
+        }
+        .padding(.horizontal, 6)
+    }
+
+    private var settingsButton: some View {
+        let open = model.overlay == .settings
+        let size: CGFloat = model.showsVoicePad ? 44 : 36
+        return Button {
+            open ? model.actions.hideOverlay() : model.actions.showOverlay(.settings)
+        } label: {
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: model.showsVoicePad ? 17 : 15, weight: .semibold))
+                .foregroundStyle(open ? KeyboardChrome.accentGlyph : Color.primary)
+                .frame(width: size, height: size)
+                .background {
+                    if open {
+                        Circle().fill(KeyboardChrome.accent)
+                    } else {
+                        KeyboardSurface(shape: Circle())
+                    }
+                }
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.keyboardPress)
+        .accessibilityLabel("Keyboard settings")
+    }
+
+    @ViewBuilder
+    private var memoryReadout: some View {
+        if let memory = model.debugMemory {
+            Text(memory)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(KeyboardChrome.muted)
         }
     }
 
     @ViewBuilder
-    private var center: some View {
+    private var keysCenter: some View {
         if let pending = model.pendingResult {
             HStack(spacing: 6) {
                 Button(action: model.actions.insertPending) {
@@ -57,15 +95,7 @@ struct KeyboardToolbar: View {
                 }
                 .buttonStyle(.keyboardPress)
                 .accessibilityHint(pending.text)
-                Button(action: model.actions.dismissPending) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(width: 30, height: 30)
-                        .background { KeyboardSurface(shape: Circle()) }
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(.keyboardPress)
-                .accessibilityLabel("Dismiss")
+                dismissButton(model.actions.dismissPending)
             }
         } else {
             switch model.phase {
@@ -81,36 +111,44 @@ struct KeyboardToolbar: View {
                 caption("Opening Murmur…")
             case .starting:
                 caption("Starting…")
-            case .listening:
-                RecognitionIndicator(direction: model.recognitionDirection,
-                                     since: model.listeningSince)
-            case .idle, .processing:
-                HStack(spacing: 6) {
-                    stylePill
-                    languagePill
+            case .idle, .listening, .processing:
+                ViewThatFits(in: .horizontal) {
+                    pills(tiles: true)
+                    pills(tiles: false)
                 }
             }
         }
     }
 
-    /// Opens the compact translation/source-language panel over the keyboard.
-    private var languagePill: some View {
-        Button(action: model.actions.showLanguageSelector) {
-            HStack(spacing: 5) {
-                if model.translationEnabled {
-                    Image(systemName: "character.bubble")
-                        .font(.system(size: 11, weight: .semibold))
+    private func pills(tiles: Bool) -> some View {
+        HStack(spacing: 6) {
+            StylePill(model: model, compact: true, showsDisc: tiles)
+            languagePill(tile: tiles)
+        }
+    }
+
+    /// Opens the language sheet over the keys.
+    private func languagePill(tile: Bool) -> some View {
+        Button { model.actions.showOverlay(.languages) } label: {
+            HStack(spacing: 6) {
+                if tile, model.translationEnabled {
+                    TranslateGlyph(tile: KeyboardChrome.translateTile)
+                        .frame(width: 19, height: 19)
+                        .frame(width: 26, height: 26)
+                        .background(KeyboardChrome.translateTile, in: .rect(cornerRadius: 8, style: .continuous))
                 }
                 Text(model.languagePillTitle)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 14, weight: .bold))
+                    .lineLimit(1)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .opacity(0.65)
+                    .font(.system(size: 10, weight: .bold))
             }
-                .padding(.horizontal, 9)
-                .frame(height: 32)
-                .background { KeyboardSurface(shape: Capsule(), active: model.translationEnabled) }
-                .frame(minHeight: 44)
+            .padding(.leading, tile && model.translationEnabled ? 5 : 12)
+            .padding(.trailing, 11)
+            .frame(height: 36)
+            .background { KeyboardSurface(shape: Capsule()) }
+            .frame(minHeight: 44)
+            .contentShape(.rect)
         }
         .buttonStyle(.keyboardPress)
         .disabled(model.locksSessionOptions)
@@ -119,40 +157,10 @@ struct KeyboardToolbar: View {
             : "Dictation language: \(model.effectiveLanguage.localizedName)")
     }
 
-    private var stylePill: some View {
-        Menu {
-            ForEach(StylePreset.allCases) { style in
-                Button {
-                    model.actions.setStyle(style)
-                } label: {
-                    if style == model.style {
-                        Label(style.title, systemImage: "checkmark")
-                    } else {
-                        Text(style.title)
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: 5) {
-                Text(model.style.title)
-                    .font(.system(size: 13, weight: .medium))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .opacity(0.65)
-            }
-            .padding(.horizontal, 10)
-            .frame(height: 32)
-            .background { KeyboardSurface(shape: Capsule()) }
-            .frame(minHeight: 44)
-        }
-        .disabled(model.locksSessionOptions)
-        .accessibilityLabel("Style: \(model.style.title)")
-    }
-
     private func caption(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 14, weight: .medium))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(KeyboardChrome.muted)
             .lineLimit(1)
     }
 
@@ -164,119 +172,52 @@ struct KeyboardToolbar: View {
                 }
                 Text(detail)
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(KeyboardChrome.muted)
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
             }
-            Button(action: dismiss) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 30, height: 30)
-                    .background { KeyboardSurface(shape: Circle()) }
-                    .frame(width: 44, height: 44)
-            }
-            .buttonStyle(.keyboardPress)
-            .accessibilityLabel("Dismiss")
+            dismissButton(dismiss)
         }
     }
 
-    private var micButton: some View {
-        Button(action: model.actions.mic) {
-            ZStack {
-                Circle().fill(actionFill)
-                Circle().stroke(.white.opacity(0.16), lineWidth: 0.7)
-                switch model.phase {
-                case .starting, .openingApp:
-                    ProgressView().tint(actionGlyph)
-                case .listening:
-                    Image(systemName: "checkmark").font(.system(size: 16, weight: .bold)).foregroundStyle(actionGlyph)
-                default:
-                    Image(systemName: "waveform").font(.system(size: 17, weight: .semibold)).foregroundStyle(actionGlyph)
-                }
-            }
-            .frame(width: 40, height: 40)
-            .shadow(color: KeyboardChrome.accent.opacity(0.20), radius: 5, y: 2)
-            .frame(width: 44, height: 44)
+    private func dismissButton(_ dismiss: @escaping () -> Void) -> some View {
+        Button(action: dismiss) {
+            Image(systemName: "xmark")
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 30, height: 30)
+                .background { KeyboardSurface(shape: Circle()) }
+                .frame(width: 44, height: 44)
         }
         .buttonStyle(.keyboardPress)
-        .disabled(model.isTransitioning)
-        .accessibilityLabel(model.isCapturing ? "Stop transcribing" : "Start Murmur")
+        .accessibilityLabel("Dismiss")
     }
 }
 
-/// Replaces the keys while listening / processing: X, waveform + timer, ✓.
+/// Replaces the key layouts' keys while a dictation runs: the voice keyboard's talk button, ✕
+/// beside it, and the waveform and status line under it.
 struct ListeningPanel: View {
     let model: KeyboardModel
 
     var body: some View {
-        HStack(spacing: 0) {
-            Button(action: model.actions.cancel) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 20, weight: .semibold))
-                    .frame(width: 58, height: 58)
-                    .background { KeyboardSurface(shape: Circle()) }
+        VStack(spacing: 12) {
+            MicButton(model: model, size: 64)
+                .overlay {
+                    CancelChip(model: model)
+                        .offset(x: -(32 + 28 + 22))
+                }
+            Group {
+                if case .listening = model.phase {
+                    VStack(spacing: 6) {
+                        Waveform(model: model, height: 24)
+                        StatusLine(model: model)
+                    }
+                } else {
+                    StatusLine(model: model)
+                }
             }
-            .buttonStyle(.keyboardPress)
-            .accessibilityLabel("Cancel transcription")
-            .padding(.leading, 20)
-
-            Spacer()
-            VStack(spacing: 14) {
-                Waveform(levels: model.levels)
-                    .frame(height: 44)
-                status
-            }
-            Spacer()
-
-            Button(action: model.actions.stop) {
-                Image(systemName: "checkmark")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(actionGlyph)
-                    .frame(width: 58, height: 58)
-                    .background(actionFill, in: .circle)
-                    .overlay { Circle().stroke(.white.opacity(0.16), lineWidth: 0.7) }
-                    .shadow(color: KeyboardChrome.accent.opacity(0.20), radius: 6, y: 2)
-            }
-            .buttonStyle(.keyboardPress)
-            .accessibilityLabel("Stop transcribing")
-            .padding(.trailing, 20)
-            .opacity(model.listeningSince == nil ? 0.3 : 1)
-            .disabled(model.listeningSince == nil)
+            .frame(height: 48)
         }
         .foregroundStyle(.primary)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    @ViewBuilder
-    private var status: some View {
-        if let since = model.listeningSince {
-            RecognitionIndicator(direction: model.recognitionDirection, since: since)
-        } else {
-            HStack(spacing: 8) {
-                ProgressView()
-                Text("Transcribing…")
-            }
-            .font(.system(size: 15, weight: .medium))
-            .foregroundStyle(.secondary)
-            .onTapGesture(perform: model.actions.cancel)
-            .accessibilityHint("Tap to cancel")
-        }
-    }
-}
-
-private struct Waveform: View {
-    let levels: [Double]
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        HStack(alignment: .center, spacing: 3) {
-            ForEach(Array(levels.suffix(20).enumerated()), id: \.offset) { _, level in
-                Capsule()
-                    .fill(KeyboardChrome.accent.opacity(0.82))
-                    .frame(width: 3, height: max(4, 44 * level))
-            }
-        }
-        .animation(reduceMotion ? nil : .linear(duration: 0.08), value: levels)
-        .accessibilityHidden(true)
     }
 }

@@ -21,7 +21,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     private var toolbarHost: UIHostingController<KeyboardToolbar>?
     private var panelHost: UIHostingController<ListeningPanel>?
     private var padHost: UIHostingController<VoicePad>?
-    private var languageHost: UIHostingController<LanguageSelectorPanel>?
+    /// The style menu, the settings sheet and the language sheet, above everything but the toolbar.
+    private var overlayHost: UIHostingController<KeyboardOverlayView>?
+    private var heightConstraint: NSLayoutConstraint?
+    private var toolbarHeightConstraint: NSLayoutConstraint?
     private var client: KeyboardSessionClient?
     private var plane: KeyboardPlane = .numbers
     /// The voice layout: the pad is home, and the full keys get a key back to it.
@@ -31,11 +34,24 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     /// The last dictation, while the text before the cursor still ends with it (the pad's Undo).
     private var undoableDictation: String?
     private var layoutSignature = ""
+    /// The iPhone's language among the keyboard's (`KeyboardLanguageDefaults`): the letters under Auto.
+    private var interfaceLanguage: DictationLanguage?
+    /// `SharedSettings.keepScreenAwake`, read when the keyboard appears.
+    private var keepsScreenAwake = true
     private var memoryTimer: Timer?
+    #if DEBUG
+    /// `SharedSettings.debugKeyboardDemo`, read when the keyboard appears.
+    private var demo: KeyboardDemo?
+    private var demoTimer: Timer?
+    #endif
     private lazy var haptics = UIImpactFeedbackGenerator(style: .light, view: view)
     private lazy var readyHaptics = UINotificationFeedbackGenerator(view: view)
 
-    private static let keyboardHeight: CGFloat = 272
+    /// The voice keyboard is taller, as in Anton's mock, except in landscape.
+    private static let voiceHeight: CGFloat = 320
+    private static let keysHeight: CGFloat = 272
+    private static let voiceToolbarHeight: CGFloat = 56
+    private static let keysToolbarHeight: CGFloat = 50
 
     // MARK: Lifecycle
 
@@ -58,40 +74,51 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
 
         wireActions()
         buildViews()
+        registerForTraitChanges([UITraitVerticalSizeClass.self]) { (controller: KeyboardViewController, _: UITraitCollection) in
+            controller.updateHeights()
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        updateKeyboardAppearance()
         model.hasFullAccess = hasFullAccess
+        loadKeyboardSettings()
+        updateKeyboardAppearance()
         model.style = settings.defaultStyle
         client?.styleOverride = model.style
-        model.announcesReady = hasFullAccess && settings.readyHaptic
+        keepsScreenAwake = settings.keepScreenAwake
         loadLanguages()
         loadTranslationSettings()
         if hasFullAccess { haptics.prepare() }
-        usesVoicePad = settings.keyboardLayout == .voice
-        plane = switch settings.keyboardLayout {
-        case .numbers: .numbers
-        case .qwerty: .letters
-        case .voice: .voice
-        }
+        chooseLayout(settings.keyboardLayout)
+        #if DEBUG
+        demo = settings.debugKeyboardDemo
+        if let layout = demo?.layout { chooseLayout(layout, demo: true) }
+        #endif
+        updateHeights()
         updateAutoShift()
         reloadKeys()
         client?.activate()
+        #if DEBUG
+        applyDemo()
+        #endif
         startMemoryReadout()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        if model.showsLanguageSelector {
-            model.showsLanguageSelector = false
-            languageHost?.view.isHidden = true
-            updateLanguagePanelAccessibility(isPresented: false, postsFocusChange: false)
+        if model.overlay != nil {
+            model.overlay = nil
+            overlayHost?.view.isHidden = true
+            updateOverlayAccessibility(isPresented: false, postsFocusChange: false)
         }
         repeater.stop()
         client?.deactivate()
+        ScreenWake.keepAwake(false, from: self)
         memoryTimer?.invalidate()
+        #if DEBUG
+        demoTimer?.invalidate()
+        #endif
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -138,18 +165,24 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         padKeys.onSpaceTrackMove = { [weak self] offset in self?.moveCursor(offset) }
         view.addSubview(padKeys)
 
-        let languagePanel = embed(LanguageSelectorPanel(model: model), in: view)
-        languagePanel.view.backgroundColor = .clear
-        languageHost = languagePanel
+        // Embedded last, so it covers everything below the toolbar.
+        let overlay = embed(KeyboardOverlayView(model: model), in: view)
+        overlayHost = overlay
 
-        let height = view.heightAnchor.constraint(equalToConstant: Self.keyboardHeight)
+        // The layout as `viewWillAppear` will pick it, so the voice keyboard doesn't open short.
+        let tall = settings.keyboardLayout == .voice && hasFullAccess
+        let height = view.heightAnchor.constraint(equalToConstant: tall ? Self.voiceHeight : Self.keysHeight)
         height.priority = UILayoutPriority(999)
+        heightConstraint = height
+        let toolbarHeight = toolbar.view.heightAnchor.constraint(
+            equalToConstant: tall ? Self.voiceToolbarHeight : Self.keysToolbarHeight)
+        toolbarHeightConstraint = toolbarHeight
         NSLayoutConstraint.activate([
             height,
             toolbar.view.topAnchor.constraint(equalTo: view.topAnchor),
             toolbar.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             toolbar.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            toolbar.view.heightAnchor.constraint(equalToConstant: 50),
+            toolbarHeight,
             keyGrid.topAnchor.constraint(equalTo: toolbar.view.bottomAnchor),
             keyGrid.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             keyGrid.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -161,20 +194,39 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             pad.view.topAnchor.constraint(equalTo: keyGrid.topAnchor),
             pad.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             pad.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            pad.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            pad.view.bottomAnchor.constraint(equalTo: padKeys.topAnchor),
             padKeys.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             padKeys.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             padKeys.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             padKeys.heightAnchor.constraint(equalToConstant: 58),
-            languagePanel.view.topAnchor.constraint(equalTo: view.topAnchor),
-            languagePanel.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            languagePanel.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            languagePanel.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            overlay.view.topAnchor.constraint(equalTo: toolbar.view.bottomAnchor),
+            overlay.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            overlay.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            overlay.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         panel.view.isHidden = true
         pad.view.isHidden = true
         padKeys.isHidden = true
-        languagePanel.view.isHidden = true
+        overlay.view.isHidden = true
+    }
+
+    /// The voice keyboard needs Full Access to dictate and has no letters, so without it the
+    /// keyboard opens on Numbers first, where typing works (guideline 4.4.1, docs/PLAN.md). A
+    /// Debug demo may show it anyway.
+    private func chooseLayout(_ layout: KeyboardLayoutPreference, demo: Bool = false) {
+        usesVoicePad = layout == .voice && (hasFullAccess || demo)
+        plane = usesVoicePad ? .voice : layout == .qwerty ? .letters : .numbers
+    }
+
+    /// 320 pt for the voice keyboard; 272 for the key layouts, and in landscape, where the voice
+    /// keyboard switches to its compact sizes.
+    private func updateHeights() {
+        let compact = traitCollection.verticalSizeClass == .compact
+        let tall = usesVoicePad && !compact
+        heightConstraint?.constant = tall ? Self.voiceHeight : Self.keysHeight
+        toolbarHeightConstraint?.constant = tall ? Self.voiceToolbarHeight : Self.keysToolbarHeight
+        let compactPad = usesVoicePad && compact
+        if model.compactHeight != compactPad { model.compactHeight = compactPad }
     }
 
     private func embed<Content: View>(_ content: Content, in container: UIView) -> UIHostingController<Content> {
@@ -194,7 +246,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         let returnTitle = KeyboardLayouts.returnTitle(for: textDocumentProxy.returnKeyType ?? .default)
         if model.returnTitle != returnTitle { model.returnTitle = returnTitle }
         let showsGlobe = needsInputModeSwitchKey
-        let typingLanguage = model.effectiveLanguage.languageCode
+        let typingLanguage = KeyboardLanguageDefaults.typingLanguage(source: model.effectiveLanguage,
+                                                                      interface: interfaceLanguage)
         let signature = "\(plane)|\(shift)|\(showsGlobe)|\(usesVoicePad)|\(returnTitle)|\(typingLanguage)"
         guard signature != layoutSignature else { return }
         layoutSignature = signature
@@ -206,13 +259,15 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     }
 
     /// The keys, the voice pad or the listening panel, whichever fits the plane and the phase. The
-    /// pad shows its own listening state, so it keeps the panel hidden.
+    /// pad shows its own listening state, so it keeps the panel hidden; its space and return stay
+    /// in view, dimmed, while a dictation runs.
     private func updateKeyAreas() {
         let capturing = model.isCapturing
         let onPad = plane == .voice
         if model.showsVoicePad != onPad { model.showsVoicePad = onPad }
         padHost?.view.isHidden = !onPad
-        padKeys.isHidden = !onPad || capturing
+        padKeys.isHidden = !onPad
+        padKeys.typingEnabled = !capturing
         keyGrid.isHidden = onPad || capturing
         panelHost?.view.isHidden = onPad || !capturing
     }
@@ -222,6 +277,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             mic: { [weak self] in
                 guard let self else { return }
                 feedback()
+                if model.overlay != nil { hideOverlay() }
                 // On the voice layout's full keys, talking goes back to the pad.
                 if usesVoicePad, plane != .voice {
                     plane = .voice
@@ -248,24 +304,33 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             setLanguage: { [weak self] language in
                 self?.selectSourceLanguage(language)
             },
-            showLanguageSelector: { [weak self] in
-                guard let self else { return }
-                self.languageHost?.view.isHidden = false
-                withAnimation(.easeOut(duration: 0.18)) { self.model.showsLanguageSelector = true }
-                self.updateLanguagePanelAccessibility(isPresented: true)
-            },
-            hideLanguageSelector: { [weak self] in
-                withAnimation(.easeIn(duration: 0.15)) { self?.model.showsLanguageSelector = false }
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(for: .milliseconds(170))
-                    guard let self, !self.model.showsLanguageSelector else { return }
-                    self.languageHost?.view.isHidden = true
-                    self.updateLanguagePanelAccessibility(isPresented: false)
-                }
-            },
+            showOverlay: { [weak self] overlay in self?.showOverlay(overlay) },
+            hideOverlay: { [weak self] in self?.hideOverlay() },
             setTranslationEnabled: { [weak self] enabled in self?.setTranslationEnabled(enabled) },
             setTargetLanguage: { [weak self] language in self?.selectTargetLanguage(language) },
             swapLanguages: { [weak self] in self?.swapTranslationLanguages() },
+            setKeyboardFeedback: { [weak self] on in
+                guard let self else { return }
+                settings.keyboardFeedback = on
+                model.keyboardFeedback = on
+            },
+            setReadyHaptic: { [weak self] on in
+                guard let self else { return }
+                settings.readyHaptic = on
+                model.readyHaptic = on
+                model.announcesReady = hasFullAccess && on
+            },
+            setInteractionSounds: { [weak self] on in
+                guard let self else { return }
+                settings.interactionSounds = on
+                model.interactionSounds = on
+            },
+            setAppearance: { [weak self] appearance in
+                guard let self else { return }
+                settings.keyboardAppearance = appearance
+                model.appearance = appearance
+                updateKeyboardAppearance()
+            },
             deleteDown: { [weak self] in self?.keyDown(KeySpec(action: .delete)) },
             deleteUp: { [weak self] in self?.keyUp(KeySpec(action: .delete)) },
             deleteWord: { [weak self] in
@@ -277,8 +342,26 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             moveCursor: { [weak self] offset in self?.moveCursor(offset) })
     }
 
-    private func updateLanguagePanelAccessibility(isPresented: Bool, postsFocusChange: Bool = true) {
-        languageHost?.view.accessibilityViewIsModal = isPresented
+    private func showOverlay(_ overlay: KeyboardOverlay) {
+        overlayHost?.view.isHidden = false
+        withAnimation(.easeOut(duration: 0.18)) { model.overlay = overlay }
+        updateOverlayAccessibility(isPresented: true)
+    }
+
+    private func hideOverlay() {
+        withAnimation(.easeIn(duration: 0.15)) { model.overlay = nil }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(170))
+            guard let self, self.model.overlay == nil else { return }
+            self.overlayHost?.view.isHidden = true
+            self.updateOverlayAccessibility(isPresented: false)
+        }
+    }
+
+    /// An open overlay is modal for VoiceOver; each one has its own close button and the escape
+    /// gesture.
+    private func updateOverlayAccessibility(isPresented: Bool, postsFocusChange: Bool = true) {
+        overlayHost?.view.accessibilityViewIsModal = isPresented
         toolbarHost?.view.accessibilityElementsHidden = isPresented
         panelHost?.view.accessibilityElementsHidden = isPresented
         padHost?.view.accessibilityElementsHidden = isPresented
@@ -286,19 +369,37 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         padKeys.accessibilityElementsHidden = isPresented
 
         if postsFocusChange {
-            let focusTarget = isPresented ? languageHost?.view : toolbarHost?.view
+            let focusTarget = isPresented ? overlayHost?.view : toolbarHost?.view
             DispatchQueue.main.async {
                 UIAccessibility.post(notification: .screenChanged, argument: focusTarget)
             }
         }
     }
 
+    /// The settings sheet's choice, or else the field's keyboard appearance.
     private func updateKeyboardAppearance() {
-        overrideUserInterfaceStyle = switch textDocumentProxy.keyboardAppearance {
+        overrideUserInterfaceStyle = switch model.appearance {
+        case .light: .light
+        case .dark: .dark
+        case .automatic: fieldAppearance
+        }
+    }
+
+    private var fieldAppearance: UIUserInterfaceStyle {
+        switch textDocumentProxy.keyboardAppearance {
         case .dark: .dark
         case .light: .light
         default: .unspecified
         }
+    }
+
+    /// The settings sheet's switches and the appearance, as the app or the sheet last left them.
+    private func loadKeyboardSettings() {
+        model.keyboardFeedback = settings.keyboardFeedback
+        model.readyHaptic = settings.readyHaptic
+        model.interactionSounds = settings.interactionSounds
+        model.appearance = settings.keyboardAppearance
+        model.announcesReady = hasFullAccess && settings.readyHaptic
     }
 
     /// Loads the app's installed on-device languages. Cloud recognition can additionally use the
@@ -314,47 +415,34 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         model.secondaryLanguage = secondary
     }
 
-    /// Defaults to an installed system keyboard language, then to the iPhone interface language,
-    /// then the app's primary dictation language. The onboarding flow normally made the same
-    /// choice already; doing it here also handles upgraded installs.
+    /// Auto-detect until the user picks a Speak language; the letters and the translation target
+    /// follow the iPhone's language until they are picked (`KeyboardLanguageDefaults`).
     private func loadTranslationSettings() {
-        let available = ([model.primaryLanguage] + (model.secondaryLanguage.map { [$0] } ?? [])
-                         + KeyboardModel.commonLanguages)
-            .reduce(into: [String: DictationLanguage]()) { result, language in
-                result[language.languageCode] = result[language.languageCode] ?? language
-            }
-        let installedIdentifiers = UITextInputMode.activeInputModes.compactMap(\.primaryLanguage)
-            + Locale.preferredLanguages
-        let defaultSource = installedIdentifiers.lazy
-            .map(DictationLanguage.init(normalizing:))
-            .compactMap { available[$0.languageCode] }
-            .first ?? model.primaryLanguage
-        let savedSource = settings.translationSourceLanguage.map(DictationLanguage.init(tag:))
-        let source = savedSource ?? defaultSource
+        interfaceLanguage = KeyboardLanguageDefaults.interfaceLanguage(
+            preferred: Locale.preferredLanguages, available: KeyboardModel.commonLanguages)
+        let source = KeyboardLanguageDefaults.source(
+            saved: settings.translationSourceLanguage, autoDetectApplied: settings.autoDetectDefaultApplied)
+        if !settings.autoDetectDefaultApplied {
+            settings.translationSourceLanguage = nil
+            settings.autoDetectDefaultApplied = true
+        }
         model.languageOverride = source.languageCode == model.primaryLanguage.languageCode ? nil : source
         client?.languageOverride = model.languageOverride?.tag
 
-        let target = settings.translationTargetLanguage.map(DictationLanguage.init(tag:))
-            ?? defaultTargetLanguage(source: source)
-        model.targetLanguage = target.languageCode == source.languageCode
-            ? fallbackTargetLanguage(excluding: source.languageCode) : target
-        model.translationEnabled = settings.translationEnabled
         model.recentLanguages = settings.recentTranslationLanguages
             .map(DictationLanguage.init(tag:))
             .filter { !$0.isAutomatic }
+        model.targetLanguage = defaultTarget(
+            saved: settings.translationTargetLanguage.map(DictationLanguage.init(tag:)), source: source)
+        model.translationEnabled = settings.translationEnabled
         syncTranslationToClient()
     }
 
-    private func defaultTargetLanguage(source: DictationLanguage) -> DictationLanguage {
-        for identifier in Locale.preferredLanguages {
-            let language = DictationLanguage(normalizing: identifier)
-            if language.languageCode != source.languageCode { return language }
-        }
-        return fallbackTargetLanguage(excluding: source.languageCode)
-    }
-
-    private func fallbackTargetLanguage(excluding sourceCode: String) -> DictationLanguage {
-        KeyboardModel.commonLanguages.first { $0.languageCode != sourceCode } ?? .englishUS
+    /// The saved target unless it is `source` itself, else the iPhone's language.
+    private func defaultTarget(saved: DictationLanguage? = nil, source: DictationLanguage) -> DictationLanguage {
+        KeyboardLanguageDefaults.target(
+            saved: saved, source: source, preferred: Locale.preferredLanguages,
+            available: KeyboardModel.commonLanguages, recent: model.recentLanguages)
     }
 
     private func selectSourceLanguage(_ language: DictationLanguage?) {
@@ -363,7 +451,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         settings.translationSourceLanguage = selected.tag
         client?.languageOverride = model.languageOverride?.tag
         if model.targetLanguage.languageCode == selected.languageCode {
-            selectTargetLanguage(fallbackTargetLanguage(excluding: selected.languageCode))
+            selectTargetLanguage(defaultTarget(source: selected))
         }
         remember(selected)
         reloadKeys()
@@ -381,7 +469,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         model.translationEnabled = enabled
         settings.translationEnabled = enabled
         if enabled, model.targetLanguage.languageCode == model.effectiveLanguage.languageCode {
-            selectTargetLanguage(fallbackTargetLanguage(excluding: model.effectiveLanguage.languageCode))
+            selectTargetLanguage(defaultTarget(source: model.effectiveLanguage))
         }
         syncTranslationToClient()
     }
@@ -549,9 +637,14 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     }
 
     func sessionClientDidChange(_ client: KeyboardSessionClient) {
+        #if DEBUG
+        if demo != nil { return }
+        #endif
         model.update(from: client)
         if model.isProcessing, model.announcesReady { readyHaptics.prepare() }
         updateKeyAreas()
+        // Auto-Lock would otherwise cut a long dictation; the screen stays on only while one listens.
+        ScreenWake.keepAwake(keepsScreenAwake && model.listeningSince != nil, from: self)
     }
 
     // MARK: Undo
@@ -595,9 +688,15 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
 
     // MARK: Debug
 
+    /// The Debug memory readout in the toolbar, except under a demo, whose screenshots should look
+    /// like a Release build.
     private func startMemoryReadout() {
         #if DEBUG
         memoryTimer?.invalidate()
+        guard demo == nil else {
+            model.debugMemory = nil
+            return
+        }
         updateMemoryReadout()
         memoryTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.updateMemoryReadout() }
@@ -606,6 +705,74 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     }
 
     #if DEBUG
+    /// `SharedSettings.debugKeyboardDemo` pins one state, so each can be screenshotted in the
+    /// simulator, where nothing records. The live session's updates are ignored while it is on.
+    private func applyDemo() {
+        demoTimer?.invalidate()
+        demoTimer = nil
+        guard let demo else { return }
+        let id = UUID()
+        model.pendingResult = nil
+        model.undoableWords = nil
+        switch demo.state {
+        case .idle:
+            model.phase = .idle
+        case .translate:
+            model.phase = .idle
+            model.translationEnabled = true
+        case .starting:
+            model.phase = .starting(id)
+        case .opening:
+            model.phase = .openingApp(id)
+        case .reconnect:
+            model.phase = .needsReconnect
+        case .listening:
+            model.translationEnabled = true
+            model.phase = .listening(id, since: Date().addingTimeInterval(-12))
+            startDemoLevels()
+        case .processing:
+            model.translationEnabled = true
+            model.phase = .processing(id)
+        case .inserted:
+            model.phase = .idle
+            model.undoableWords = 12
+        case .notice:
+            model.phase = .notice("We didn't catch anything. Try again a little closer.")
+        case .pending:
+            model.phase = .idle
+            model.pendingResult = DictationResult(
+                requestId: id, documentIdentifier: nil, text: "Running ten minutes late, start without me",
+                status: .cleaned, createdAt: Date())
+        case .fullAccess:
+            model.phase = .needsFullAccess
+        case .style:
+            model.phase = .idle
+            showOverlay(.style)
+        case .settings:
+            model.phase = .idle
+            showOverlay(.settings)
+        case .languages:
+            model.phase = .idle
+            model.translationEnabled = true
+            showOverlay(.languages)
+        }
+        updateKeyAreas()
+    }
+
+    /// A speech-like level for the demo's listening state: syllables riding a slower phrase.
+    private func startDemoLevels() {
+        let start = Date()
+        demoTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let time = Date().timeIntervalSince(start)
+                let level = 0.12 + 0.7 * abs(sin(time * 7.3)) * (0.55 + 0.45 * sin(time * 1.3))
+                self.model.levels.removeFirst()
+                self.model.levels.append(min(1, max(0.06, level)))
+            }
+        }
+    }
+
     /// The footprint and what is left before the extension is killed, in MB, e.g. "21.4/27MB"
     /// (the simulator doesn't enforce the limit). The peak goes to the app's Debug screen.
     private func updateMemoryReadout() {

@@ -18,7 +18,7 @@ final class OnboardingJourneyTests: XCTestCase {
 
     // MARK: Helpers
 
-    /// The button labeled `text`, else the first whose label starts with it ("Casual, Caps + …").
+    /// The button labeled `text`, else the first whose label starts with it ("Word for word, Your exact …").
     /// Keyboard keys are excluded: the globe key is "Next keyboard".
     private func button(_ text: String) -> XCUIElement {
         let exact = app.buttons.matching(NSPredicate(format: "label == %@", text)).firstMatch
@@ -99,7 +99,7 @@ final class OnboardingJourneyTests: XCTestCase {
         tap("Next")
         expectText("Confirm your language")
         tap("Next")
-        tap("Casual")
+        tap("Word for word")
         tap("Next")
         tap("Maybe later")
         tap("Another time")

@@ -13,7 +13,7 @@ Rewrite the transcript into the text the user meant to type:
 
 1. Remove filler words and disfluencies: "um", "uh", "er", "hmm", and "like", "you know", "I mean", "so", "basically" when they are only fillers. Remove false starts, stutters and repeated words.
 2. Apply self-corrections. When the speaker corrects themselves ("at 3, no wait, 4 pm", "send it to John, actually Sarah", "scratch that"), keep only the corrected version.
-3. Fix punctuation, capitalization and obvious recognition errors. Keep the speaker's own words, meaning, tone and language. Do not paraphrase, summarize, translate, add content, or make the text more formal than the requested style. Never change the script of a word: a word the recognizer wrote in Cyrillic stays in Cyrillic and a Latin word stays in Latin, except where the language rules below name a specific exception.
+3. Fix punctuation, capitalization and obvious recognition errors. Keep the speaker's own words, meaning, tone and language. Do not paraphrase, summarize, translate or add content, and never change the tone or the level of formality. Never change the script of a word: a word the recognizer wrote in Cyrillic stays in Cyrillic and a Latin word stays in Latin, except where the language rules below name a specific exception.
 4. Format spoken structure. Use a numbered or bulleted list when the speaker enumerates items ("first…, second…, third…", or a to-do list), and paragraph breaks for long multi-topic dictations. Spoken punctuation commands become the symbols themselves: "new line", "new paragraph", "comma", "period", "question mark", "exclamation point", "colon", "open quote … close quote".
 5. Write numbers, dates, times, currencies, phone numbers, email addresses and URLs the way people type them in the spoken language; the language rules below give the conventions. Spelled-out addresses become real ones: "john at gmail dot com" → "john@gmail.com".
 6. Personal dictionary: spell every dictionary term exactly as given whenever the speaker says it or something that sounds like it. A line "Term ← misheard" means the recognizer tends to write "misheard" when the speaker says "Term".
@@ -64,7 +64,10 @@ export interface LanguageExample {
  * follows English instructions most reliably); the examples are in the language itself.
  */
 export interface LanguageRules {
-  /** Primary language subtag ("en", "ru"); also the key in LANGUAGE_RULES. */
+  /**
+   * Primary language subtag ("en", "ru", "tr"), "auto" for a language nobody named, and the
+   * prompt-cache key. en and ru are also the keys in LANGUAGE_RULES.
+   */
   key: string;
   name: string;
   script?: string;
@@ -99,12 +102,8 @@ Capitalization. Sentence starts, proper nouns, "I", days, months, languages, nat
       },
     ],
     styles: {
-      formal: "Formal: standard capitalization and full punctuation; polished but faithful wording.",
-      casual:
-        "Casual: standard capitalization, lighter punctuation (a single short sentence may end without a period).",
-      veryCasual:
-        'Very casual: all lowercase except proper nouns and "I", minimal punctuation, no trailing period.',
-      excited: "Excited: standard capitalization and an upbeat tone, with exclamation marks where natural.",
+      grammar:
+        "Improve my grammar: make the text grammatically correct and change nothing else. Apply the rules above, then fix grammar mistakes (subject-verb agreement, tense, articles, prepositions, pronoun case such as \"me and him\" → \"he and I\", word forms, and word order where it is wrong) and misspellings. Keep the speaker's own words, tone, slang and level of formality: leave a correct sentence exactly as it is, never swap in synonyms, and never make the text more formal, shorter, longer or more polished. When translating, write natural, grammatical text in the target language with the speaker's meaning and tone.",
       verbatim:
         "Word for word: this style overrides the rules above wherever they would change the wording. Keep every word the speaker said, in the order they said it, including self-corrections, hedges and repetitions; remove only pure sound fillers (um, uh, er, hmm). Do not paraphrase, reorder, shorten, polish or improve anything. Only add standard capitalization and punctuation, turn spoken punctuation commands into symbols, and fix clear recognition errors. When translating, translate literally, word for word and clause for clause, keeping the speaker's sentence structure and word order wherever the grammar allows; do not rephrase, smooth out, summarize or swap in idioms, and translate self-corrections as spoken.",
     },
@@ -125,7 +124,7 @@ Numbers and formats. Times in 24-hour digits when a full time or a part of the d
 
 Typography. Quotation marks are «ёлочки», with „лапки“ for a quote inside a quote. A spaced em dash between clauses and in dialogue: «Он сказал: «Я приду» — и ушёл». An unspaced dash for ranges: «10—15 минут». A hyphen inside words: «кто-то», «что-нибудь», «пулл-реквест», «из-за». Keep «ё» exactly as the recognizer wrote it; do not add or remove it.
 
-Capitalization. Capitalize only sentence starts and proper nouns. Days, months, languages and nationalities are lowercase: «в понедельник», «15 марта», «русский», «немец». «я» is lowercase mid-sentence. «вы» is lowercase unless the formal style addresses one person. Acronyms stay uppercase: «ИИ», «МГУ», «США».
+Capitalization. Capitalize only sentence starts and proper nouns. Days, months, languages and nationalities are lowercase: «в понедельник», «15 марта», «русский», «немец». «я» is lowercase mid-sentence, and so is «вы». Acronyms stay uppercase: «ИИ», «МГУ», «США».
 
 Mixed language. Keep loanwords in Cyrillic as the recognizer wrote them: «дедлайн», «коммит», «фича», «пулл-реквест», «митинг», «апдейт». Write a word in Latin only when it is an unambiguous brand, product, file format or programming language: «гитхаб» → GitHub, «джейсон» → JSON, «айфон» → iPhone, «питон» → Python, «пи-ди-эф» → PDF, «телеграм» → Telegram, «ютуб» → YouTube. When unsure, keep the Cyrillic. Dictionary entries always win over these rules.
 
@@ -167,14 +166,8 @@ Lists. «во-первых… во-вторых… в-третьих», «пер
       },
     ],
     styles: {
-      formal:
-        "Formal (официальный стиль): standard capitalization and full punctuation; polished but faithful wording. Capitalize «Вы» and «Ваш» when the text addresses one person formally, as in a letter.",
-      casual:
-        "Casual: standard capitalization, lighter punctuation (a single short sentence may end without a period).",
-      veryCasual:
-        "Very casual: all lowercase except proper nouns and Latin acronyms (Russian has no capital-I rule: «я» stays lowercase), minimal punctuation, no trailing period.",
-      excited:
-        "Excited: standard capitalization and an upbeat tone, with exclamation marks where natural — one «!» at a time, never «!!!».",
+      grammar:
+        "Improve my grammar: make the text grammatically correct and change nothing else. Apply the rules above, then fix grammar mistakes (case endings, agreement in gender, number and case, verb forms and aspect, prepositions, and word order where it is wrong) and misspellings. Keep the speaker's own words, tone, slang and level of formality: leave a correct sentence exactly as it is, never swap in synonyms, and never make the text more formal, shorter, longer or more polished. When translating, write natural, grammatical text in the target language with the speaker's meaning and tone.",
       verbatim:
         "Word for word: this style overrides the rules above wherever they would change the wording. Keep every word the speaker said, in the order they said it, including self-corrections, hedges and repetitions, and words such as «ну», «типа», «короче», «вот»; remove only pure sound fillers («э», «э-э», «эм», «мм»). Do not paraphrase, reorder, shorten, polish or improve anything. Only add standard capitalization and punctuation, turn spoken punctuation commands into symbols, and fix clear recognition errors. When translating, translate literally, word for word and clause for clause, keeping the speaker's sentence structure and word order wherever the grammar allows; do not rephrase, smooth out, summarize or swap in idioms, and translate self-corrections as spoken.",
     },
@@ -184,7 +177,8 @@ Lists. «во-первых… во-вторых… в-третьих», «пер
 export type LanguageKey = keyof typeof LANGUAGE_RULES;
 
 export interface ResolvedLanguage {
-  key: LanguageKey;
+  /** The pack's key: "en", "ru", another primary subtag ("tr"), or "auto". */
+  key: string;
   /** The sanitized client tag, or null when the client did not say ("auto"). */
   tag: string | null;
   rules: LanguageRules;
@@ -194,15 +188,74 @@ function isLanguageKey(value: string): value is LanguageKey {
   return Object.hasOwn(LANGUAGE_RULES, value);
 }
 
-/** Picks the language pack for a normalized tag: "ru", "ru-RU", "ru-Cyrl-RU" → ru; anything else → en. */
-export function resolveLanguage(tag?: string | null, transcript = ""): ResolvedLanguage {
+/**
+ * Picks the language pack for a normalized tag: "ru", "ru-RU", "ru-Cyrl-RU" → ru; "en-GB" → en;
+ * any other language gets the generic pack named after it ("tr-TR" → Turkish). With no tag, or
+ * "und" (auto-detect on a build that doesn't send the detected language), the pack keeps whatever
+ * language the transcript is in; guessing from the script used to give Ukrainian the Russian pack.
+ */
+export function resolveLanguage(tag?: string | null): ResolvedLanguage {
   const primary = tag?.split("-")[0]?.toLowerCase() ?? "";
-  const automatic = primary === "" || primary === "und";
-  const cyrillic = transcript.match(/\p{Script=Cyrillic}/gu)?.length ?? 0;
-  const letters = transcript.match(/\p{L}/gu)?.length ?? 0;
-  const detected: LanguageKey = letters >= 3 && cyrillic / letters > 0.5 ? "ru" : "en";
-  const key: LanguageKey = automatic ? detected : isLanguageKey(primary) ? primary : "en";
-  return { key, tag: automatic ? null : tag ?? null, rules: LANGUAGE_RULES[key] };
+  if (primary === "" || primary === "und") return { key: "auto", tag: null, rules: genericLanguageRules(null) };
+  const rules = isLanguageKey(primary) ? LANGUAGE_RULES[primary] : genericLanguageRules(tag ?? null);
+  return { key: rules.key, tag: tag ?? null, rules };
+}
+
+/**
+ * The pack for a language without its own, built from the tag. The rules are worded for any
+ * language and carry no examples (the shared rules' English examples show the format). A pure
+ * function of the language and script subtags, so every user of a language sends the same bytes:
+ * "tr-TR" and "tr" share a cached block, and "zh-Hant" stays apart from "zh".
+ */
+export function genericLanguageRules(tag: string | null): LanguageRules {
+  const locale = tag ? safeLocale(tag) : null;
+  const key = locale ? (locale.script ? `${locale.language}-${locale.script}` : locale.language) : "auto";
+  const name = locale ? englishName(key) : null;
+  const language = name ?? "the spoken language";
+  const opening = name
+    ? `The transcript is ${name} dictation. Keep it ${name}: never translate it, and never transliterate a word into another script.`
+    : "The transcript is dictation in the language it is written in; that is the spoken language. Keep the output in that language: never translate it, and never transliterate a word into another script. If the transcript mixes languages, keep each part in the language it was spoken in.";
+  const rules = `${opening}
+
+Fillers. Remove hesitation sounds and filler words of ${language} only when they carry no meaning.
+
+Self-corrections. When the speaker corrects themselves, keep only the corrected version.
+
+Numbers and formats. Write numbers, dates, times, currencies, decimal and thousands separators, phone numbers, email addresses and URLs the way people type them in ${language}.
+
+Typography. Use the quotation marks, dashes, spacing and punctuation that ${language} normally uses. In languages written without spaces between words, add none.
+
+Capitalization. Follow the rules of ${language} for sentence starts, proper nouns and acronyms; leave scripts without capital letters as they are.`;
+  return {
+    key,
+    name: name ?? "Detected from the transcript",
+    rules,
+    examples: [],
+    styles: {
+      grammar:
+        `Improve my grammar: make the text grammatically correct and change nothing else. Apply the rules above, then fix grammar mistakes (agreement, tense, word forms, particles or prepositions, and word order where it is wrong) and misspellings, following the grammar of ${language}. Keep the speaker's own words, tone, slang and level of formality: leave a correct sentence exactly as it is, never swap in synonyms, and never make the text more formal, shorter, longer or more polished.`,
+      verbatim:
+        "Word for word: this style overrides the rules above wherever they would change the wording. Keep every word the speaker said, in the order they said it, including self-corrections, hedges and repetitions; remove only pure hesitation sounds. Do not paraphrase, reorder, shorten, polish or improve anything. Only add standard capitalization and punctuation, turn spoken punctuation commands into symbols, and fix clear recognition errors.",
+    },
+  };
+}
+
+function safeLocale(tag: string): Intl.Locale | null {
+  try {
+    return new Intl.Locale(tag);
+  } catch {
+    return null;
+  }
+}
+
+/** "Turkish" for "tr", "Traditional Chinese" for "zh-Hant", or null when Intl doesn't know it. */
+function englishName(tag: string): string | null {
+  try {
+    const name = new Intl.DisplayNames(["en"], { type: "language" }).of(tag);
+    return name && name !== tag ? name : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -239,7 +292,7 @@ export function buildUserContext(request: CleanupRequest, language: ResolvedLang
   return [
     "<context>",
     `Language: ${language.tag ?? "auto"} (keep the output in the language that was spoken).`,
-    `Style: ${language.rules.styles[request.style ?? "casual"]}`,
+    `Style: ${language.rules.styles[request.style ?? "verbatim"]}`,
     ...personalContext(request),
     "</context>",
   ].join("\n");
@@ -284,7 +337,7 @@ Turn the transcript into that text:
 
 1. Translate. Write the entire output in the target language, even when the transcript is short, informal, or mixes in words from other languages. Never return the transcript in the language it was spoken in, and never put the original next to the translation. If the transcript is already in the target language, only clean it up.
 2. Remove filler words and disfluencies ("um", "uh", "like", «э», «ну», «типа», «короче» and their equivalents in any language, when they are only fillers), false starts, stutters and repeated words. Apply self-corrections: when the speaker corrects themselves ("at 3, no wait, 4 pm", «в три, нет, подожди, в четыре», "scratch that"), translate only the corrected version.
-3. Translate faithfully: keep the speaker's meaning, tone and level of formality. Do not summarize, explain, add content, or make the text more formal than the requested style. Keep names of people, brands, products and programming languages, file names, code, email addresses and URLs as they are; a brand the recognizer spelled out phonetically («гитхаб», «айфон») is written the way the brand writes itself (GitHub, iPhone).
+3. Translate faithfully: keep the speaker's meaning, tone and level of formality. Do not summarize, explain or add content, and never change the tone or the level of formality. Keep names of people, brands, products and programming languages, file names, code, email addresses and URLs as they are; a brand the recognizer spelled out phonetically («гитхаб», «айфон») is written the way the brand writes itself (GitHub, iPhone).
 4. Format spoken structure. Spoken punctuation commands become the symbols themselves ("comma", "new line", "question mark", «запятая», «с новой строки»), never translated words. Use a numbered or bulleted list when the speaker enumerates items, and paragraph breaks for long multi-topic dictations.
 5. Write numbers, dates, times, currencies, phone numbers, quotation marks and other punctuation the way people type them in the target language. Spelled-out addresses become real ones: "john at gmail dot com" → "john@gmail.com".
 6. Personal dictionary: spell every dictionary term exactly as given whenever the speaker says it or something that sounds like it. A line "Term ← misheard" means the recognizer tends to write "misheard" when the speaker says "Term".
@@ -335,11 +388,8 @@ Output only the translated text: no quotation marks around it, no preamble, no e
 
 /** Writing styles for a target language without its own pack, worded for any language. */
 export const TRANSLATION_STYLES: Record<Style, string> = {
-  formal:
-    "Formal: standard capitalization and full punctuation; polished but faithful wording, with the target language's polite form of address where it has one.",
-  casual: "Casual: standard capitalization, lighter punctuation (a single short sentence may end without a period).",
-  veryCasual: "Very casual: lowercase except where the target language requires capitals, minimal punctuation, no trailing period.",
-  excited: "Excited: standard capitalization and an upbeat tone, with exclamation marks where natural.",
+  grammar:
+    "Improve my grammar: translate into natural, grammatical text in the target language, keeping the speaker's meaning, tone and level of formality. Do not polish, embellish, shorten or make it more formal.",
   verbatim:
     "Word for word: this style overrides the rules above wherever they would change the wording. Translate literally, word for word and clause for clause, keeping the speaker's sentence structure and word order wherever the target language's grammar allows. Keep every word that carries meaning, including self-corrections, hedges and repetitions; drop only pure sound fillers (um, uh, «э», «мм»). Do not rephrase, smooth out, summarize, polish or swap in idioms.",
 };
@@ -381,7 +431,7 @@ export function buildTranslationContext(request: CleanupRequest, source: Resolve
       : "Source language: not given; it is whatever language the transcript is in.",
     `Target language: ${describeLanguage(target)}${script ? `, written in ${script} script` : ""}. ` +
     "Write the whole output in this language.",
-    `Style: ${styles[request.style ?? "casual"]}`,
+    `Style: ${styles[request.style ?? "verbatim"]}`,
     ...personalContext(request),
     "</context>",
   ].join("\n");

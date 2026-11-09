@@ -38,7 +38,7 @@ enum OnboardingFixtures {
             record.answers.dataChoice = DataChoiceDecision(choice: choice, policyVersion: 1, decidedAt: Date())
         }
         if step.order >= OnboardingStep.languages.order { record.answers.languages = ["en-US", "ru-RU"] }
-        if reached(.defaultStyle) { record.answers.style = .casual }
+        if reached(.defaultStyle) { record.answers.style = .verbatim }
         if reached(.notifications) { record.permissions.notifications = .granted }
         if reached(.desktopOffer) { record.answers.desktopLink = .declined }
         if reached(.referralSource) { record.answers.referralSource = .searchEngine }
@@ -100,7 +100,7 @@ enum OnboardingFixtures {
             let text = ScriptedPracticeClient.sampleText(for: exercise)
             history.record(Transcript(
                 id: UUID(), createdAt: now.addingTimeInterval(Double(index - 3) * 60), language: "en-US",
-                style: .casual, rawText: text, cleanedText: text, status: .cleaned,
+                style: .verbatim, rawText: text, cleanedText: text, status: .cleaned,
                 insertedAt: now.addingTimeInterval(Double(index - 3) * 60), source: .keyboard))
         }
     }

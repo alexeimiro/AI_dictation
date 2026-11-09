@@ -1,68 +1,57 @@
 import SwiftUI
 import UIKit
 
-/// Adaptive visual tokens shared by the SwiftUI voice surface and the UIKit key grid. The palette
-/// stays close to the system keyboard, with a restrained plum accent that belongs to Murmur.
+/// Adaptive visual tokens shared by the SwiftUI voice surface and the UIKit key grid: the light and
+/// dark palettes of Anton's keyboard mock (November 2026) with an indigo accent and a recording
+/// red. The keyboard links only MurmurCore, so the values live here rather than in MurmurUI.
 enum KeyboardChrome {
-    static let backdropUIColor = UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.075, green: 0.071, blue: 0.086, alpha: 1)
-            : UIColor(red: 0.910, green: 0.914, blue: 0.941, alpha: 1)
-    }
-    static let panelUIColor = UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.105, green: 0.098, blue: 0.122, alpha: 0.98)
-            : UIColor(red: 0.963, green: 0.965, blue: 0.982, alpha: 0.98)
-    }
-    static let surfaceUIColor = UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(white: 1, alpha: 0.11)
-            : UIColor(white: 1, alpha: 0.78)
-    }
-    static let keyUIColor = UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.255, green: 0.247, blue: 0.286, alpha: 1)
-            : UIColor(white: 1, alpha: 0.96)
-    }
-    static let functionKeyUIColor = UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.165, green: 0.157, blue: 0.188, alpha: 1)
-            : UIColor(red: 0.790, green: 0.800, blue: 0.842, alpha: 1)
-    }
-    static let pressedKeyUIColor = UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.350, green: 0.337, blue: 0.388, alpha: 1)
-            : UIColor(red: 0.710, green: 0.720, blue: 0.765, alpha: 1)
-    }
-    static let accentUIColor = UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.855, green: 0.804, blue: 0.949, alpha: 1)
-            : UIColor(red: 0.192, green: 0.176, blue: 0.220, alpha: 1)
-    }
-    static let accentGlyphUIColor = UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.110, green: 0.098, blue: 0.129, alpha: 1)
-            : .white
-    }
+    static let backdropUIColor = dynamic(light: 0xE7E9EF, dark: 0x16171C)
+    /// Sheets and the style menu.
+    static let panelUIColor = dynamic(light: 0xFFFFFF, dark: 0x1E2028)
+    /// Chips, pills and the translate row.
+    static let surfaceUIColor = dynamic(light: 0xFFFFFF, dark: 0x24262E)
+    static let keyUIColor = dynamic(light: 0xFFFFFF, dark: 0x2E3039)
+    static let functionKeyUIColor = dynamic(light: 0xD3D6DE, dark: 0x24262E)
+    static let pressedKeyUIColor = dynamic(light: 0xBFC3CD, dark: 0x454852)
+    static let returnKeyUIColor = dynamic(light: 0x14161C, dark: 0xF2F3F5)
+    static let returnGlyphUIColor = dynamic(light: 0xFFFFFF, dark: 0x16171C)
+    static let accentUIColor = UIColor(hex: 0x4F5BD5)
+    static let accentGlyphUIColor = UIColor.white
     static let accentSoftUIColor = UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.490, green: 0.410, blue: 0.620, alpha: 0.36)
-            : UIColor(red: 0.655, green: 0.555, blue: 0.835, alpha: 0.18)
+        accentUIColor.withAlphaComponent(traits.userInterfaceStyle == .dark ? 0.22 : 0.14)
     }
-    static let listeningUIColor = UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 1.000, green: 0.365, blue: 0.390, alpha: 1)
-            : UIColor(red: 0.800, green: 0.105, blue: 0.145, alpha: 1)
+    /// The style menu's current row.
+    static let selectedRowUIColor = UIColor { traits in
+        accentUIColor.withAlphaComponent(traits.userInterfaceStyle == .dark ? 0.22 : 0.10)
     }
+    static let recordingUIColor = UIColor(hex: 0xE5484D)
+    static let mutedUIColor = UIColor { traits in
+        let dark = traits.userInterfaceStyle == .dark
+        if traits.accessibilityContrast == .high { return UIColor(hex: dark ? 0xC9CDD6 : 0x3C4150) }
+        return UIColor(hex: dark ? 0xA3A8B4 : 0x5B6170)
+    }
+    /// The icon tiles of rows that aren't selected.
+    static let tileUIColor = dynamic(light: 0xF1F2F5, dark: 0x2B2D36)
+    static let tileGlyphUIColor = dynamic(light: 0x3C4150, dark: 0xC9CDD6)
+    static let scrimUIColor = UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(white: 0, alpha: 0.35)
+            : UIColor(red: 20 / 255, green: 22 / 255, blue: 28 / 255, alpha: 0.10)
+    }
+    /// Switched off: the translate tile and switch tracks.
+    static let offTrackUIColor = dynamic(light: 0xC4C8D2, dark: 0x3A3D47)
+    static let translateTileUIColor = UIColor(hex: 0x8EC0EC)
     static let borderUIColor = UIColor { traits in
-        if traits.accessibilityContrast == .high {
-            return traits.userInterfaceStyle == .dark
-                ? UIColor(white: 1, alpha: 0.28)
-                : UIColor(red: 0.135, green: 0.118, blue: 0.160, alpha: 0.26)
-        }
-        return traits.userInterfaceStyle == .dark
-            ? UIColor(white: 1, alpha: 0.10)
-            : UIColor(red: 0.135, green: 0.118, blue: 0.160, alpha: 0.10)
+        let dark = traits.userInterfaceStyle == .dark
+        let alpha: CGFloat = traits.accessibilityContrast == .high ? (dark ? 0.28 : 0.26) : (dark ? 0.10 : 0.08)
+        return dark
+            ? UIColor(white: 1, alpha: alpha)
+            : UIColor(red: 20 / 255, green: 22 / 255, blue: 28 / 255, alpha: alpha)
+    }
+    static let keyShadowUIColor = UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(white: 0, alpha: 0.5)
+            : UIColor(red: 20 / 255, green: 22 / 255, blue: 28 / 255, alpha: 0.18)
     }
 
     static let backdrop = Color(uiColor: backdropUIColor)
@@ -73,57 +62,28 @@ enum KeyboardChrome {
     static let accent = Color(uiColor: accentUIColor)
     static let accentGlyph = Color(uiColor: accentGlyphUIColor)
     static let accentSoft = Color(uiColor: accentSoftUIColor)
-    static let listening = Color(uiColor: listeningUIColor)
+    static let selectedRow = Color(uiColor: selectedRowUIColor)
+    static let recording = Color(uiColor: recordingUIColor)
+    static let recordingSoft = recording.opacity(0.18)
+    static let muted = Color(uiColor: mutedUIColor)
+    static let tile = Color(uiColor: tileUIColor)
+    static let tileGlyph = Color(uiColor: tileGlyphUIColor)
+    static let scrim = Color(uiColor: scrimUIColor)
+    static let offTrack = Color(uiColor: offTrackUIColor)
+    static let translateTile = Color(uiColor: translateTileUIColor)
     static let border = Color(uiColor: borderUIColor)
+    /// The mock's shadows are a cool navy, rgb(15, 20, 40).
+    static let shadow = Color(red: 15 / 255, green: 20 / 255, blue: 40 / 255)
+
+    private static func dynamic(light: UInt32, dark: UInt32) -> UIColor {
+        UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light) }
+    }
 }
 
-/// A persistent recording badge shared by both keyboard layouts. The red live dot and explicit
-/// recognition direction make listening distinguishable from the idle and processing states.
-struct RecognitionIndicator: View {
-    let direction: String
-    var since: Date?
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulses = false
-
-    var body: some View {
-        HStack(spacing: 7) {
-            ZStack {
-                Circle()
-                    .fill(KeyboardChrome.listening.opacity(0.20))
-                    .frame(width: 16, height: 16)
-                    .scaleEffect(pulses ? 1.28 : 0.86)
-                Circle()
-                    .fill(KeyboardChrome.listening)
-                    .frame(width: 8, height: 8)
-            }
-            Text("Listening")
-                .fontWeight(.semibold)
-            Text("· \(direction)")
-                .foregroundStyle(.secondary)
-            if let since {
-                Text(since, style: .timer)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .font(.system(size: 14, weight: .medium))
-        .lineLimit(1)
-        .minimumScaleFactor(0.82)
-        .padding(.horizontal, 12)
-        .frame(height: 32)
-        .background(KeyboardChrome.listening.opacity(0.09), in: .capsule)
-        .overlay {
-            Capsule().stroke(KeyboardChrome.listening.opacity(0.34), lineWidth: 1)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Listening for \(direction)")
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-                pulses = true
-            }
-        }
+extension UIColor {
+    convenience init(hex: UInt32) {
+        self.init(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255,
+                  blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
     }
 }
 
@@ -143,16 +103,19 @@ extension ButtonStyle where Self == KeyboardPressStyle {
     static var keyboardPress: KeyboardPressStyle { KeyboardPressStyle() }
 }
 
+/// The mock's chip: a white (dark: graphite) fill, a hairline and a soft shadow. `active` tints it
+/// with the accent; `pressed` darkens it while a held key (Delete) is down.
 struct KeyboardSurface<S: Shape>: View {
     let shape: S
     var active = false
+    var pressed = false
 
     var body: some View {
         shape
-            .fill(active ? KeyboardChrome.accentSoft : KeyboardChrome.surface)
+            .fill(pressed ? KeyboardChrome.pressedKey : active ? KeyboardChrome.accentSoft : KeyboardChrome.surface)
             .overlay {
-                shape.stroke(active ? KeyboardChrome.accent.opacity(0.22) : KeyboardChrome.border, lineWidth: 0.7)
+                shape.stroke(active ? KeyboardChrome.accent.opacity(0.22) : KeyboardChrome.border, lineWidth: 1)
             }
-            .shadow(color: .black.opacity(0.07), radius: 3, y: 1.5)
+            .shadow(color: KeyboardChrome.shadow.opacity(0.06), radius: 1, y: 1)
     }
 }

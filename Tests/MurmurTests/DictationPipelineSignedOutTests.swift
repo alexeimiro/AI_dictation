@@ -46,7 +46,7 @@ private final class SignedOutTranscriber: Transcriber, UtteranceTimingProviding,
         guard let transcript else { throw fallbackFailure ?? refusal }
         return transcript
     }
-    func finishUtterance(translation: TranslationRequest) async throws -> UtteranceOutput {
+    func finishUtterance(model request: ModelRequest?) async throws -> UtteranceOutput {
         UtteranceOutput(transcript: try await finishUtterance())
     }
     func cancelUtterance() async {}
@@ -90,11 +90,11 @@ struct DictationPipelineSignedOutTests {
         #expect(transcript.errorReason == "The account was signed out.")
     }
 
-    /// No cleanup runs to be refused for a short dictation or with AI cleanup off: the
-    /// transcriber's word on the refusal is enough for the keyboard to say so.
+    /// No cleanup runs to be refused for a short dictation or a Word for word one with nothing to
+    /// write differently: the transcriber's word on the refusal is enough for the keyboard to say so.
     @Test func aDictationThatSkipsTheCleanupSaysSoToo() async {
-        for (heard, aiCleanup) in [("Thanks, Olga", true), ("can you send me the report by friday", false)] {
-            let (result, transcript, cleanup) = await dictate(heard: heard, aiCleanup: aiCleanup)
+        for (heard, style) in [("Thanks, Olga", StylePreset.grammar), ("Can you send me the report by Friday?", .verbatim)] {
+            let (result, transcript, cleanup) = await dictate(heard: heard, style: style)
             #expect(cleanup.calls == 0)
             #expect(result.status == .raw)
             #expect(result.isInsertable)
@@ -121,17 +121,16 @@ struct DictationPipelineSignedOutTests {
     /// `heard`: the fallback's transcript, or nil when the cloud's refusal (or `fallbackFailure`)
     /// is all there is.
     private func dictate(
-        heard: String?, translatingTo target: String? = nil, aiCleanup: Bool = true,
+        heard: String?, translatingTo target: String? = nil, style: StylePreset = .grammar,
         refusal: CloudTranscriptionError = .signedOut, fallbackFailure: (any Error)? = nil
     ) async -> (DictationResult, Transcript, SignedOutCleanup) {
         let suite = "test.murmur.pipeline.\(UUID().uuidString)"
         defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
         let settings = SharedSettings(defaults: UserDefaults(suiteName: suite))
-        settings.aiCleanupEnabled = aiCleanup
         let cleanup = SignedOutCleanup()
         let pipeline = DictationPipeline(cleanup: cleanup, settings: settings)
         let dictation = ActiveDictation(
-            requestId: UUID(), documentIdentifier: nil, style: .formal, language: target == nil ? "en-US" : "ru-RU",
+            requestId: UUID(), documentIdentifier: nil, style: style, language: target == nil ? "en-US" : "ru-RU",
             translationTargetLanguage: target, source: .keyboard, startedAt: Date())
         let transcriber = SignedOutTranscriber(fallbackTranscript: heard, refusal: refusal, fallbackFailure: fallbackFailure)
         let outcome = await pipeline.complete(dictation, transcriber: transcriber, audioSeconds: 2,

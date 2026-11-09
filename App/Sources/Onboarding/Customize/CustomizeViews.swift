@@ -244,7 +244,7 @@ struct DefaultStyleView: View {
                         .padding(.top, 15)
                     VStack(spacing: 18) {
                         ForEach(StylePreset.allCases) { style in
-                            OptionCard(style.title, subtitle: style.onboardingSubtitle,
+                            OptionCard(style.title, subtitle: style.subtitle,
                                        isSelected: store.answers.style == style, height: 71.3) {
                                 store.send(.selectStyle(style))
                             }
@@ -255,6 +255,8 @@ struct DefaultStyleView: View {
                 }
             }
             .scrollIndicators(.hidden)
+            // Word for word is the default; one tap on Next keeps it.
+            .onAppear { if store.answers.style == nil { store.send(.selectStyle(.verbatim)) } }
         } actions: {
             Button("Next") {
                 if let style = store.answers.style, store.send(.next), !model.launchOptions.usesOnboardingFixtures {
@@ -267,18 +269,6 @@ struct DefaultStyleView: View {
     }
 }
 
-extension StylePreset {
-    /// What each style does, in the style screen's words.
-    var onboardingSubtitle: String {
-        switch self {
-        case .formal: "Caps + Punctuation"
-        case .casual: "Caps + Less punctuation"
-        case .veryCasual: "no caps, less punctuation"
-        case .excited: "More exclamations!"
-        case .verbatim: "Your exact words, no rephrasing"
-        }
-    }
-}
 
 /// References 35–36: benefits first, then the system prompt. "Maybe later" never blocks.
 struct NotificationsView: View {

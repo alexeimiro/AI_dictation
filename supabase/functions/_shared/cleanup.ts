@@ -31,7 +31,7 @@ export interface CleanupOutcome {
   status: "cleaned" | "raw";
   reason?: string;
   model: string;
-  /** Language pack that was applied ("en", "ru"); for a translation, the one the source resolves to. */
+  /** Language pack that was applied ("en", "ru", "tr", "auto"); for a translation, the source's. */
   language: string;
   stopReason: string | null;
   /** Not measured: the reply isn't streamed, so it's null. */
@@ -112,7 +112,7 @@ interface ResponsesReply {
 
 /** One cleanup call. A deadline abort surfaces as a DOMException (see `describeCleanupError`). */
 export async function runCleanup(request: CleanupRequest, options: CleanupOptions): Promise<CleanupOutcome> {
-  const language = resolveLanguage(request.language, request.transcript);
+  const language = resolveLanguage(request.language);
   const started = performance.now();
   const fetcher = options.fetcher ?? fetch;
   const response = await fetcher("https://api.openai.com/v1/responses", {

@@ -119,14 +119,22 @@ public struct KeyboardStatus: Codable, Sendable, Equatable {
     public var hiddenAt: Date?
     public var listeningRequestId: UUID?
     public var listeningHeartbeatAt: Date?
+    /// The dictation the keyboard left running when it went off screen (the screen locked, or
+    /// another app): the app records on until the keyboard is back, the 5-minute cap, or the Lock
+    /// Screen's Stop, instead of finishing it when the heartbeats stop.
+    public var awayRequestId: UUID?
+    /// When that dictation began, for the timer of a keyboard that iOS relaunched meanwhile.
+    public var awayListeningSince: Date?
 
     public init(fullAccessAt: Date?, lastSeenAt: Date, hiddenAt: Date? = nil, listeningRequestId: UUID? = nil,
-                listeningHeartbeatAt: Date? = nil) {
+                listeningHeartbeatAt: Date? = nil, awayRequestId: UUID? = nil, awayListeningSince: Date? = nil) {
         self.fullAccessAt = fullAccessAt
         self.lastSeenAt = lastSeenAt
         self.hiddenAt = hiddenAt
         self.listeningRequestId = listeningRequestId
         self.listeningHeartbeatAt = listeningHeartbeatAt
+        self.awayRequestId = awayRequestId
+        self.awayListeningSince = awayListeningSince
     }
 
     /// When the keyboard stopped being on screen: when it said so, or shortly after its last

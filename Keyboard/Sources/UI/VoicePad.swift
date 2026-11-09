@@ -1,8 +1,9 @@
+import MurmurCore
 import SwiftUI
 
-/// The voice layout's main area: a big talk button with cancel on the left while capturing and
-/// delete in the familiar right-hand position. Return lives in the bottom key row.
-/// Dragging anywhere off the buttons moves the cursor, like holding the space bar.
+/// The voice keyboard from Anton's mock, under the toolbar: the translate row (or a notice in its
+/// place), then the talk button with what it is doing under it. Space and return are the UIKit row
+/// below. Dragging in the empty space moves the cursor, like holding the space bar.
 struct VoicePad: View {
     let model: KeyboardModel
     /// Trackpad distance already turned into cursor moves.
@@ -11,87 +12,81 @@ struct VoicePad: View {
     /// Points of drag per character.
     private static let cursorStep: CGFloat = 9
 
+    /// Sizes for the 320 pt keyboard, and for landscape, where it is 272 pt.
+    private struct Metrics {
+        var top: CGFloat
+        var mic: CGFloat
+        var gap: CGFloat
+        var wave: CGFloat
+        var waveGap: CGFloat
+        /// The hint, the waveform with the status line, or the status line alone.
+        var block: CGFloat
+
+        // The soft ring reaches 8 pt (regular) or 6 pt (compact) past the disc; `top` clears it.
+        static let regular = Metrics(top: 12, mic: 74, gap: 12, wave: 26, waveGap: 6, block: 48)
+        static let compact = Metrics(top: 8, mic: 54, gap: 8, wave: 16, waveGap: 4, block: 34)
+    }
+
     var body: some View {
-        VStack(spacing: 8) {
-            // Fixed side slots, so the talk button stays put when a slot empties (while transcribing).
-            HStack(alignment: .center) {
-                Color.clear.frame(width: 72, height: 78).overlay { leading }
-                Spacer()
-                TalkButton(model: model)
-                Spacer()
-                Color.clear.frame(width: 72, height: 78).overlay { trailing }
-            }
-            hint.frame(height: 30)
+        let metrics = model.compactHeight ? Metrics.compact : .regular
+        VStack(spacing: 0) {
+            topSlot
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
+                // Above the talk button's pulses, so they seem to come from behind it.
+                .zIndex(1)
+            centre(metrics)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .contentShape(.rect)
+                .gesture(trackpad)
         }
-        .padding(.horizontal, 18)
-        .padding(.top, 12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .foregroundStyle(.primary)
-        // On the whole pad: the buttons' own gestures still win where they are.
-        .contentShape(.rect)
-        .gesture(trackpad)
     }
 
+    /// The translate row, or in its place a notice or the last dictation that couldn't be inserted.
     @ViewBuilder
-    private var leading: some View {
-        if model.isCapturing {
-            Button(action: model.actions.cancel) {
-                VStack(spacing: 5) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(width: 50, height: 50)
-                        .background { KeyFace(shape: Circle()) }
-                    Text("Cancel")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .buttonStyle(.keyboardPress)
-            .accessibilityLabel("Cancel transcription")
-        }
-    }
-
-    private var trailing: some View {
-        DeleteKey(model: model)
-    }
-
-    @ViewBuilder
-    private var hint: some View {
-        switch model.phase {
-        case .listening:
-            Text("Tap Done when you've finished")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
-        case .processing:
-            caption(model.announcesReady ? "Transcribing · we'll tap when it's ready" : "Transcribing…")
-        default:
-            if let words = model.undoableWords {
-                HStack(spacing: 10) {
-                    Text("Inserted \(words) \(words == 1 ? "word" : "words")")
-                        .foregroundStyle(.secondary)
-                    Button("Undo", action: model.actions.undo)
-                        .buttonStyle(.keyboardPress)
-                        .font(.system(size: 15, weight: .semibold))
-                        .padding(.horizontal, 14)
-                        .frame(height: 30)
-                        .background { KeyboardSurface(shape: Capsule(), active: true) }
-                        .frame(minHeight: 44)
-                }
-                .font(.system(size: 15, weight: .medium))
-            } else {
-                caption(model.idleHint)
+    private var topSlot: some View {
+        if let pending = model.pendingResult {
+            NoticeCard(symbol: "arrow.uturn.down", accent: true, title: "Insert last dictation",
+                       detail: pending.text, action: model.actions.insertPending,
+                       dismiss: model.actions.dismissPending)
+        } else {
+            switch model.phase {
+            case .needsFullAccess:
+                NoticeCard(symbol: "lock", title: "Almost there!",
+                           detail: "Turn on Allow Full Access in Settings › Murmur › Keyboards",
+                           dismiss: model.actions.dismissNotice)
+            case .notice(let message):
+                NoticeCard(symbol: "exclamationmark.bubble", title: nil, detail: message,
+                           dismiss: model.actions.dismissNotice)
+            default:
+                TranslateRow(model: model)
             }
         }
     }
 
-    private func caption(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 13, weight: .medium))
-            .lineLimit(1)
-            .minimumScaleFactor(0.9)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 11)
-            .frame(height: 28)
+    private func centre(_ metrics: Metrics) -> some View {
+        VStack(spacing: metrics.gap) {
+            MicButton(model: model, size: metrics.mic)
+                .overlay {
+                    if model.isCapturing {
+                        CancelChip(model: model)
+                            .offset(x: -(metrics.mic / 2 + 28 + 22))
+                    }
+                }
+            Group {
+                if case .listening = model.phase {
+                    VStack(spacing: metrics.waveGap) {
+                        Waveform(model: model, height: metrics.wave)
+                        StatusLine(model: model)
+                    }
+                } else {
+                    StatusLine(model: model)
+                }
+            }
+            .frame(height: metrics.block)
+        }
+        .padding(.top, metrics.top)
     }
 
     private var trackpad: some Gesture {
@@ -106,124 +101,71 @@ struct VoicePad: View {
     }
 }
 
-/// Start, finish and progress in one big circle, ringed by the mic level while listening.
-private struct TalkButton: View {
-    let model: KeyboardModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+/// A card the size of the translate row that takes its place for a notice: a tile, the message,
+/// and ✕. With an `action` the whole card is the button (Insert last dictation).
+private struct NoticeCard: View {
+    let symbol: String
+    var accent = false
+    let title: String?
+    let detail: String
+    var action: (() -> Void)?
+    let dismiss: () -> Void
 
     var body: some View {
-        let listening = model.listeningSince != nil
-        Button(action: listening ? model.actions.stop : model.actions.mic) {
-            VStack(spacing: 5) {
-                ZStack {
-                    Circle()
-                        .fill(KeyboardChrome.accentSoft)
-                        .scaleEffect(listening ? 1 + 0.18 * level : 1)
-                        .opacity(listening ? 0.72 + 0.28 * level : 1)
-                        .animation(reduceMotion ? nil : .linear(duration: 0.10), value: level)
-                    Circle()
-                        .stroke(KeyboardChrome.listening.opacity(listening ? 0.30 + 0.45 * level : 0),
-                                lineWidth: 2)
-                        .scaleEffect(listening ? 0.91 + 0.09 * level : 0.91)
-                        .animation(reduceMotion ? nil : .linear(duration: 0.10), value: level)
-                        .padding(3)
-                    Circle()
-                        .fill(LinearGradient(colors: [actionFill, actionFill.opacity(0.88)],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
-                        .padding(8)
-                    Circle()
-                        .stroke(.white.opacity(0.18), lineWidth: 0.8)
-                        .padding(8)
-                    glyph
-                }
-                .frame(width: 94, height: 94)
-                .shadow(color: KeyboardChrome.accent.opacity(0.24), radius: listening ? 9 : 6, y: 3)
-
-                Text(listening ? "Done" : "Dictate")
-                    .font(.system(size: 12, weight: .semibold))
+        HStack(spacing: 10) {
+            if let action {
+                Button(action: action) { message }
+                    .buttonStyle(.keyboardPress)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(title ?? detail)
+                    .accessibilityHint(detail)
+            } else {
+                message
+                    .accessibilityElement(children: .combine)
             }
+
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.primary)
+                    .frame(width: 30, height: 30)
+                    .background(KeyboardChrome.backdrop, in: .circle)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.keyboardPress)
+            .accessibilityLabel("Dismiss")
         }
-        .buttonStyle(.keyboardPress)
-        .disabled(model.isTransitioning)
-        .accessibilityLabel(listening ? "Stop transcribing" : model.isTransitioning ? "Transcribing" : "Start Murmur")
+        .padding(.leading, 7)
+        .padding(.trailing, 3)
+        .padding(.vertical, 4)
+        .frame(minHeight: 54)
+        .background { KeyboardSurface(shape: RoundedRectangle(cornerRadius: 18, style: .continuous)) }
     }
 
-    private var level: Double { model.levels.last ?? 0 }
-
-    @ViewBuilder
-    private var glyph: some View {
-        switch model.phase {
-        case .starting, .openingApp, .processing:
-            ProgressView().tint(actionGlyph).controlSize(.large)
-        case .listening:
-            Image(systemName: "checkmark")
-                .font(.system(size: 28, weight: .bold))
-                .foregroundStyle(actionGlyph)
-        default:
-            Image(systemName: "mic.fill")
-                .font(.system(size: 32, weight: .medium))
-                .foregroundStyle(actionGlyph)
+    private var message: some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(accent ? KeyboardChrome.accentGlyph : KeyboardChrome.tileGlyph)
+                .frame(width: 36, height: 36)
+                .background(accent ? KeyboardChrome.accent : KeyboardChrome.tile,
+                            in: .rect(cornerRadius: 10, style: .continuous))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 1) {
+                if let title {
+                    Text(title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.primary)
+                }
+                Text(detail)
+                    .font(.system(size: 12))
+                    .foregroundStyle(KeyboardChrome.muted)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.85)
+            }
+            Spacer(minLength: 0)
         }
-    }
-}
-
-/// Delete: one character on touch, repeating while held (`KeyRepeater`); a swipe left takes the
-/// whole word.
-private struct DeleteKey: View {
-    let model: KeyboardModel
-    @State private var pressed = false
-    @State private var swiped = false
-
-    var body: some View {
-        VStack(spacing: 5) {
-            Image(systemName: "delete.left")
-                .font(.system(size: 17))
-                .frame(width: 50, height: 50)
-                .background { KeyFace(shape: Circle(), pressed: pressed) }
-            Text("Delete")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-        }
-        .foregroundStyle(.secondary)
         .contentShape(.rect)
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { value in
-                    if !pressed {
-                        pressed = true
-                        model.actions.deleteDown()
-                    }
-                    if !swiped, value.translation.width < -28 {
-                        swiped = true
-                        model.actions.deleteWord()
-                    }
-                }
-                .onEnded { _ in
-                    pressed = false
-                    swiped = false
-                    model.actions.deleteUp()
-                }
-        )
-        .accessibilityElement()
-        .accessibilityLabel("Delete")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction {
-            model.actions.deleteDown()
-            model.actions.deleteUp()
-        }
-    }
-}
-
-/// A key's face: the key color with the system keys' hairline shadow (light mode only).
-private struct KeyFace<S: Shape>: View {
-    let shape: S
-    var pressed = false
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        shape
-            .fill(pressed ? KeyboardChrome.pressedKey : KeyboardChrome.key)
-            .overlay { shape.stroke(KeyboardChrome.border, lineWidth: 0.6) }
-            .shadow(color: .black.opacity(colorScheme == .dark ? 0.18 : 0.12), radius: 2, y: 1)
     }
 }

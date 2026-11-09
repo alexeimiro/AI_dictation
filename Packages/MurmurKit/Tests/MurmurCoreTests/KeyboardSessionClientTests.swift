@@ -340,14 +340,14 @@ struct KeyboardSessionClientTests {
         client.host = host
         client.activate()
 
-        client.styleOverride = .formal
+        client.styleOverride = .grammar
         client.languageOverride = "ru-RU"
         client.translationTargetLanguage = "en-US"
         client.micTapped()
         let pending = try #require(transport.payloads.readPendingStart())
         #expect(pending.autoStart == true)
         #expect(pending.documentIdentifier == host.currentDocumentIdentifier)
-        #expect(pending.styleOverride == .formal)
+        #expect(pending.styleOverride == .grammar)
         #expect(pending.languageOverride == "ru-RU")
         #expect(pending.translationTargetLanguage == "en-US")
     }
@@ -517,6 +517,93 @@ struct KeyboardSessionClientTests {
     }
 
     // MARK: Visibility
+
+    /// A screen lock or a trip to another app no longer ends a dictation: the app records on, and
+    /// the keyboard follows it again when it is back, inserting into whichever field is focused.
+    @Test func aDictationOutlivesTheKeyboardLeavingTheScreen() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport)
+        client.host = host
+        app.publish(.ready)
+        client.activate()
+        client.micTapped()
+        #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
+        guard case .listening(let requestId, let since) = client.phase else { return }
+
+        client.deactivate()
+        #expect(transport.payloads.readCommand()?.kind == .start, "nothing stopped it")
+        let away = try #require(transport.payloads.readKeyboardStatus())
+        #expect(away.awayRequestId == requestId)
+        // The status file keeps dates to the second or so.
+        #expect(abs(away.awayListeningSince?.timeIntervalSince(since) ?? .infinity) < 1)
+        #expect(away.listeningRequestId == nil)
+
+        host.currentDocumentIdentifier = UUID()
+        client.activate()
+        #expect(client.phase == .listening(requestId, since: since))
+        let back = try #require(transport.payloads.readKeyboardStatus())
+        #expect(back.awayRequestId == nil)
+        #expect(back.listeningRequestId == requestId)
+
+        client.stopTapped()
+        #expect(transport.payloads.readCommand()?.kind == .stop)
+        try app.finish(requestId, text: "A long thought.", document: UUID())
+        #expect(await waitUntil { host.inserted.count == 1 })
+        #expect(host.inserted.first?.text == "A long thought.")
+    }
+
+    /// iOS may relaunch the keyboard while it is away: the new one finds the dictation in the
+    /// status the old one left, timer and all.
+    @Test func aKeyboardRelaunchedWhileADictationRanFollowsIt() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let firstHost = FakeHost()
+        let first = KeyboardSessionClient(transport: transport)
+        first.host = firstHost
+        app.publish(.ready)
+        first.activate()
+        first.micTapped()
+        #expect(await waitUntil { if case .listening = first.phase { true } else { false } })
+        guard case .listening(let requestId, let since) = first.phase else { return }
+        first.deactivate()
+
+        let host = FakeHost()
+        let relaunched = KeyboardSessionClient(transport: transport)
+        relaunched.host = host
+        relaunched.activate()
+        guard case .listening(requestId, let resumedSince) = relaunched.phase else {
+            Issue.record("expected to follow \(requestId), got \(relaunched.phase)")
+            return
+        }
+        #expect(abs(resumedSince.timeIntervalSince(since)) < 1, "the timer keeps its start")
+    }
+
+    /// The cap or the Lock Screen's Stop ended it while the keyboard was away: its text is offered
+    /// for ten minutes, not the two a leftover gets.
+    @Test func aDictationThatEndedWhileAwayIsOfferedLonger() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        var now = Date()
+        let firstHost = FakeHost()
+        let first = KeyboardSessionClient(transport: transport, clock: { now })
+        first.host = firstHost
+        app.publish(.ready)
+        first.activate()
+        first.micTapped()
+        #expect(await waitUntil { if case .listening = first.phase { true } else { false } })
+        guard case .listening(let requestId, _) = first.phase else { return }
+        first.deactivate()
+        try app.finish(requestId, text: "Ended at the cap.", document: nil)
+
+        now = now.addingTimeInterval(300)
+        let host = FakeHost()
+        let relaunched = KeyboardSessionClient(transport: transport, clock: { now })
+        relaunched.host = host
+        relaunched.activate()
+        #expect(relaunched.pendingResult?.requestId == requestId)
+    }
 
     @Test func theAppHearsWhenTheKeyboardComesAndGoes() async throws {
         let transport = InMemoryIPCTransport()

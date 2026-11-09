@@ -28,11 +28,12 @@ protocol Transcriber: AnyObject, Sendable {
     /// Ends the dictation and returns the final transcript.
     func finishUtterance() async throws -> String
 
-    /// Ends a dictation to translate. A transcriber that can translate in the request that
-    /// transcribes (`OpenAITranscriber` with `dictate`) returns the translation too; the others
-    /// return the transcript alone, and the pipeline translates it. No default: a transcriber that
-    /// wraps another must pass the request on.
-    func finishUtterance(translation: TranslationRequest) async throws -> UtteranceOutput
+    /// Ends a dictation for the pipeline. With `request` (a translation, or Improve my grammar), a
+    /// transcriber that can have the model write the text in the request that transcribes
+    /// (`OpenAITranscriber` with `dictate`) returns that reply too; the others return the
+    /// transcript alone, and the pipeline asks the cleanup. No default: a transcriber that wraps
+    /// another must pass the request on.
+    func finishUtterance(model request: ModelRequest?) async throws -> UtteranceOutput
 
     func cancelUtterance() async
 
@@ -46,16 +47,23 @@ protocol Transcriber: AnyObject, Sendable {
     func shutdown() async
 }
 
-/// A finished dictation's transcript, and its translation when the transcriber made it in the same
-/// request.
+/// A finished dictation's transcript, and the model's text when the transcriber had it written in
+/// the same request.
 struct UtteranceOutput: Sendable {
     var transcript: String
-    /// Nil when only transcribed: the pipeline translates the transcript itself.
-    var translation: Result<CleanupClient.Response, CleanupClient.Failure>?
+    /// The translation or the improved grammar. Nil when only transcribed: the pipeline asks the
+    /// cleanup itself.
+    var modelReply: Result<CleanupClient.Response, CleanupClient.Failure>?
+    /// Under Auto-detect, the language the transcript turned out to be in (BCP-47: "tr", "ru-RU"),
+    /// as the cloud heard it or as the fallback recognized it. Nil for a dictation in a chosen
+    /// language, or when the cloud couldn't tell.
+    var detectedLanguage: String?
 
-    init(transcript: String, translation: Result<CleanupClient.Response, CleanupClient.Failure>? = nil) {
+    init(transcript: String, modelReply: Result<CleanupClient.Response, CleanupClient.Failure>? = nil,
+         detectedLanguage: String? = nil) {
         self.transcript = transcript
-        self.translation = translation
+        self.modelReply = modelReply
+        self.detectedLanguage = detectedLanguage
     }
 }
 
@@ -174,7 +182,7 @@ final class StubTranscriber: Transcriber, @unchecked Sendable {
     }
 
     /// The test sentence, for the pipeline to translate.
-    func finishUtterance(translation: TranslationRequest) async throws -> UtteranceOutput {
+    func finishUtterance(model request: ModelRequest?) async throws -> UtteranceOutput {
         UtteranceOutput(transcript: try await finishUtterance())
     }
 

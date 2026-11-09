@@ -50,6 +50,10 @@ final class AppModel {
         self.transport = transport
         let launchOptions = LaunchOptions(arguments: arguments)
         self.launchOptions = launchOptions
+        #if DEBUG
+        // Also clears a demo an earlier launch or the Debug screen left on.
+        SharedSettings.shared.debugKeyboardDemo = launchOptions.keyboardDemo
+        #endif
         let history = HistoryStore.open(inMemory: launchOptions.useFixtures || launchOptions.isOnboardingScreenshot)
         self.history = history
         if launchOptions.useFixtures { HistoryFixtures.seed(history) }
@@ -311,7 +315,7 @@ final class AppModel {
         case .active:
             if activeSince == nil { activeSince = Date() }
             setup.refresh()
-            settings.reloadDefaultStyle()
+            settings.reloadFromKeyboard()
             refreshNotificationPermission()
             session.appDidBecomeActive()
             history.applyRetention()
@@ -379,6 +383,10 @@ enum LaunchRoute: String {
 ///   Home and Settings without the account's card and section.
 /// - `-account-sheet [email|guest]` opens the sign-in sheet, at the email step or asking about
 ///   continuing as a guest
+///
+/// The keyboard (screenshots, DEBUG builds only): `-keyboard-demo <state>[@<layout>]` makes the
+/// keyboard show that state instead of the live one (`KeyboardDemo`); a launch without it ends
+/// the demo.
 struct LaunchOptions: Equatable {
     var route: LaunchRoute?
     var useFixtures = false
@@ -389,6 +397,7 @@ struct LaunchOptions: Equatable {
     var resetOnboarding = false
     var accountState: AccountModel.State?
     var accountSheet: SignInAgainView.Start?
+    var keyboardDemo: KeyboardDemo?
 
     init(arguments: [String]) {
         route = LaunchRoute(arguments: arguments)
@@ -404,6 +413,7 @@ struct LaunchOptions: Equatable {
             accountSheet = Self.value(after: "-account-sheet", in: arguments).flatMap(SignInAgainView.Start.init(rawValue:))
                 ?? .options
         }
+        keyboardDemo = Self.value(after: "-keyboard-demo", in: arguments).flatMap(KeyboardDemo.init)
         #endif
     }
 

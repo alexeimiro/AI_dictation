@@ -44,11 +44,29 @@ public enum DisableAfter: String, Codable, Sendable, CaseIterable, Identifiable 
 }
 
 public enum KeyboardLayoutPreference: String, Codable, Sendable, CaseIterable {
-    /// Numbers-first layout with a dictation row (the default, like Wispr Flow).
+    /// Numbers-first layout with a dictation row, like Wispr Flow.
     case numbers
     case qwerty
-    /// A big talk button with a few keys; ABC and 123 open the full keys.
+    /// The voice keyboard (the default): a big talk button, the translate row, space and return.
+    /// It can't dictate without Full Access, so the keyboard shows Numbers first until then.
     case voice
+}
+
+/// The keyboard's colours: the text field's keyboard appearance, or always light or dark.
+public enum KeyboardAppearancePreference: String, Codable, Sendable, CaseIterable, Identifiable {
+    case automatic
+    case light
+    case dark
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .automatic: "Auto"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
 }
 
 /// Which on-device recognizer passed validation for a language on this device, so the check isn't
@@ -79,11 +97,12 @@ public final class SharedSettings: @unchecked Sendable {
 
     private enum Key: String {
         case disableAfter, keyboardLayout, keyboardFeedback, readyHaptic, interactionSounds, defaultStyle
-        case useBuiltInMic, aiCleanupEnabled, transcriberEngine, liveActivities, transcriptRetention, autoReturn
+        case useBuiltInMic, transcriberEngine, liveActivities, transcriptRetention, autoReturn, keepScreenAwake
         case translateInOneRequest
         case primaryLanguage, secondaryLanguage, verifiedEngines
         case translationEnabled, translationSourceLanguage, translationTargetLanguage, recentTranslationLanguages
-        case debugKeyboardPeakFootprint
+        case lastDetectedLanguage, autoDetectDefaultApplied, keyboardAppearance
+        case debugKeyboardPeakFootprint, debugKeyboardDemo, debugKeyboardDemoUntil
         /// Phase 1 single-language setting, migrated into `primaryLanguage`.
         case dictationLocale
     }
@@ -94,8 +113,14 @@ public final class SharedSettings: @unchecked Sendable {
     }
 
     public var keyboardLayout: KeyboardLayoutPreference {
-        get { enumValue(.keyboardLayout) ?? .numbers }
+        get { enumValue(.keyboardLayout) ?? .voice }
         set { defaults.set(newValue.rawValue, forKey: Key.keyboardLayout.rawValue) }
+    }
+
+    /// Set from the keyboard's own settings sheet or the app's Settings.
+    public var keyboardAppearance: KeyboardAppearancePreference {
+        get { enumValue(.keyboardAppearance) ?? .automatic }
+        set { defaults.set(newValue.rawValue, forKey: Key.keyboardAppearance.rawValue) }
     }
 
     /// Haptics on key presses (requires Full Access).
@@ -117,8 +142,10 @@ public final class SharedSettings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Key.interactionSounds.rawValue) }
     }
 
+    /// Word for word until the user picks Improve my grammar; a style removed in November 2026
+    /// reads as Word for word (`StylePreset(stored:)`).
     public var defaultStyle: StylePreset {
-        get { enumValue(.defaultStyle) ?? .casual }
+        get { defaults.string(forKey: Key.defaultStyle.rawValue).map(StylePreset.init(stored:)) ?? .verbatim }
         set { defaults.set(newValue.rawValue, forKey: Key.defaultStyle.rawValue) }
     }
 
@@ -126,11 +153,6 @@ public final class SharedSettings: @unchecked Sendable {
     public var useBuiltInMic: Bool {
         get { bool(.useBuiltInMic, default: true) }
         set { defaults.set(newValue, forKey: Key.useBuiltInMic.rawValue) }
-    }
-
-    public var aiCleanupEnabled: Bool {
-        get { bool(.aiCleanupEnabled, default: true) }
-        set { defaults.set(newValue, forKey: Key.aiCleanupEnabled.rawValue) }
     }
 
     /// Show the session in a Live Activity (Lock Screen / Dynamic Island). App-only.
@@ -146,8 +168,15 @@ public final class SharedSettings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Key.autoReturn.rawValue) }
     }
 
-    /// Translate a cloud dictation in one `dictate` request instead of `transcribe` then `cleanup`.
-    /// App-only; a Debug switch, to compare the two in one build.
+    /// The keyboard holds off Auto-Lock while a dictation listens. A Debug switch, since it relies
+    /// on the extension's idle timer, which iOS doesn't document for keyboards.
+    public var keepScreenAwake: Bool {
+        get { bool(.keepScreenAwake, default: true) }
+        set { defaults.set(newValue, forKey: Key.keepScreenAwake.rawValue) }
+    }
+
+    /// Translate, or improve the grammar of, a cloud dictation in one `dictate` request instead of
+    /// `transcribe` then `cleanup`. App-only; a Debug switch, to compare the two in one build.
     public var translateInOneRequest: Bool {
         get { bool(.translateInOneRequest, default: true) }
         set { defaults.set(newValue, forKey: Key.translateInOneRequest.rawValue) }
@@ -179,7 +208,7 @@ public final class SharedSettings: @unchecked Sendable {
         set { setString(newValue.map(DictationLanguage.normalize), for: .secondaryLanguage) }
     }
 
-    /// Translation is deliberately independent from the writing style and AI-cleanup switches.
+    /// Translation is deliberately independent from the writing style.
     public var translationEnabled: Bool {
         get { bool(.translationEnabled, default: false) }
         set { defaults.set(newValue, forKey: Key.translationEnabled.rawValue) }
@@ -191,10 +220,24 @@ public final class SharedSettings: @unchecked Sendable {
         set { setString(newValue.map(DictationLanguage.normalize), for: .translationSourceLanguage) }
     }
 
+    /// Set once the keyboard first ran with Auto-detect as the default Speak language (November
+    /// 2026). A source saved before then was the old default, not the user's pick, and is dropped.
+    public var autoDetectDefaultApplied: Bool {
+        get { bool(.autoDetectDefaultApplied, default: false) }
+        set { defaults.set(newValue, forKey: Key.autoDetectDefaultApplied.rawValue) }
+    }
+
     /// The language that translated text is inserted in.
     public var translationTargetLanguage: String? {
         get { defaults.string(forKey: Key.translationTargetLanguage.rawValue) }
         set { setString(newValue.map(DictationLanguage.normalize), for: .translationTargetLanguage) }
+    }
+
+    /// The language the last Auto-detect dictation turned out to be in (BCP-47), so the on-device
+    /// fallback can guess it when the cloud doesn't answer. App-only.
+    public var lastDetectedLanguage: String? {
+        get { defaults.string(forKey: Key.lastDetectedLanguage.rawValue) }
+        set { setString(newValue.map(DictationLanguage.normalize), for: .lastDetectedLanguage) }
     }
 
     /// Most-recently-used source/target tags, newest first.
@@ -238,6 +281,28 @@ public final class SharedSettings: @unchecked Sendable {
         get { defaults.integer(forKey: Key.debugKeyboardPeakFootprint.rawValue) }
         set { defaults.set(newValue, forKey: Key.debugKeyboardPeakFootprint.rawValue) }
     }
+
+    /// Debug: a state Debug builds of the keyboard show instead of the live one (`KeyboardDemo`),
+    /// set by the app's `-keyboard-demo` argument or its Debug screen. It lapses after
+    /// `keyboardDemoLifetime`, so a forgotten demo can't freeze the keyboard on a phone.
+    public var debugKeyboardDemo: KeyboardDemo? {
+        get {
+            guard let until = defaults.object(forKey: Key.debugKeyboardDemoUntil.rawValue) as? Date,
+                  until > Date() else { return nil }
+            return defaults.string(forKey: Key.debugKeyboardDemo.rawValue).flatMap(KeyboardDemo.init)
+        }
+        set {
+            setString(newValue?.value, for: .debugKeyboardDemo)
+            if newValue != nil {
+                defaults.set(Date().addingTimeInterval(Self.keyboardDemoLifetime),
+                             forKey: Key.debugKeyboardDemoUntil.rawValue)
+            } else {
+                defaults.removeObject(forKey: Key.debugKeyboardDemoUntil.rawValue)
+            }
+        }
+    }
+
+    public static let keyboardDemoLifetime: TimeInterval = 15 * 60
 
     private func bool(_ key: Key, default value: Bool) -> Bool {
         defaults.object(forKey: key.rawValue) as? Bool ?? value

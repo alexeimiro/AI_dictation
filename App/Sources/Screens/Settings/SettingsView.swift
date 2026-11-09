@@ -22,8 +22,6 @@ struct SettingsView: View {
                 NavigationLink(value: Route.languages) {
                     LabeledContent("Languages", value: languagesSummary)
                 }
-                Toggle("AI cleanup", isOn: $settings.aiCleanupEnabled)
-                    .tint(Palette.toggleGreen)
                 Picker("Default style", selection: $settings.defaultStyle) {
                     ForEach(StylePreset.allCases) { Text($0.title).tag($0) }
                 }
@@ -33,18 +31,25 @@ struct SettingsView: View {
                     ForEach(DisableAfter.allCases) { Text($0.title).tag($0) }
                 }
             }
-            Section("Keyboard") {
+            Section {
                 Picker("Layout", selection: $settings.keyboardLayout) {
+                    Text("Voice").tag(KeyboardLayoutPreference.voice)
                     Text("Numbers first").tag(KeyboardLayoutPreference.numbers)
                     Text("QWERTY").tag(KeyboardLayoutPreference.qwerty)
-                    Text("Voice pad").tag(KeyboardLayoutPreference.voice)
                 }
-                Toggle("Keyboard feedback", isOn: $settings.keyboardFeedback)
+                Picker("Appearance", selection: $settings.keyboardAppearance) {
+                    ForEach(KeyboardAppearancePreference.allCases) { Text($0.title).tag($0) }
+                }
+                Toggle("Haptic feedback", isOn: $settings.keyboardFeedback)
                     .tint(Palette.toggleGreen)
                 Toggle("Vibrate when text is ready", isOn: $settings.readyHaptic)
                     .tint(Palette.toggleGreen)
-                Toggle("Interaction sounds", isOn: $settings.interactionSounds)
+                Toggle("Start and stop sounds", isOn: $settings.interactionSounds)
                     .tint(Palette.toggleGreen)
+            } header: {
+                Text("Keyboard")
+            } footer: {
+                Text("The voice keyboard needs Allow Full Access; until it's on, the keyboard shows Numbers first.")
             }
             Section("System") {
                 Toggle("Live Activities", isOn: $settings.liveActivities)

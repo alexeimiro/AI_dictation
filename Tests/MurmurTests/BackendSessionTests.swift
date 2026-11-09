@@ -308,7 +308,7 @@ struct BackendSessionTests {
         let cleanup = CleanupClient(functions: functions)
         do {
             _ = try await cleanup.clean(dictationId: UUID(), transcript: "привет всем", language: "ru-RU",
-                                        targetLanguage: "en-US", style: .casual, dictionary: [], snippets: [])
+                                        targetLanguage: "en-US", style: .verbatim, dictionary: [], snippets: [])
             Issue.record("The cleanup went through while signed out")
         } catch {
             guard case .signedOut = error else {

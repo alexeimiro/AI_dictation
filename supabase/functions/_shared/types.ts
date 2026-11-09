@@ -1,4 +1,5 @@
-export type Style = "formal" | "casual" | "veryCasual" | "excited" | "verbatim";
+/** How a dictation is written: Word for word (the default when a request names none) or Improve my grammar. */
+export type Style = "verbatim" | "grammar";
 
 export interface DictionaryEntry {
   term: string;
@@ -32,7 +33,13 @@ export interface CleanupRequest {
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 
-const STYLES: Style[] = ["formal", "casual", "veryCasual", "excited", "verbatim"];
+const STYLES: Style[] = ["verbatim", "grammar"];
+/**
+ * The styles removed in November 2026, which older builds still send ("casual" by default). Each
+ * now means Improve my grammar, the closer of the two to the cleanup it asked for; rejecting them
+ * would turn every cleanup and translation from those builds into a 400.
+ */
+const LEGACY_STYLES = ["formal", "casual", "veryCasual", "excited"];
 export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TOKEN_PATTERN = /^⟦s:[0-9a-f]{8}⟧$/;
 /** Characters a client may send as a language tag. Anything else is a 400, never prompt text. */
@@ -90,8 +97,11 @@ export function parseCleanupRequest(body: unknown): Parsed<CleanupRequest> {
   if (!language.ok) return { ok: false, error: language.error };
   const targetLanguage = normalizeLanguageTag(raw.targetLanguage);
   if (!targetLanguage.ok) return { ok: false, error: targetLanguage.error };
-  if (raw.style !== undefined && !STYLES.includes(raw.style as Style)) {
-    return { ok: false, error: "unknown style" };
+  let style: Style | undefined;
+  if (raw.style !== undefined) {
+    if (STYLES.includes(raw.style as Style)) style = raw.style as Style;
+    else if (LEGACY_STYLES.includes(raw.style as string)) style = "grammar";
+    else return { ok: false, error: "unknown style" };
   }
 
   const dictionary: DictionaryEntry[] = [];
@@ -139,7 +149,7 @@ export function parseCleanupRequest(body: unknown): Parsed<CleanupRequest> {
       // "und" can name an auto-detected source, never an output language: such a request is
       // cleaned up, and the reply's missing targetLanguage tells the app it wasn't translated.
       targetLanguage: targetLanguage.tag?.split("-")[0] === "und" ? undefined : targetLanguage.tag,
-      style: raw.style as Style | undefined,
+      style,
       dictionary,
       snippets,
     },

@@ -92,9 +92,26 @@ struct TextJoinerTests {
         let traits = InsertionTraits(contextBefore: nil, singleLine: true)
         #expect(TextJoiner.prepare(text, traits: traits) == "Things to buy: milk, eggs, bread")
     }
+
+    /// Chinese, Japanese and Thai put no space between words, or after their full-width marks.
+    @Test func noSpaceInScriptsWrittenWithoutSpaces() {
+        #expect(TextJoiner.prepare("明天见。", traits: .init(contextBefore: "好的", singleLine: false, language: "zh")) == "明天见。")
+        #expect(TextJoiner.prepare("OK", traits: .init(contextBefore: "我们明天见。", singleLine: false)) == "OK")
+        #expect(TextJoiner.prepare("また明日。", traits: .init(contextBefore: "了解です", singleLine: false, language: "ja")) == "また明日。")
+        #expect(TextJoiner.prepare("ครับ", traits: .init(contextBefore: "สวัสดี", singleLine: false, language: "th")) == "ครับ")
+        // Spaced scripts still get their space, and their own marks attach to the word before.
+        #expect(TextJoiner.prepare("Merhaba.", traits: .init(contextBefore: "Selam", singleLine: false, language: "tr")) == " Merhaba.")
+        #expect(TextJoiner.prepare("؟", traits: .init(contextBefore: "كيف حالك", singleLine: false, language: "ar")) == "؟")
+    }
 }
 
 struct LocalFormatterTests {
+    @Test func noSpaceBeforeOtherScriptsMarks() {
+        #expect(LocalFormatter().format("你好 。") == "你好。")
+        #expect(LocalFormatter().format("مرحبا ، كيف حالك ؟") == "مرحبا، كيف حالك؟")
+        #expect(LocalFormatter().format("मैं कल आऊँगा ।") == "मैं कल आऊँगा।")
+    }
+
     @Test func removesFillersAndCapitalizes() {
         let formatter = LocalFormatter()
         #expect(formatter.format("um so, uh, we should ship it") == "So, we should ship it")
@@ -132,91 +149,91 @@ struct LocalFormatterTests {
 }
 
 struct CleanupGateTests {
-    @Test func cleanSpeechSkipsTheModel() {
+    /// Word for word keeps hedges, self-corrections, repeats, numbers and lists as spoken, so none
+    /// of those is worth a model call.
+    @Test func wordForWordSkipsTheModelForWhatItKeepsAnyway() {
         for text in [
             "Can you send me the report by Friday?",
             "I think we should ship it on Monday, after the review.",
-            "At first I thought it was a bug.",
-            "Ask Valeria about iOS builds.",
-            "Можешь скинуть отчёт до пятницы? Спасибо большое!",
-            "Я думаю, что мы успеем к четвергу.",
-            "Вот этот файл надо отправить сегодня.",
-        ] {
-            #expect(!CleanupGate.needsModel(text, style: .casual), "\(text)")
-            #expect(!CleanupGate.needsModel(text, style: .formal), "\(text)")
-        }
-    }
-
-    @Test func spokenEditsNeedTheModel() {
-        for text in [
-            "Hey, can you send me the report by Friday question mark thanks",
             "Let's meet at 3, no, wait, 4 PM on Thursday.",
             "We could, like, meet tomorrow.",
             "The the meeting moved.",
-            "Reach me at john dot smith at gmail dot com.",
             "The budget got cut to twenty five thousand dollars.",
             "Things to do today: first, run the laundry, second, buy groceries.",
-            "Можешь скинуть отчёт до пятницы вопросительный знак спасибо",
+            "Можешь скинуть отчёт до пятницы? Спасибо большое!",
             "Давай в три, нет, подожди, в четыре.",
             "Ну, короче, я завтра приду.",
-            "Встречаемся в семь вечера.",
             "Во-первых, запустить стирку, во-вторых, купить продукты.",
         ] {
-            #expect(CleanupGate.needsModel(text, style: .casual), "\(text)")
+            #expect(!CleanupGate.needsModel(text, style: .verbatim), "\(text)")
         }
     }
 
-    @Test func stylesAndUnpunctuatedTextNeedTheModel() {
-        #expect(CleanupGate.needsModel("Can you send me the report by Friday?", style: .veryCasual))
-        #expect(CleanupGate.needsModel("Can you send me the report by Friday?", style: .excited))
-        #expect(CleanupGate.needsModel("can you send me the report by friday", style: .casual))
+    @Test func wordForWordNeedsTheModelForCommandsAddressesAndMissingPunctuation() {
+        for text in [
+            "Hey, can you send me the report by Friday question mark thanks",
+            "Send it today comma please.",
+            "Reach me at john dot smith at gmail dot com.",
+            "Можешь скинуть отчёт до пятницы вопросительный знак спасибо",
+            "Пиши на иван собака яндекс, пожалуйста.",
+            "can you send me the report by friday",
+            "i don't know",
+        ] {
+            #expect(CleanupGate.needsModel(text, style: .verbatim), "\(text)")
+        }
     }
 
-    @Test func wordForWordSkipsTheModelUnlessACueNeedsIt() {
-        #expect(!CleanupGate.needsModel("Can you send me the report by Friday?", style: .verbatim))
-        #expect(CleanupGate.needsModel("Send it today comma please.", style: .verbatim))
+    /// A grammar mistake doesn't show in the text, so Improve my grammar always asks the model.
+    @Test func grammarAlwaysNeedsTheModel() {
+        #expect(CleanupGate.needsModel("Can you send me the report by Friday?", style: .grammar))
+        #expect(CleanupGate.needsModel("Me and him was going to the store.", style: .grammar))
+    }
+
+    /// Recognizers punctuate CJK, Arabic and Hindi with their own marks.
+    @Test func punctuationInOtherScriptsCounts() {
+        for text in ["你明天能把报告发给我吗？谢谢。", "明日、会議があります。", "هل يمكنك إرسال التقرير؟", "मैं कल आऊँगा।", "Γεια σου\u{037E}"] {
+            #expect(!CleanupGate.needsModel(text, style: .verbatim), "\(text)")
+        }
     }
 
     @Test func cuesAreWholeWords() {
-        #expect(!CleanupGate.needsModel("Check the dashboard and the dotted line.", style: .casual))
-        #expect(!CleanupGate.needsModel("Стоит купить сорочку.", style: .casual))
+        #expect(!CleanupGate.needsModel("Check the dashboard and the dotted line.", style: .verbatim))
+        #expect(!CleanupGate.needsModel("Стоит купить сорочку.", style: .verbatim))
     }
 }
 
-struct StyleFormatterTests {
-    @Test func formalAndWordForWordKeepTheText() {
-        for style in [StylePreset.formal, .verbatim] {
-            #expect(StyleFormatter.apply(style, to: "Sounds good, see you soon.") == "Sounds good, see you soon.")
+struct StylePresetTests {
+    @Test func wordForWordComesFirstAndIsTheFallback() {
+        #expect(StylePreset.allCases == [.verbatim, .grammar])
+        #expect(StylePreset(stored: "grammar") == .grammar)
+        for removed in ["formal", "casual", "veryCasual", "excited", "shouty", ""] {
+            #expect(StylePreset(stored: removed) == .verbatim, "\(removed)")
         }
     }
 
-    @Test func casualDropsOnlyASentencesFinalPeriod() {
-        #expect(StyleFormatter.apply(.casual, to: "Sounds good. See you soon.") == "Sounds good. See you soon")
-        #expect(StyleFormatter.apply(.casual, to: "Email me at john@gmail.com.") == "Email me at john@gmail.com")
-        for text in ["Are you coming?", "Great!", "Wait...", "Wait…", "See you at 5 p.m.", "Купи хлеб, молоко и т.д."] {
-            #expect(StyleFormatter.apply(.casual, to: text) == text, "\(text)")
-        }
+    /// An IPC file or record written by an older build must not fail to decode over its style.
+    @Test func decodesARemovedStyleAsWordForWord() throws {
+        let decoded = try JSONDecoder().decode([StylePreset].self, from: Data(#"["excited","grammar"]"#.utf8))
+        #expect(decoded == [.verbatim, .grammar])
+        #expect(String(decoding: try JSONEncoder().encode([StylePreset.grammar]), as: UTF8.self) == #"["grammar"]"#)
+
+        let legacy = """
+        {"id":"\(UUID().uuidString)","requestId":"\(UUID().uuidString)","kind":"start","createdAt":0,"styleOverride":"casual"}
+        """
+        let command = try JSONDecoder().decode(KeyboardCommand.self, from: Data(legacy.utf8))
+        #expect(command.styleOverride == .verbatim)
     }
 
-    @Test func veryCasualLowercasesSentenceStartsButNotIOrNames() {
-        #expect(StyleFormatter.apply(.veryCasual, to: "Sounds good. See you soon.") == "sounds good. see you soon")
-        #expect(StyleFormatter.apply(.veryCasual, to: "I'm on my way. NASA called.") == "I'm on my way. NASA called")
-        #expect(StyleFormatter.apply(.veryCasual, to: "Are we still on for Friday?") == "are we still on for Friday?")
-        #expect(StyleFormatter.apply(.veryCasual, to: "Привет. Я дома.") == "привет. я дома")
-    }
-
-    @Test func excitedEndsWithAnExclamationMark() {
-        #expect(StyleFormatter.apply(.excited, to: "Sounds good.") == "Sounds good!")
-        #expect(StyleFormatter.apply(.excited, to: "Sounds good") == "Sounds good!")
-        #expect(StyleFormatter.apply(.excited, to: "Are you coming?") == "Are you coming?")
-        #expect(StyleFormatter.apply(.excited, to: "See you at 5 p.m.") == "See you at 5 p.m.")
-    }
-
-    /// The model already wrote the casing and the exclamations; only the final period is enforced.
-    @Test func modelOutputKeepsItsCasing() {
-        #expect(StyleFormatter.apply(.veryCasual, to: "Anna said hi.", cleaned: true) == "Anna said hi")
-        #expect(StyleFormatter.apply(.casual, to: "Sounds good.", cleaned: true) == "Sounds good")
-        #expect(StyleFormatter.apply(.excited, to: "Sounds good.", cleaned: true) == "Sounds good.")
+    @Test func settingsReadARemovedStyleAsWordForWord() throws {
+        let suite = "test.murmur.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SharedSettings(defaults: defaults)
+        #expect(settings.defaultStyle == .verbatim)
+        defaults.set("excited", forKey: "defaultStyle")
+        #expect(settings.defaultStyle == .verbatim)
+        settings.defaultStyle = .grammar
+        #expect(SharedSettings(defaults: defaults).defaultStyle == .grammar)
     }
 }
 
@@ -230,6 +247,47 @@ struct DictationLanguageTests {
         #expect(russian.shortCode == "RU")
         #expect(russian.isRussian)
         #expect(!DictationLanguage.englishUS.isRussian)
+    }
+}
+
+struct KeyboardLanguageDefaultsTests {
+    private let available = ["en-US", "ru-RU", "uk-UA", "tr-TR", "es-ES", "zh-CN", "de-DE"].map(DictationLanguage.init(tag:))
+
+    /// A language saved before Auto became the default was the old default, not a choice.
+    @Test func listensForAnyLanguageUntilTheUserPicksOne() {
+        #expect(KeyboardLanguageDefaults.source(saved: nil, autoDetectApplied: false).isAutomatic)
+        #expect(KeyboardLanguageDefaults.source(saved: "ru-RU", autoDetectApplied: false).isAutomatic)
+        #expect(KeyboardLanguageDefaults.source(saved: nil, autoDetectApplied: true).isAutomatic)
+        #expect(KeyboardLanguageDefaults.source(saved: "ru-RU", autoDetectApplied: true).tag == "ru-RU")
+        #expect(KeyboardLanguageDefaults.source(saved: "und", autoDetectApplied: true).isAutomatic)
+    }
+
+    @Test func theLettersFollowTheIPhoneUnderAuto() {
+        let russian = KeyboardLanguageDefaults.interfaceLanguage(preferred: ["ru-RU", "en-RU"], available: available)
+        #expect(russian?.tag == "ru-RU")
+        #expect(KeyboardLanguageDefaults.typingLanguage(source: .automatic, interface: russian) == "ru")
+        #expect(KeyboardLanguageDefaults.typingLanguage(source: .automatic, interface: nil) == "en")
+        #expect(KeyboardLanguageDefaults.typingLanguage(source: DictationLanguage(tag: "uk-UA"), interface: russian) == "uk")
+        #expect(KeyboardLanguageDefaults.interfaceLanguage(preferred: ["xx-YY"], available: available) == nil)
+    }
+
+    @Test func translationTypesInTheIPhonesLanguage() {
+        func target(_ source: String, phone: [String], saved: String? = nil, recent: [String] = []) -> String {
+            KeyboardLanguageDefaults.target(
+                saved: saved.map(DictationLanguage.init(tag:)), source: DictationLanguage(tag: source), preferred: phone,
+                available: available, recent: recent.map(DictationLanguage.init(tag:))).tag
+        }
+        #expect(target("und", phone: ["ru-RU"]) == "ru-RU", "Auto → Russian on a Russian iPhone")
+        #expect(target("und", phone: ["en-US"]) == "en-US")
+        #expect(target("ru-RU", phone: ["ru-RU"]) == "en-US", "Russian → English when the iPhone speaks the source")
+        #expect(target("tr-TR", phone: ["ru-RU"]) == "ru-RU")
+        // English spoken on an English iPhone: its other language, a recent one, else Spanish (not Afrikaans).
+        #expect(target("en-US", phone: ["en-US", "de-DE"]) == "de-DE")
+        #expect(target("en-US", phone: ["en-US"], recent: ["tr-TR"]) == "tr-TR")
+        #expect(target("en-US", phone: ["en-US"]) == "es-ES")
+        // A saved pick wins, unless it is the source itself.
+        #expect(target("und", phone: ["ru-RU"], saved: "tr-TR") == "tr-TR")
+        #expect(target("tr-TR", phone: ["ru-RU"], saved: "tr-TR") == "ru-RU")
     }
 }
 
@@ -265,19 +323,52 @@ struct SharedSettingsTests {
         #expect(settings.transcriberEngine == nil)
     }
 
-    @Test func readyHapticIsOnByDefaultAndTheVoiceLayoutPersists() throws {
+    @Test func readyHapticAndTheVoiceLayoutAreDefaultsAndAPickedLayoutPersists() throws {
         let suite = "test.murmur.settings.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
 
         let settings = SharedSettings(defaults: defaults)
         #expect(settings.readyHaptic)
-        #expect(settings.keyboardLayout == .numbers)
+        #expect(settings.keyboardLayout == .voice)
         settings.readyHaptic = false
-        settings.keyboardLayout = .voice
+        settings.keyboardLayout = .qwerty
         let reread = SharedSettings(defaults: defaults)
         #expect(!reread.readyHaptic)
-        #expect(reread.keyboardLayout == .voice)
+        #expect(reread.keyboardLayout == .qwerty)
+    }
+
+    @Test func keyboardAppearanceFollowsTheFieldUntilPicked() throws {
+        let suite = "test.murmur.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = SharedSettings(defaults: defaults)
+        #expect(settings.keyboardAppearance == .automatic)
+        settings.keyboardAppearance = .dark
+        #expect(SharedSettings(defaults: defaults).keyboardAppearance == .dark)
+        defaults.set("sepia", forKey: "keyboardAppearance")
+        #expect(SharedSettings(defaults: defaults).keyboardAppearance == .automatic)
+    }
+
+    @Test func keyboardDemoRoundTripsAndLapses() throws {
+        let suite = "test.murmur.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        #expect(KeyboardDemo("listening@numbers") == KeyboardDemo(state: .listening, layout: .numbers))
+        #expect(KeyboardDemo("style")?.layout == nil)
+        #expect(KeyboardDemo("listening@dvorak") == nil)
+        #expect(KeyboardDemo("dancing") == nil)
+
+        let settings = SharedSettings(defaults: defaults)
+        #expect(settings.debugKeyboardDemo == nil)
+        settings.debugKeyboardDemo = KeyboardDemo(state: .processing, layout: .voice)
+        #expect(settings.debugKeyboardDemo?.value == "processing@voice")
+        defaults.set(Date().addingTimeInterval(-1), forKey: "debugKeyboardDemoUntil")
+        #expect(settings.debugKeyboardDemo == nil)
+        settings.debugKeyboardDemo = nil
+        #expect(defaults.string(forKey: "debugKeyboardDemo") == nil)
     }
 }
 

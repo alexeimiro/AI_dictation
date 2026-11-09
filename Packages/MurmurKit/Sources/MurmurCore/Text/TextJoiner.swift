@@ -35,13 +35,24 @@ public enum TextJoiner {
             output = lowercasingLeadingCommonWord(output, rules: rules)
         }
 
-        // Spacing: separate from the previous word unless we start with closing punctuation.
+        // Spacing: separate from the previous word unless we start with closing punctuation, or
+        // either side is written without spaces (Chinese, Japanese, Thai).
         if let last = before.last, !last.isWhitespace, !rules.openingCharacters.contains(last),
-           let first = output.first, !rules.closingPunctuation.contains(first) {
+           let first = output.first, !rules.closingPunctuation.contains(first),
+           !joinsWithoutSpace(last), !joinsWithoutSpace(first) {
             output = " " + output
         }
         return output
     }
+
+    /// Scripts written without spaces between words, and the full-width punctuation that goes
+    /// with them («。», «，», «「»): nothing separates a dictation from the text around them.
+    static func joinsWithoutSpace(_ character: Character) -> Bool {
+        String(character).range(of: unspaced, options: .regularExpression) != nil
+    }
+
+    private static let unspaced =
+        #"[\p{Han}\p{Hiragana}\p{Katakana}\p{Thai}\p{Lao}\p{Khmer}\p{Myanmar}\p{Tibetan}\x{3000}-\x{303F}\x{FF00}-\x{FFEF}]"#
 
     /// Turns lines and list items into one line: "- milk\n- eggs" → "milk, eggs".
     public static func flattenToSingleLine(_ text: String) -> String {
@@ -80,7 +91,7 @@ public enum TextJoiner {
             "(", "[", "{", "\"", "'", "“", "‘", "«", "„", "‚", "/", "@", "#",
         ]
         private static let closing: Set<Character> = [
-            ",", ".", ";", ":", "!", "?", ")", "]", "}", "…", "»", "”",
+            ",", ".", ";", ":", "!", "?", ")", "]", "}", "…", "»", "”", "،", "؛", "؟", "।", "॥",
         ]
 
         static let english = Rules(openingCharacters: opening, closingPunctuation: closing, commonLeadingWords: [

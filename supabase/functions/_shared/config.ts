@@ -70,9 +70,12 @@ export interface DictateConfig {
   /** The same secrets `transcribe` reads. */
   transcribe: TranscribeConfig;
   translation: ModelConfig;
+  /** Improve my grammar in audio mode, as `cleanup` runs it. */
+  cleanup: ModelConfig;
   /**
-   * Audio mode's bound, from the start of the request: the translation gets what is left of it
-   * (at most its own deadline) and is skipped when under a second remains. Below the app's 30 s.
+   * Audio mode's bound, from the start of the request: the model call (translation or grammar)
+   * gets what is left of it (at most its own deadline) and is skipped when under a second remains.
+   * Below the app's 30 s.
    */
   deadlineMs: number;
   /** Kill switch: answers 404 dictate_disabled, so the app goes back to transcribe + cleanup. */
@@ -86,11 +89,12 @@ export interface DictateConfig {
   anonymousPerMinute: number;
 }
 
-/** `dictate`: the transcribe and translation secrets, DICTATE_DEADLINE_MS (26000) and DICTATE_DISABLED=1. */
+/** `dictate`: the transcribe, translation and cleanup secrets, DICTATE_DEADLINE_MS (26000) and DICTATE_DISABLED=1. */
 export function dictateConfig(env: Env = Deno.env): DictateConfig {
   return {
     transcribe: transcribeConfig(env),
     translation: translationConfig(env),
+    cleanup: cleanupConfig(env),
     deadlineMs: envNumber(env, "DICTATE_DEADLINE_MS", 26000),
     disabled: env.get("DICTATE_DISABLED") === "1",
     perMinute: 40,

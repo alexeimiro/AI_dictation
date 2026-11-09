@@ -41,7 +41,7 @@ private final class FinishedTranscriber: Transcriber, UtteranceTimingProviding, 
     /// Set: translates in the request that transcribes, answering this.
     var translation: Result<CleanupClient.Response, CleanupClient.Failure>?
     var timings: UtteranceTimings?
-    private(set) var translationRequest: TranslationRequest?
+    private(set) var translationRequest: ModelRequest?
 
     func prepare(micFormat: AVAudioFormat, language: ResolvedLanguage) async throws {
         currentLanguage = language
@@ -50,9 +50,9 @@ private final class FinishedTranscriber: Transcriber, UtteranceTimingProviding, 
     func beginUtterance() {}
     func append(_ buffer: AVAudioPCMBuffer) {}
     func finishUtterance() async throws -> String { "можешь скинуть отчёт до пятницы" }
-    func finishUtterance(translation request: TranslationRequest) async throws -> UtteranceOutput {
+    func finishUtterance(model request: ModelRequest?) async throws -> UtteranceOutput {
         translationRequest = request
-        return UtteranceOutput(transcript: try await finishUtterance(), translation: translation)
+        return UtteranceOutput(transcript: try await finishUtterance(), modelReply: translation)
     }
     func cancelUtterance() async {}
     func abandonUtterance() {}
@@ -91,7 +91,7 @@ struct DictationPipelineTranslationTests {
         let pipeline = DictationPipeline(cleanup: cleanup)
         let requestID = UUID()
         let dictation = ActiveDictation(
-            requestId: requestID, documentIdentifier: nil, style: .formal, language: "ru-RU",
+            requestId: requestID, documentIdentifier: nil, style: .grammar, language: "ru-RU",
             translationTargetLanguage: "tr-TR", source: .keyboard, startedAt: Date())
 
         let outcome = await pipeline.complete(
@@ -111,7 +111,7 @@ struct DictationPipelineTranslationTests {
         cleanup.failure = .unavailable("offline")
         let pipeline = DictationPipeline(cleanup: cleanup)
         let dictation = ActiveDictation(
-            requestId: UUID(), documentIdentifier: nil, style: .casual, language: "ru-RU",
+            requestId: UUID(), documentIdentifier: nil, style: .verbatim, language: "ru-RU",
             translationTargetLanguage: "tr-TR", source: .keyboard, startedAt: Date())
 
         let outcome = await pipeline.complete(
@@ -175,12 +175,15 @@ struct DictationPipelineTranslationTests {
         answer.configure(twoCalls)
         let (expected, expectedTranscript) = await translate(with: twoCalls)
 
-        let unused = TranslationCleanup()
+        // Only a translation `dictate` couldn't finish is tried again, through `cleanup`, which
+        // answers as it did for two requests.
+        let retry = TranslationCleanup()
+        answer.configure(retry)
         let transcriber = FinishedTranscriber()
         transcriber.translation = twoCalls.reply(to: "tr-TR")
-        let (result, transcript) = await translate(with: unused, transcriber: transcriber)
+        let (result, transcript) = await translate(with: retry, transcriber: transcriber)
 
-        #expect(unused.calls == 0)
+        #expect(retry.calls == (answer == .unavailable ? 1 : 0))
         #expect(result.status == expected.status)
         #expect(result.text == expected.text)
         #expect(result.message == expected.message)
@@ -197,14 +200,29 @@ struct DictationPipelineTranslationTests {
         let pipeline = DictationPipeline(cleanup: TranslationCleanup())
         let requestID = UUID()
         let dictation = ActiveDictation(
-            requestId: requestID, documentIdentifier: nil, style: .formal, language: "ru-RU",
+            requestId: requestID, documentIdentifier: nil, style: .grammar, language: "ru-RU",
             translationTargetLanguage: "tr-TR", source: .keyboard, startedAt: Date())
 
         _ = await pipeline.complete(dictation, transcriber: transcriber, audioSeconds: 2, stoppedAt: ContinuousClock.now)
 
         #expect(transcriber.translationRequest?.dictationId == requestID)
         #expect(transcriber.translationRequest?.targetLanguage == "tr-TR")
-        #expect(transcriber.translationRequest?.style == .formal)
+        #expect(transcriber.translationRequest?.style == .grammar)
+    }
+
+    /// Out of time or a model error in `dictate`: the transcript is translated through `cleanup`
+    /// instead of the keyboard saying "Couldn't translate that".
+    @Test func aTranslationDictateCouldntFinishIsRetriedThroughCleanup() async {
+        let cleanup = TranslationCleanup()
+        let transcriber = FinishedTranscriber()
+        transcriber.translation = .failure(.unavailable("dictate couldn't write the text (deadline)"))
+
+        let (result, _) = await translate(with: cleanup, transcriber: transcriber)
+
+        #expect(cleanup.calls == 1)
+        #expect(cleanup.receivedTarget == "tr-TR")
+        #expect(result.status == .cleaned)
+        #expect(result.text == "Raporu cuma gününe kadar gönderebilir misin?")
     }
 
     /// The fallback's transcript, or `transcribe`'s when `dictate` isn't there, still gets translated.
@@ -227,7 +245,7 @@ struct DictationPipelineTranslationTests {
                                      server: ServerTiming(transcribeMs: 800, modelMs: 700))],
             cloudTranscript: true)
         let dictation = ActiveDictation(
-            requestId: UUID(), documentIdentifier: nil, style: .casual, language: "ru-RU",
+            requestId: UUID(), documentIdentifier: nil, style: .verbatim, language: "ru-RU",
             translationTargetLanguage: "tr-TR", source: .keyboard, startedAt: Date())
 
         let outcome = await DictationPipeline(cleanup: TranslationCleanup()).complete(
@@ -248,7 +266,7 @@ struct DictationPipelineTranslationTests {
                            transcriber: FinishedTranscriber = FinishedTranscriber()) async -> (DictationResult, Transcript) {
         let pipeline = DictationPipeline(cleanup: cleanup)
         let dictation = ActiveDictation(
-            requestId: UUID(), documentIdentifier: nil, style: .casual, language: "ru-RU",
+            requestId: UUID(), documentIdentifier: nil, style: .verbatim, language: "ru-RU",
             translationTargetLanguage: "tr-TR", source: .keyboard, startedAt: Date())
         let outcome = await pipeline.complete(
             dictation, transcriber: transcriber, audioSeconds: 2,

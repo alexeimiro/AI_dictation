@@ -42,7 +42,7 @@ struct EdgeFunctionClientTests {
     private func clean(with functions: EdgeFunctionClient) async throws(CleanupClient.Failure) -> CleanupClient.Response {
         try await CleanupClient(functions: functions).clean(
             dictationId: UUID(), transcript: "привет всем", language: "ru-RU", targetLanguage: "en-US",
-            style: .casual, dictionary: [], snippets: [])
+            style: .verbatim, dictionary: [], snippets: [])
     }
 
     /// `CleanupClient.Failure` isn't Equatable; its description is enough to tell the cases apart.

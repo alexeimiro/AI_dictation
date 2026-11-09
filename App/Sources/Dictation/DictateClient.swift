@@ -1,23 +1,35 @@
 import Foundation
 import MurmurCore
 
-/// What `dictate` needs to translate a dictation in the request that transcribes it.
-struct TranslationRequest: Sendable {
+/// What `dictate` needs to have the model write a dictation's text in the request that
+/// transcribes it: its translation (`targetLanguage`), or, with no target, its grammar improved.
+struct ModelRequest: Sendable {
     /// The dictation's `requestId`: its usage is counted once, however often it's sent.
     let dictationId: UUID
-    let targetLanguage: String
+    /// Nil for Improve my grammar in the spoken language.
+    let targetLanguage: String?
     let style: StylePreset
     let dictionary: [DictionaryTerm]
     let snippets: [SnippetDefinition]
 }
 
-/// A dictation transcribed and translated in one `dictate` request.
+/// A dictation transcribed and written (translated, or its grammar improved) in one `dictate` request.
 struct DictateReply: Sendable {
     let transcript: String
-    /// The translation as `cleanup` answers one. `.unavailable` when the function kept the
-    /// transcript but couldn't translate it (an OpenAI error, or out of time).
-    let translation: Result<CleanupClient.Response, CleanupClient.Failure>
+    /// The languages the transcription heard, first the main one (ISO 639-1); empty when unsure.
+    let languages: [String]
+    /// The model's text as `cleanup` answers it. `.unavailable` when the function kept the
+    /// transcript but couldn't write it (an OpenAI error, or out of time).
+    let modelReply: Result<CleanupClient.Response, CleanupClient.Failure>
     let timing: RequestTiming
+
+    init(transcript: String, languages: [String] = [],
+         modelReply: Result<CleanupClient.Response, CleanupClient.Failure>, timing: RequestTiming) {
+        self.transcript = transcript
+        self.languages = languages
+        self.modelReply = modelReply
+        self.timing = timing
+    }
 }
 
 /// How a warm-up went, for `BackendWarmup`.
@@ -41,13 +53,13 @@ protocol Dictating: AnyObject, Sendable {
     /// `language`: BCP-47 tag of the dictation, nil to detect it; `keywords`: personal dictionary
     /// terms. Throws `.notDeployed` on a 404, and when unavailable.
     func dictate(audio: Data, format: EncodedAudio.Format, language: String?, keywords: [String],
-                 translation: TranslationRequest) async throws(CloudTranscriptionError) -> DictateReply
+                 request: ModelRequest) async throws(CloudTranscriptionError) -> DictateReply
     func warm() async -> WarmupResult
 }
 
-/// Calls the `dictate` Edge Function: a translation's audio goes up once, and the function
-/// transcribes and translates it on one worker, instead of `transcribe` then `cleanup` (two
-/// round trips, each checking the token and the limits). A 404 (not deployed, or switched off
+/// Calls the `dictate` Edge Function: a translated or Improve my grammar dictation's audio goes
+/// up once, and the function transcribes and writes it on one worker, instead of `transcribe`
+/// then `cleanup` (two round trips, each checking the token and the limits). A 404 (not deployed, or switched off
 /// with `DICTATE_DISABLED`) turns it off until the app restarts, and dictations go back to those two.
 @MainActor
 final class DictateClient: Dictating {
@@ -57,7 +69,8 @@ final class DictateClient: Dictating {
         let format: String
         let language: String?
         let keywords: [String]
-        let targetLanguage: String
+        /// Left out for Improve my grammar.
+        let targetLanguage: String?
         let style: String
         let dictionary: [CleanupClient.Entry]
         let snippets: [CleanupClient.Snippet]
@@ -66,6 +79,7 @@ final class DictateClient: Dictating {
     /// The reply's transcription; the rest of it is `cleanup`'s reply.
     private struct Transcription: Decodable {
         let transcript: String?
+        let languages: [String]?
     }
 
     /// A warm-up's reply names its worker beside `timings`, not in them.
@@ -96,13 +110,13 @@ final class DictateClient: Dictating {
     var isAvailable: Bool { functions != nil && deployed && settings.translateInOneRequest }
 
     func dictate(audio: Data, format: EncodedAudio.Format, language: String?, keywords: [String],
-                 translation: TranslationRequest) async throws(CloudTranscriptionError) -> DictateReply {
+                 request: ModelRequest) async throws(CloudTranscriptionError) -> DictateReply {
         guard let functions, isAvailable else { throw .notDeployed }
         let metadata = Metadata(
-            dictationId: translation.dictationId, format: format.rawValue, language: language,
-            keywords: Array(keywords.prefix(100)), targetLanguage: translation.targetLanguage,
-            style: translation.style.rawValue, dictionary: CleanupClient.Entry.wire(translation.dictionary),
-            snippets: CleanupClient.Snippet.wire(translation.snippets))
+            dictationId: request.dictationId, format: format.rawValue, language: language,
+            keywords: Array(keywords.prefix(100)), targetLanguage: request.targetLanguage,
+            style: request.style.rawValue, dictionary: CleanupClient.Entry.wire(request.dictionary),
+            snippets: CleanupClient.Snippet.wire(request.snippets))
         var body = MultipartBody()
         do {
             body.appendField(name: "metadata", contentType: "application/json", try JSONEncoder().encode(metadata))
@@ -114,12 +128,13 @@ final class DictateClient: Dictating {
             // The header lets the function check the token and the limits while the audio uploads.
             let reply = try await functions.send(
                 "dictate", payload: body.finalized(), contentType: body.contentType,
-                extraHeaders: ["x-murmur-dictation": translation.dictationId.uuidString], timeout: timeout)
+                extraHeaders: ["x-murmur-dictation": request.dictationId.uuidString], timeout: timeout)
             lastReplyAt = .now
             let decoder = JSONDecoder()
-            let transcript = try decoder.decode(Transcription.self, from: reply.data).transcript ?? ""
+            let transcription = try decoder.decode(Transcription.self, from: reply.data)
             let response = try decoder.decode(CleanupClient.Response.self, from: reply.data)
-            return DictateReply(transcript: transcript, translation: Self.translation(response), timing: reply.timing)
+            return DictateReply(transcript: transcription.transcript ?? "", languages: transcription.languages ?? [],
+                                modelReply: Self.modelReply(response), timing: reply.timing)
         } catch EdgeFunctionError.httpError(code: 404) {
             deployed = false
             throw .notDeployed
@@ -155,11 +170,11 @@ final class DictateClient: Dictating {
         }
     }
 
-    /// "unavailable": the transcript came back without its translation, and nothing was counted.
-    private static func translation(_ response: CleanupClient.Response)
+    /// "unavailable": the transcript came back without its text, and nothing was counted.
+    private static func modelReply(_ response: CleanupClient.Response)
         -> Result<CleanupClient.Response, CleanupClient.Failure> {
         guard response.status == "unavailable" else { return .success(response) }
-        return .failure(.unavailable("dictate couldn't translate (\(response.reason ?? "no reason given"))"))
+        return .failure(.unavailable("dictate couldn't write the text (\(response.reason ?? "no reason given"))"))
     }
 }
 

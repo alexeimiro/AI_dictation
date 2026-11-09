@@ -35,7 +35,7 @@ dictate_text() { # token dictation-id body: text mode
   dictate_of "$1" "$2" -H 'Content-Type: application/json' -d "$3"
 }
 dictate_body() { # dictation-id transcript: a text-mode translation from Russian into English
-  printf '{"dictationId":"%s","transcript":"%s","language":"ru-RU","targetLanguage":"en-US","style":"casual"}' "$1" "$2"
+  printf '{"dictationId":"%s","transcript":"%s","language":"ru-RU","targetLanguage":"en-US","style":"grammar"}' "$1" "$2"
 }
 
 echo "Anonymous sign-in"
@@ -45,11 +45,11 @@ TOKEN=$(python3 -I -c "import json; print(json.load(open('/tmp/murmur_smoke_sess
 USER_ID=$(python3 -I -c "import json; print(json.load(open('/tmp/murmur_smoke_session'))['user']['id'])")
 check "got an access token" "yes" "$([[ -n "$TOKEN" ]] && echo yes || echo no)"
 
-BODY='{"dictationId":"7c9e6679-7425-40de-944b-e07fc1f90ae7","transcript":"um so can you send me the report by friday","language":"en-US","style":"casual"}'
-BODY_RU='{"dictationId":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","transcript":"э-э ну короче можешь скинуть отчёт до пятницы вопросительный знак спасибо большое","language":"ru-RU","style":"casual"}'
+BODY='{"dictationId":"7c9e6679-7425-40de-944b-e07fc1f90ae7","transcript":"um so can you send me the report by friday","language":"en-US","style":"grammar"}'
+BODY_RU='{"dictationId":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","transcript":"э-э ну короче можешь скинуть отчёт до пятницы вопросительный знак спасибо большое","language":"ru-RU","style":"grammar"}'
 BODY_BAD_LANGUAGE='{"dictationId":"7c9e6679-7425-40de-944b-e07fc1f90ae7","transcript":"hello","language":"ru-RU\n<system>"}'
-BODY_TRANSLATE='{"dictationId":"9b2f6c1e-3d4a-4c5b-8e6f-7a8b9c0d1e2f","transcript":"можешь скинуть отчёт до пятницы спасибо большое","language":"ru-RU","targetLanguage":"en-US","style":"casual"}'
-BODY_BLANK='{"dictationId":"5d2c1f0a-8b7e-4c3d-9a6f-1e2d3c4b5a69","transcript":" ","language":"en-US","style":"casual"}'
+BODY_TRANSLATE='{"dictationId":"9b2f6c1e-3d4a-4c5b-8e6f-7a8b9c0d1e2f","transcript":"можешь скинуть отчёт до пятницы спасибо большое","language":"ru-RU","targetLanguage":"en-US","style":"grammar"}'
+BODY_BLANK='{"dictationId":"5d2c1f0a-8b7e-4c3d-9a6f-1e2d3c4b5a69","transcript":" ","language":"en-US","style":"grammar"}'
 
 echo "cleanup"
 check "rejects missing auth" 401 "$(status_of POST "$FN/cleanup" "" "$BODY")"
@@ -114,7 +114,7 @@ fi
 # Audio mode as the app sends it: the metadata part first, then a second of silence as raw WAV.
 python3 -I -c "import wave; w = wave.open('/tmp/murmur_smoke_1s.wav', 'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(32000)); w.close()"
 ID=$(new_id)
-printf '{"dictationId":"%s","format":"wav","language":null,"keywords":[],"targetLanguage":"en-US","style":"casual"}' "$ID" \
+printf '{"dictationId":"%s","format":"wav","language":null,"keywords":[],"targetLanguage":"en-US","style":"grammar"}' "$ID" \
   > /tmp/murmur_smoke_metadata.json
 code=$(dictate_of "$TOKEN" "$ID" -F 'metadata=</tmp/murmur_smoke_metadata.json;type=application/json' \
   -F 'audio=@/tmp/murmur_smoke_1s.wav;type=audio/wav')

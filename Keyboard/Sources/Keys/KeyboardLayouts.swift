@@ -125,15 +125,15 @@ enum KeyboardLayouts {
         return row
     }
 
-    /// The voice pad's compact typing row: space and return only. Delete sits beside the talk
-    /// button in the main pad.
+    /// The voice keyboard's typing row: space and a wide return, as in Anton's mock. Delete sits in
+    /// the toolbar.
     private static func voiceRow(showsGlobe: Bool, returnTitle: String) -> [KeySpec] {
         var row: [KeySpec] = []
         if showsGlobe {
-            row.append(KeySpec(action: .globe, systemImage: "globe", weight: 1.1, style: .function))
+            row.append(KeySpec(action: .globe, systemImage: "globe", weight: 1.25, style: .function))
         }
-        row.append(KeySpec(action: .space, label: "space", weight: showsGlobe ? 6.8 : 7.9))
-        row.append(KeySpec(action: .returnKey, label: returnTitle, weight: 2.1, style: .returnKey))
+        row.append(KeySpec(action: .space, label: "space", weight: showsGlobe ? 6.25 : 7.5))
+        row.append(KeySpec(action: .returnKey, label: returnTitle, weight: 2.5, style: .returnKey))
         return row
     }
 

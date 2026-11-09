@@ -12,9 +12,8 @@ final class KeyButton: UIControl {
         super.init(frame: .zero)
         isExclusiveTouch = true
         background.isUserInteractionEnabled = false
-        background.layer.cornerRadius = 10
+        background.layer.cornerRadius = 12
         background.layer.cornerCurve = .continuous
-        background.layer.borderWidth = 0.6
         addSubview(background)
 
         titleLabel.textAlignment = .center
@@ -35,7 +34,7 @@ final class KeyButton: UIControl {
             let isCharacter = spec.style == .character && label.count == 1
             titleLabel.font = isCharacter
                 ? .systemFont(ofSize: 23, weight: .regular)
-                : .systemFont(ofSize: 15, weight: .medium)
+                : .systemFont(ofSize: 16, weight: spec.style == .returnKey ? .medium : .regular)
         }
         if let systemImage = spec.systemImage {
             iconView.image = UIImage(systemName: systemImage,
@@ -73,6 +72,8 @@ final class KeyButton: UIControl {
         iconView.frame = inset
     }
 
+    /// The mock's keys: white (graphite) letters, grey function keys and an ink return key, each
+    /// with a 1 pt hard shadow. Increase Contrast adds a hairline.
     private func updateColors() {
         let base: UIColor
         switch spec.style {
@@ -81,20 +82,21 @@ final class KeyButton: UIControl {
         case .function:
             base = KeyboardChrome.functionKeyUIColor
         case .returnKey:
-            base = KeyboardChrome.accentUIColor
+            base = KeyboardChrome.returnKeyUIColor
         }
         let highlighted = spec.style == .returnKey
-            ? KeyboardChrome.accentUIColor.withAlphaComponent(0.72)
+            ? KeyboardChrome.returnKeyUIColor.withAlphaComponent(0.72)
             : KeyboardChrome.pressedKeyUIColor
         background.backgroundColor = isHighlighted ? highlighted : base
-        let foreground = spec.style == .returnKey ? KeyboardChrome.accentGlyphUIColor : UIColor.label
+        let foreground = spec.style == .returnKey ? KeyboardChrome.returnGlyphUIColor : UIColor.label
         titleLabel.textColor = foreground
         iconView.tintColor = foreground
+        background.layer.borderWidth = traitCollection.accessibilityContrast == .high ? 1 : 0
         background.layer.borderColor = KeyboardChrome.borderUIColor.resolvedColor(with: traitCollection).cgColor
-        background.layer.shadowColor = UIColor.black.cgColor
-        background.layer.shadowOpacity = traitCollection.userInterfaceStyle == .dark ? 0.22 : 0.13
-        background.layer.shadowOffset = CGSize(width: 0, height: isHighlighted ? 0.5 : 1.5)
-        background.layer.shadowRadius = isHighlighted ? 0.5 : 1.5
+        background.layer.shadowColor = KeyboardChrome.keyShadowUIColor.resolvedColor(with: traitCollection).cgColor
+        background.layer.shadowOpacity = 1
+        background.layer.shadowOffset = CGSize(width: 0, height: isHighlighted ? 0 : 1)
+        background.layer.shadowRadius = 0
     }
 
     private static func accessibilityLabel(for spec: KeySpec) -> String {
@@ -152,11 +154,28 @@ final class KeyGridView: UIView {
                 return button
             }
         }
+        if !typingEnabled { applyTypingEnabled() }
         setNeedsLayout()
     }
 
     override var intrinsicContentSize: CGSize {
         CGSize(width: UIView.noIntrinsicMetric, height: rowHeight * 4 + 8)
+    }
+
+    /// Off while a dictation runs: the typing keys dim and stop responding (return could send a
+    /// message before the text lands). The globe stays live, as iOS expects.
+    var typingEnabled = true {
+        didSet {
+            if typingEnabled != oldValue { applyTypingEnabled() }
+        }
+    }
+
+    private func applyTypingEnabled() {
+        for button in rows.joined() where button.spec.action != .globe {
+            button.isEnabled = typingEnabled
+            button.isUserInteractionEnabled = typingEnabled
+            button.alpha = typingEnabled ? 1 : 0.4
+        }
     }
 
     override func layoutSubviews() {

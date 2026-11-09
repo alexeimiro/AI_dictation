@@ -278,6 +278,20 @@ final class SessionController {
     private func addFallback(_ language: ResolvedLanguage) {
         onDeviceFallbacks[language.tag] = language
         (transcriber as? OpenAITranscriber)?.addFallbackLanguage(language)
+        updateAutomaticFallback()
+    }
+
+    /// Under Auto-detect only the cloud knows the language, so a failed request is covered by a
+    /// guess: the last automatic dictation's language, else the phone's, else the primary, whichever
+    /// has an installed model. None installed: no fallback under Auto.
+    private func updateAutomaticFallback() {
+        guard let cloud = transcriber as? OpenAITranscriber else { return }
+        let guesses = [settings.lastDetectedLanguage, Locale.preferredLanguages.first, primaryTag].compactMap { $0 }
+        let installed = guesses.lazy.compactMap { tag in
+            let code = DictationLanguage(normalizing: tag).languageCode
+            return self.onDeviceFallbacks.values.first { $0.language.languageCode == code }
+        }.first
+        cloud.setAutomaticFallback(installed)
     }
 
     /// In the cloud, the installed on-device model covers failed requests. Finding and preparing
@@ -294,6 +308,7 @@ final class SessionController {
                 addFallback(onDevice)
             }
             guard !Task.isCancelled, self.transcriber === cloud else { return }
+            updateAutomaticFallback()
             await cloud.prepareFallback()
             engineName = cloud.displayName
         }
@@ -443,6 +458,11 @@ final class SessionController {
             return false
         }
         let language: ResolvedLanguage
+        // The keyboard asks for Auto-detect by default; on-device recognition needs a language,
+        // so it listens in the primary one.
+        let languageOverride = languageOverride.flatMap { tag in
+            !usesCloud && DictationLanguage(tag: tag).isAutomatic ? nil : tag
+        }
         if let languageOverride, languageOverride != primaryTag {
             if let ready = languages[languageOverride] {
                 language = ready
@@ -455,9 +475,7 @@ final class SessionController {
                 let name = requested.localizedName
                 logger.notice("Dictation in \(languageOverride, privacy: .public) requested before its model is ready")
                 rejectDictation(requestId: requestId, documentIdentifier: documentIdentifier, language: languageOverride,
-                                message: requested.isAutomatic
-                                    ? "Automatic language detection needs cloud transcription. Choose a source language instead."
-                                    : "\(name) is still being set up in Murmur. Try again in a moment.")
+                                message: "\(name) is still being set up in Murmur. Try again in a moment.")
                 prepareSecondaryLanguage()
                 return false
             }
@@ -471,6 +489,8 @@ final class SessionController {
         if transcriber.currentLanguage != language {
             transcriber.setLanguage(language)
         }
+        // The last Auto-detect dictation may have been in another language.
+        if language.language.isAutomatic { updateAutomaticFallback() }
         idleTask?.cancel()
         transcriber.beginUtterance()
         audio.openGate()
@@ -483,7 +503,8 @@ final class SessionController {
         transport.post(.stateChanged)
         playSound(.start)
         // After the acknowledgement: nothing here may delay it.
-        warmup?.dictationDidStart(requestId, translating: translationTargetLanguage != nil && usesCloud)
+        let usesDictate = translationTargetLanguage != nil || (style ?? settings.defaultStyle) == .grammar
+        warmup?.dictationDidStart(requestId, usesDictate: usesDictate && usesCloud)
         liveActivity.update(.recording, since: Date())
         capTask?.cancel()
         capTask = Task { [weak self] in
@@ -707,6 +728,12 @@ final class SessionController {
         case .recording(let requestId):
             guard let dictation = active, dictation.source == .keyboard else { return }
             let status = transport.payloads.readKeyboardStatus()
+            // The keyboard left it running (the screen locked, another app): it records on until
+            // the keyboard is back, the cap, or the Lock Screen's Stop.
+            if status?.awayRequestId == requestId {
+                if active?.keyboardAttachedAt == nil { active?.keyboardAttachedAt = status?.lastSeenAt }
+                return
+            }
             let heartbeat = status?.listeningRequestId == requestId ? status?.listeningHeartbeatAt : nil
             guard let attachedAt = dictation.keyboardAttachedAt else {
                 // Started before the keyboard was back (after it opened the app), or just now.

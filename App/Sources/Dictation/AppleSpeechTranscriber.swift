@@ -154,7 +154,7 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
     }
 
     /// On-device, the transcript alone: the pipeline translates it.
-    func finishUtterance(translation: TranslationRequest) async throws -> UtteranceOutput {
+    func finishUtterance(model request: ModelRequest?) async throws -> UtteranceOutput {
         UtteranceOutput(transcript: try await finishUtterance())
     }
 

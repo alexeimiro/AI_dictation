@@ -22,6 +22,7 @@ import {
   buildUserContext,
   CLEANUP_RULES,
   describeLanguage,
+  genericLanguageRules,
   LANGUAGE_RULES,
   resolveLanguage,
   TRANSLATION_RULES,
@@ -43,7 +44,7 @@ const request: CleanupRequest = {
   dictationId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
   transcript: "um so can you send me the report by friday",
   language: "en-US",
-  style: "casual",
+  style: "grammar",
   dictionary: [{ term: "Valerio", misspelling: "valeria" }, { term: "iOS" }],
   snippets: [{ token: "⟦s:1a2b3c4d⟧", trigger: "my calendar link" }],
 };
@@ -52,7 +53,7 @@ const russianRequest: CleanupRequest = {
   dictationId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
   transcript: "э-э ну короче можешь скинуть отчёт до пятницы вопросительный знак спасибо большое",
   language: "ru-RU",
-  style: "casual",
+  style: "grammar",
 };
 
 // A signal that never fires: the deadline default (`AbortSignal.timeout`) would leave a timer
@@ -166,7 +167,7 @@ Deno.test("a translation gets the translation prompt, not the cleanup rules and 
   assertEquals(outcome.status, "cleaned");
   assertEquals(outcome.text, "Raporu cuma gününe kadar gönderebilir misin? Çok teşekkürler!");
   const body = captured.body!;
-  const source = resolveLanguage("ru-RU", russianRequest.transcript);
+  const source = resolveLanguage("ru-RU");
   assertEquals(body.instructions, [TRANSLATION_RULES, buildTranslationContext(translationRequest, source)].join("\n\n"));
   assertEquals(body.prompt_cache_key, "murmur-translate");
   assertEquals(body.input, [{ role: "user", content: buildTranslationMessage(russianRequest.transcript, "tr-TR") }]);
@@ -200,21 +201,21 @@ Deno.test("a translation that comes back in the spoken language is rejected as u
 Deno.test("translation context: the language pair, the target's style, the dictionary", () => {
   const auto = buildTranslationContext(
     { ...translationRequest, language: undefined },
-    resolveLanguage(undefined, russianRequest.transcript),
+    resolveLanguage(undefined),
   );
   assertStringIncludes(auto, "Source language: not given; it is whatever language the transcript is in.");
 
   // The style is the target language's: the output is written in it.
-  const intoRussian = buildTranslationContext({ ...request, targetLanguage: "ru-RU", style: "veryCasual" }, resolveLanguage("en-US"));
-  assertStringIncludes(intoRussian, "Style: " + LANGUAGE_RULES.ru.styles.veryCasual);
+  const intoRussian = buildTranslationContext({ ...request, targetLanguage: "ru-RU", style: "grammar" }, resolveLanguage("en-US"));
+  assertStringIncludes(intoRussian, "Style: " + LANGUAGE_RULES.ru.styles.grammar);
   const intoEnglish = buildTranslationContext(
-    { ...russianRequest, targetLanguage: "en-US", style: "veryCasual" },
+    { ...russianRequest, targetLanguage: "en-US", style: "grammar" },
     resolveLanguage("ru-RU"),
   );
-  assertStringIncludes(intoEnglish, "Style: " + LANGUAGE_RULES.en.styles.veryCasual);
-  assertFalse(intoEnglish.includes("«я»"), "a Russian style rule must not reach an English translation");
-  const intoTurkish = buildTranslationContext({ ...translationRequest, style: "formal" }, resolveLanguage("ru-RU"));
-  assertStringIncludes(intoTurkish, "Style: " + TRANSLATION_STYLES.formal);
+  assertStringIncludes(intoEnglish, "Style: " + LANGUAGE_RULES.en.styles.grammar);
+  assertFalse(intoEnglish.includes("case endings"), "a Russian style rule must not reach an English translation");
+  const intoTurkish = buildTranslationContext({ ...translationRequest, style: "grammar" }, resolveLanguage("ru-RU"));
+  assertStringIncludes(intoTurkish, "Style: " + TRANSLATION_STYLES.grammar);
 
   const intoGerman = buildTranslationContext({ ...request, targetLanguage: "de-DE" }, resolveLanguage("en-US"));
   assertStringIncludes(intoGerman, "Valerio ← valeria");
@@ -452,11 +453,49 @@ Deno.test("language resolution from tags", () => {
     assertEquals(resolved.rules, LANGUAGE_RULES.ru);
   }
   assertEquals(resolveLanguage("en-US").key, "en");
-  assertEquals(resolveLanguage("de-DE"), { key: "en", tag: "de-DE", rules: LANGUAGE_RULES.en });
-  assertEquals(resolveLanguage(undefined), { key: "en", tag: null, rules: LANGUAGE_RULES.en });
-  assertEquals(resolveLanguage("und", russianRequest.transcript), {
-    key: "ru", tag: null, rules: LANGUAGE_RULES.ru,
-  });
+  assertEquals(resolveLanguage("en-GB").rules, LANGUAGE_RULES.en);
+  // Every other language used to get the English pack ("The transcript is English dictation").
+  assertEquals(resolveLanguage("de-DE"), { key: "de", tag: "de-DE", rules: genericLanguageRules("de-DE") });
+  // Auto-detect from a build that doesn't send the detected language: keep whatever was spoken.
+  assertEquals(resolveLanguage(undefined), { key: "auto", tag: null, rules: genericLanguageRules(null) });
+  assertEquals(resolveLanguage("und"), { key: "auto", tag: null, rules: genericLanguageRules(null) });
+});
+
+Deno.test("every other language gets a pack named after it, shared by its regions", () => {
+  const turkish = resolveLanguage("tr-TR").rules;
+  assertEquals(turkish.key, "tr");
+  assertEquals(turkish.name, "Turkish");
+  assertStringIncludes(turkish.rules, "The transcript is Turkish dictation. Keep it Turkish: never translate it");
+  assertEquals(buildLanguageBlock(turkish), buildLanguageBlock(resolveLanguage("tr").rules), "tr and tr-TR share a cached block");
+  assertEquals(turkish.examples, []);
+  assertStringIncludes(turkish.styles.grammar, "following the grammar of Turkish");
+  assertStringIncludes(turkish.styles.verbatim, "Keep every word the speaker said");
+
+  // Ukrainian is Cyrillic, and must never be told to stay Russian.
+  const ukrainian = buildLanguageBlock(resolveLanguage("uk-UA").rules);
+  assertStringIncludes(ukrainian, "Keep it Ukrainian");
+  assertFalse(ukrainian.includes("Russian"));
+  assertEquals(resolveLanguage("zh-Hant-TW").rules.name, "Traditional Chinese");
+  assertEquals(resolveLanguage("zh-CN").key, "zh");
+
+  const auto = buildLanguageBlock(resolveLanguage(undefined).rules);
+  assert(auto.startsWith('<language key="auto" name="Detected from the transcript">'), auto);
+  assertStringIncludes(auto, "Keep the output in that language");
+  assertFalse(/English|Russian/.test(auto), "the auto pack names no language");
+  assertFalse(/\$\{|\d{4}-\d{2}-\d{2}/.test(buildLanguageBlock(turkish)), "no volatile content in the cached prefix");
+});
+
+Deno.test("a Turkish cleanup is cached and logged as Turkish", async () => {
+  const captured: Captured = {};
+  const outcome = await runCleanup(
+    { ...request, transcript: "yarın toplantıya gelemiyorum çünkü hastayım", language: "tr-TR" },
+    options(fakeFetch(reply("Yarın toplantıya gelemiyorum, çünkü hastayım."), captured)),
+  );
+  assertEquals(outcome.status, "cleaned");
+  assertEquals(outcome.language, "tr");
+  assertEquals(captured.body!.prompt_cache_key, "murmur-cleanup-tr");
+  assertStringIncludes(captured.body!.instructions as string, "Keep it Turkish");
+  assertFalse((captured.body!.instructions as string).includes("The transcript is English dictation"));
 });
 
 Deno.test("the language block is byte-identical for every user of a language", () => {
@@ -466,7 +505,7 @@ Deno.test("the language block is byte-identical for every user of a language", (
     ...russianRequest,
     dictationId: "11111111-2222-4333-8444-555555555555",
     transcript: "совсем другой текст",
-    style: "formal",
+    style: "verbatim",
     dictionary: [{ term: "Яндекс", misspelling: "индекс" }],
     snippets: [{ token: "⟦s:1a2b3c4d⟧", trigger: "моя ссылка" }],
   }, ru);
@@ -490,14 +529,26 @@ Deno.test("the language block is byte-identical for every user of a language", (
 
 Deno.test("Russian styles replace English ones", () => {
   const ru = resolveLanguage("ru-RU");
-  const veryCasual = buildUserContext({ ...russianRequest, style: "veryCasual" }, ru);
-  assertStringIncludes(veryCasual, "Style: " + LANGUAGE_RULES.ru.styles.veryCasual);
-  assertStringIncludes(veryCasual, "«я» stays lowercase");
-  assertFalse(veryCasual.includes('"I"'), "the English capital-I rule must not reach Russian users");
-  const formal = buildUserContext({ ...russianRequest, style: "formal" }, ru);
-  assertStringIncludes(formal, "«Вы»");
-  const english = buildUserContext({ ...request, style: "veryCasual" }, resolveLanguage("en-US"));
-  assertStringIncludes(english, LANGUAGE_RULES.en.styles.veryCasual);
+  const grammar = buildUserContext({ ...russianRequest, style: "grammar" }, ru);
+  assertStringIncludes(grammar, "Style: " + LANGUAGE_RULES.ru.styles.grammar);
+  assertStringIncludes(grammar, "case endings");
+  assertFalse(grammar.includes("me and him"), "the English example must not reach Russian users");
+  const english = buildUserContext({ ...request, style: "grammar" }, resolveLanguage("en-US"));
+  assertStringIncludes(english, LANGUAGE_RULES.en.styles.grammar);
+});
+
+Deno.test("improve my grammar fixes grammar and changes nothing else", () => {
+  for (const pack of [LANGUAGE_RULES.en, LANGUAGE_RULES.ru, genericLanguageRules("tr-TR"), genericLanguageRules(null)]) {
+    assertStringIncludes(pack.styles.grammar, "make the text grammatically correct and change nothing else", pack.key);
+    assertStringIncludes(pack.styles.grammar, "leave a correct sentence exactly as it is", pack.key);
+    assertStringIncludes(pack.styles.grammar, "never make the text more formal", pack.key);
+  }
+  assertStringIncludes(TRANSLATION_STYLES.grammar, "natural, grammatical text in the target language");
+  // The removed styles are gone from every pack.
+  for (const styles of [LANGUAGE_RULES.en.styles, LANGUAGE_RULES.ru.styles, TRANSLATION_STYLES]) {
+    assertEquals(Object.keys(styles).sort(), ["grammar", "verbatim"]);
+  }
+  assertFalse(CLEANUP_RULES.includes("more formal than the requested style"));
 });
 
 Deno.test("word for word style keeps the speaker's words and translates literally", () => {
@@ -558,6 +609,11 @@ Deno.test("request validation", () => {
   assertFalse(parseCleanupRequest({ ...request, transcript: 42 }).ok);
   assertFalse(parseCleanupRequest({ ...request, transcript: "x".repeat(20_001) }).ok);
   assertFalse(parseCleanupRequest({ ...request, style: "shouty" }).ok);
+  // Builds from before November 2026 send the removed styles ("casual" by default).
+  for (const legacy of ["formal", "casual", "veryCasual", "excited"]) {
+    const parsed = parseCleanupRequest({ ...request, style: legacy });
+    assert(parsed.ok && parsed.value.style === "grammar", legacy);
+  }
   assertFalse(parseCleanupRequest({ ...request, snippets: [{ token: "{s:1}", trigger: "x" }] }).ok);
   assertFalse(parseCleanupRequest({ ...request, dictionary: [{ term: "" }] }).ok);
   for (const language of ["ru", "ru_RU", "zh-Hans-CN", "en-001"]) {
@@ -587,7 +643,7 @@ Deno.test("user context lists style, dictionary and snippets deterministically",
   const en = resolveLanguage("en-US");
   const context = buildUserContext(request, en);
   assert(context.includes("Language: en-US"));
-  assert(context.includes("Casual:"));
+  assert(context.includes("Style: Improve my grammar:"));
   assert(context.includes("Valerio ← valeria"));
   assert(context.includes("\niOS\n"));
   assert(context.includes('⟦s:1a2b3c4d⟧ — trigger phrase: "my calendar link"'));
@@ -595,6 +651,7 @@ Deno.test("user context lists style, dictionary and snippets deterministically",
   assertEquals(reordered, context);
   const minimal = buildUserContext({ dictationId: request.dictationId, transcript: "hi" }, resolveLanguage());
   assertStringIncludes(minimal, "Language: auto (");
+  assertStringIncludes(minimal, "Style: Word for word:", "a request without a style is Word for word");
   assertFalse(minimal.includes("<dictionary>"));
   assertFalse(minimal.includes("<snippets>"));
 });

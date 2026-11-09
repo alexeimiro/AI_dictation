@@ -55,7 +55,15 @@ enum CloudTranscriptionError: LocalizedError, Equatable {
 /// A cloud transcript, and how its request went (nil from a fake).
 struct CloudTranscript: Sendable {
     let text: String
+    /// The languages OpenAI heard, first the main one (ISO 639-1: "tr"); empty when it couldn't tell.
+    let languages: [String]
     let timing: RequestTiming?
+
+    init(text: String, languages: [String] = [], timing: RequestTiming?) {
+        self.text = text
+        self.languages = languages
+        self.timing = timing
+    }
 }
 
 /// Speech-to-text in the cloud, as `OpenAITranscriber` sees it (`TranscriptionClient`, or a fake).
@@ -73,6 +81,7 @@ protocol CloudTranscribing: AnyObject, Sendable {
 final class TranscriptionClient: CloudTranscribing {
     private struct Response: Decodable, Sendable {
         let text: String
+        let languages: [String]?
     }
 
     private struct RequestBody: Encodable {
@@ -102,7 +111,7 @@ final class TranscriptionClient: CloudTranscribing {
         do {
             let reply = try await functions.post("transcribe", body: body, timeout: timeout)
             let response = try JSONDecoder().decode(Response.self, from: reply.data)
-            return CloudTranscript(text: response.text, timing: reply.timing)
+            return CloudTranscript(text: response.text, languages: response.languages ?? [], timing: reply.timing)
         } catch {
             throw CloudTranscriptionError(error)
         }

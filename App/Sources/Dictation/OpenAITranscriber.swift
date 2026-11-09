@@ -4,7 +4,7 @@ import MurmurCore
 import os
 
 /// Cloud recognition with OpenAI, through the `transcribe` function, or `dictate` when the
-/// dictation is translated: that one request transcribes and translates.
+/// dictation is translated or its grammar improved: that one request transcribes and writes it.
 ///
 /// The dictation's audio is kept as 16 kHz mono samples and sent in one request when it ends,
 /// compressed to AAC. If the language's on-device model is already on the iPhone, an on-device
@@ -36,6 +36,9 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked
     private var capturing = false
     /// On-device languages the fallback can recognize, by tag.
     private var fallbackLanguages: [String: ResolvedLanguage]
+    /// What the fallback listens in under Auto-detect, when only the cloud knows the language
+    /// (`setAutomaticFallback`).
+    private var automaticFallback: ResolvedLanguage?
     private var fallbackPrepared = false
     /// The fallback is listening to the current dictation.
     private var fallbackListening = false
@@ -70,6 +73,24 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked
         lock.withLock { fallbackLanguages[language.tag] = language }
     }
 
+    /// Under Auto-detect a failed request can only be covered by a guess: the session names the
+    /// installed language most likely spoken (nil: no fallback under Auto).
+    func setAutomaticFallback(_ language: ResolvedLanguage?) {
+        let switchTo = lock.withLock { () -> ResolvedLanguage? in
+            let changed = automaticFallback != language
+            automaticFallback = language
+            // A prepared fallback already listening in the old guess switches before the next dictation.
+            guard changed, fallbackPrepared, self.language?.language.isAutomatic == true else { return nil }
+            return language
+        }
+        if let switchTo { fallback?.setLanguage(switchTo) }
+    }
+
+    /// The on-device language that covers a dictation in `language`. Call under the lock.
+    private func onDeviceLanguage(for language: ResolvedLanguage) -> ResolvedLanguage? {
+        language.language.isAutomatic ? automaticFallback : fallbackLanguages[language.tag]
+    }
+
     // MARK: Transcriber
 
     /// Only what the cloud needs, so the session is ready quickly; the on-device fallback is
@@ -91,7 +112,7 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked
     /// session calls it once it's ready; dictations before that go without a fallback.
     func prepareFallback() async {
         let (micFormat, onDevice, generation, prepared) = lock.withLock {
-            (self.micFormat, language.flatMap { fallbackLanguages[$0.tag] }, self.generation, fallbackPrepared)
+            (self.micFormat, language.flatMap(onDeviceLanguage(for:)), self.generation, fallbackPrepared)
         }
         guard !prepared, let fallback, let micFormat, let onDevice else { return }
         do {
@@ -105,7 +126,7 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked
     func setLanguage(_ language: ResolvedLanguage) {
         let onDevice = lock.withLock { () -> ResolvedLanguage? in
             self.language = language
-            return fallbackPrepared ? fallbackLanguages[language.tag] : nil
+            return fallbackPrepared ? onDeviceLanguage(for: language) : nil
         }
         if let onDevice { fallback?.setLanguage(onDevice) }
     }
@@ -119,8 +140,9 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked
             capturing = true
             utteranceNumber += 1
             timings = nil
-            // The fallback only helps when it recognizes the dictation's language.
-            fallbackListening = fallbackPrepared && language.map { fallbackLanguages[$0.tag] != nil } == true
+            // The fallback only helps when it recognizes the dictation's language (or, under
+            // Auto-detect, the language it is most likely in).
+            fallbackListening = fallbackPrepared && language.flatMap(onDeviceLanguage(for:)) != nil
             return (unended, fallbackListening)
         }
         if unended { fallback?.abandonUtterance() }
@@ -141,46 +163,54 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked
     }
 
     func finishUtterance() async throws -> String {
-        try await finish(translation: nil).transcript
+        try await finish(model: nil).transcript
     }
 
-    /// With `dictate` available, the transcript and its translation from one request. Otherwise,
-    /// and whenever the on-device fallback answers, the transcript alone.
-    func finishUtterance(translation: TranslationRequest) async throws -> UtteranceOutput {
-        try await finish(translation: translation)
+    /// With a request and `dictate` available, the transcript and the model's text from one
+    /// request. Otherwise, and whenever the on-device fallback answers, the transcript alone.
+    func finishUtterance(model request: ModelRequest?) async throws -> UtteranceOutput {
+        try await finish(model: request)
     }
 
-    private func finish(translation: TranslationRequest?) async throws -> UtteranceOutput {
-        let (pcm, language, paused, utterance) = lock.withLock { () -> ([Float], ResolvedLanguage?, Bool, Int) in
+    private func finish(model request: ModelRequest?) async throws -> UtteranceOutput {
+        let (pcm, language, paused, utterance, onDevice) = lock.withLock {
+            () -> ([Float], ResolvedLanguage?, Bool, Int, ResolvedLanguage?) in
             capturing = false
             let taken = samples
             samples.removeAll(keepingCapacity: true)
-            return (taken, self.language, cloudPausedUntil.map { $0 > Date() } ?? false, utteranceNumber)
+            return (taken, self.language, cloudPausedUntil.map { $0 > Date() } ?? false, utteranceNumber,
+                    self.language.flatMap(onDeviceLanguage(for:)))
         }
+        let automatic = language?.language.isAutomatic == true
+        // Under Auto-detect the fallback's transcript is in the language it listened in.
+        let fallbackDetected = automatic ? onDevice?.tag : nil
         guard Double(pcm.count) >= Self.sampleRate * Self.minimumSeconds else {
             if claimFallback(of: utterance) { fallback?.abandonUtterance() }
             return UtteranceOutput(transcript: "")
         }
         if paused, claimFallback(of: utterance), let fallback {
-            return UtteranceOutput(transcript: try await fallback.finishUtterance())
+            return UtteranceOutput(transcript: try await fallback.finishUtterance(), detectedLanguage: fallbackDetected)
         }
         do {
             let encodeStarted = ContinuousClock.now
             let audio = try EncodedAudio(samples: pcm, sampleRate: Self.sampleRate)
             var measured = UtteranceTimings(encodeMs: encodeStarted.elapsedMilliseconds, audioBytes: audio.data.count)
             record(measured, for: utterance)
-            let spoken = language?.language.isAutomatic == true ? nil : language?.tag
+            let spoken = automatic ? nil : language?.tag
             let keywords = language?.contextualStrings ?? []
+            // What OpenAI heard matters only when it chose the language.
+            let detected = { (languages: [String]) in automatic ? languages.first.map(DictationLanguage.normalize) : nil }
             let output: UtteranceOutput
             let timing: RequestTiming?
-            if let translation,
-               let reply = try await translated(audio, language: spoken, keywords: keywords, translation: translation) {
-                output = UtteranceOutput(transcript: reply.transcript, translation: reply.translation)
+            if let request,
+               let reply = try await dictated(audio, language: spoken, keywords: keywords, request: request) {
+                output = UtteranceOutput(transcript: reply.transcript, modelReply: reply.modelReply,
+                                         detectedLanguage: detected(reply.languages))
                 timing = reply.timing
             } else {
                 let transcript = try await client.transcribe(
                     audio: audio.data, format: audio.format, language: spoken, keywords: keywords)
-                output = UtteranceOutput(transcript: transcript.text)
+                output = UtteranceOutput(transcript: transcript.text, detectedLanguage: detected(transcript.languages))
                 timing = transcript.timing
             }
             measured.requests = timing.map { [$0] } ?? []
@@ -201,22 +231,24 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked
             recordFailure(error, for: utterance)
             guard claimFallback(of: utterance), let fallback else { throw error }
             logger.notice("Cloud transcription failed, using on-device: \(error.localizedDescription, privacy: .public)")
-            return UtteranceOutput(transcript: try await fallback.finishUtterance())
+            return UtteranceOutput(transcript: try await fallback.finishUtterance(), detectedLanguage: fallbackDetected)
         }
     }
 
     /// `dictate`'s reply, or nil to send the same audio to `transcribe`: `dictate` is unavailable,
     /// or has just answered that it isn't deployed. Its other failures are the cloud's, as
     /// `transcribe`'s are.
-    private func translated(_ audio: EncodedAudio, language: String?, keywords: [String],
-                            translation: TranslationRequest) async throws -> DictateReply? {
+    private func dictated(_ audio: EncodedAudio, language: String?, keywords: [String],
+                          request: ModelRequest) async throws -> DictateReply? {
         guard let dictation, await dictation.isAvailable else { return nil }
         do {
             return try await dictation.dictate(
-                audio: audio.data, format: audio.format, language: language, keywords: keywords,
-                translation: translation)
-        } catch .notDeployed {
-            logger.notice("dictate isn't deployed; transcribing and translating in two requests")
+                audio: audio.data, format: audio.format, language: language, keywords: keywords, request: request)
+        } catch {
+            // Rethrown by hand: Swift 6.3.3's optimizer crashes (OSSACompleteLifetime) on the
+            // implicit rethrow of the other typed errors after `catch .notDeployed`, in Release only.
+            guard error == .notDeployed else { throw error }
+            logger.notice("dictate isn't deployed; transcribing and writing in two requests")
             return nil
         }
     }

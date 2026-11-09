@@ -133,7 +133,7 @@ public struct LocalFormatter: Sendable {
     static func collapseWhitespace(_ text: String) -> String {
         text
             .replacingOccurrences(of: #"[ \t]{2,}"#, with: " ", options: .regularExpression)
-            .replacingOccurrences(of: #" +([,.;:!?])"#, with: "$1", options: .regularExpression)
+            .replacingOccurrences(of: #" +([,.;:!?،؛؟।。，、！？；：])"#, with: "$1", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

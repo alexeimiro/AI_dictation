@@ -301,14 +301,14 @@ struct TranscriptTests {
         #expect(item.createdAt >= before && item.createdAt <= Date())
         #expect(item.language == nil && item.cleanedText == nil && item.errorReason == nil)
         #expect(item.cleanupModel == nil && item.insertedAt == nil && item.regeneratedAt == nil)
-        #expect(item.style == .casual && item.source == .keyboard)
+        #expect(item.style == .verbatim && item.source == .keyboard)
         #expect(item.metrics == TranscriptMetrics(audioSeconds: 0, words: 0))
     }
 
     @Test func codableRoundTripKeepsEveryField() throws {
         let created = instant("2026-10-10T10:00:00Z")
         let original = Transcript(
-            id: UUID(), createdAt: created, language: "ru-RU", style: .formal,
+            id: UUID(), createdAt: created, language: "ru-RU", style: .grammar,
             rawText: "привет как дела", cleanedText: "Привет, как дела?", status: .limitReached,
             errorReason: "Monthly limit reached.",
             metrics: TranscriptMetrics(audioSeconds: 3.5, words: 3, asrMs: 210, cleanupMs: 640,
@@ -322,7 +322,7 @@ struct TranscriptTests {
         // Enums travel as their raw strings, the form the SwiftData record stores for #Predicate.
         let json = try #require(String(data: data, encoding: .utf8))
         #expect(json.contains("\"status\":\"limitReached\""))
-        #expect(json.contains("\"style\":\"formal\""))
+        #expect(json.contains("\"style\":\"grammar\""))
         #expect(json.contains("\"source\":\"inApp\""))
     }
 }

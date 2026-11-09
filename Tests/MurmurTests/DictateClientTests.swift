@@ -20,15 +20,15 @@ struct DictateClientTests {
         return DictateClient(functions: functions, settings: settings)
     }
 
-    private func translation(id: UUID = UUID()) -> TranslationRequest {
-        TranslationRequest(dictationId: id, targetLanguage: "en-US", style: .formal,
+    private func translation(id: UUID = UUID()) -> ModelRequest {
+        ModelRequest(dictationId: id, targetLanguage: "en-US", style: .grammar,
                            dictionary: [DictionaryTerm(term: "Окафор", misspelling: "окофор")],
                            snippets: [])
     }
 
     private func dictate(with client: DictateClient, id: UUID = UUID()) async throws(CloudTranscriptionError) -> DictateReply {
         try await client.dictate(audio: Data([0x00, 0x01, 0x02]), format: .m4a, language: "ru-RU",
-                                 keywords: ["Окафор"], translation: translation(id: id))
+                                 keywords: ["Окафор"], request: translation(id: id))
     }
 
     /// The parts of a multipart body by name: their headers and bytes.
@@ -77,7 +77,7 @@ struct DictateClientTests {
         #expect(fields["language"] as? String == "ru-RU")
         #expect(fields["keywords"] as? [String] == ["Окафор"])
         #expect(fields["targetLanguage"] as? String == "en-US")
-        #expect(fields["style"] as? String == "formal")
+        #expect(fields["style"] as? String == "grammar")
         let dictionary = try #require(fields["dictionary"] as? [[String: String]])
         #expect(dictionary == [["term": "Окафор", "misspelling": "окофор"]])
         #expect(fields["snippets"] as? [Any] != nil)
@@ -88,7 +88,7 @@ struct DictateClientTests {
         let dictated = try await dictate(with: client())
 
         #expect(dictated.transcript == "привет всем")
-        let translation = try dictated.translation.get()
+        let translation = try dictated.modelReply.get()
         #expect(translation.text == "Hi everyone.")
         #expect(translation.status == "cleaned")
         #expect(translation.targetLanguage == "en-US")
@@ -108,7 +108,7 @@ struct DictateClientTests {
         let dictated = try await dictate(with: client())
 
         #expect(dictated.transcript == "привет всем")
-        guard case .failure(.unavailable(let reason)) = dictated.translation else {
+        guard case .failure(.unavailable(let reason)) = dictated.modelReply else {
             Issue.record("expected an unavailable translation")
             return
         }

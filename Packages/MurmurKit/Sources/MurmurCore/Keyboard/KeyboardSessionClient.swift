@@ -35,6 +35,9 @@ public final class KeyboardSessionClient {
     /// How often the keyboard tells the app it's still on screen, which keeps the session from
     /// timing out while it's in use (see `IdleStop`).
     public static let visibilityInterval: Duration = .seconds(5)
+    /// How long a dictation that ended while the keyboard was away (the cap, the Lock Screen's
+    /// Stop) is offered as "Insert last dictation", instead of `Transcript.insertWindow`.
+    public static let awayInsertWindow: TimeInterval = 600
 
     public enum Phase: Equatable, Sendable {
         case idle
@@ -81,6 +84,11 @@ public final class KeyboardSessionClient {
     private var lastSequenceChange = Date.distantPast
     /// The session failure already shown as a notice, so dismissing it doesn't bring it back.
     private var shownFailureAt: Date?
+    /// The dictation left running when the keyboard went off screen, and when it began.
+    private var away: (requestId: UUID, since: Date)?
+    /// A dictation followed again after the keyboard came back: its text goes into whichever field
+    /// is focused now, since that is where the user is looking.
+    private var resumedRequestId: UUID?
 
     public init(
         transport: IPCTransport,
@@ -113,6 +121,7 @@ public final class KeyboardSessionClient {
                 },
             ]
         }
+        resumeAwayDictation()
         writeKeyboardStatus()
         transport.post(.keyboardStatus)
         startVisibilityHeartbeat()
@@ -120,13 +129,14 @@ public final class KeyboardSessionClient {
         checkForResult()
     }
 
-    /// Call from `viewWillDisappear`. A dictation in progress is stopped so it lands in history.
-    /// While opening the app nothing is cancelled: the bounce is why the keyboard disappeared.
+    /// Call from `viewWillDisappear`. A dictation in progress keeps recording, so a screen lock or
+    /// a trip to another app doesn't cut a long one: the app finishes it on ✓ once the keyboard is
+    /// back (`activate`), at the 5-minute cap, or from the Lock Screen's Stop. While opening the
+    /// app nothing is cancelled: the bounce is why the keyboard disappeared.
     public func deactivate() {
         switch phase {
-        case .listening(let id, _):
-            send(.stop, requestId: id)
-            phase = .processing(id)
+        case .listening(let id, let since):
+            away = (id, since)
         case .starting(let id):
             // Gone before the app answered (or while it was busy): don't record for a field
             // nobody is looking at, and don't come back stuck waiting.
@@ -162,6 +172,7 @@ public final class KeyboardSessionClient {
             setPhase(.needsFullAccess)
             return
         }
+        resumedRequestId = nil
         let requestId = UUID()
         activeDocumentIdentifier = host.currentDocumentIdentifier
         pendingResult = nil
@@ -342,6 +353,28 @@ public final class KeyboardSessionClient {
         }
     }
 
+    /// Back on screen after leaving a dictation running: follow it again (the timer keeps its
+    /// start), or, when the app ended it meanwhile, wait for its result. A keyboard that iOS
+    /// relaunched while away finds the dictation in the status it left.
+    private func resumeAwayDictation() {
+        let left = away ?? transport.payloads.readKeyboardStatus().flatMap { status in
+            status.awayRequestId.map { (requestId: $0, since: status.awayListeningSince ?? clock()) }
+        }
+        away = nil
+        guard let left else { return }
+        resumedRequestId = left.requestId
+        let state = transport.currentState()
+        if state.status == .recording, state.requestTag == left.requestId.tag16 {
+            activeDocumentIdentifier = host?.currentDocumentIdentifier
+            setPhase(.listening(left.requestId, since: left.since))
+            startListeningLoop(left.requestId)
+        } else if case .listening(left.requestId, _) = phase {
+            setPhase(.processing(left.requestId))
+            waitForResult(left.requestId)
+        }
+        // Relaunched after the app ended it: `checkForResult` offers its text.
+    }
+
     // MARK: Listening
 
     private func startListeningLoop(_ requestId: UUID) {
@@ -489,8 +522,10 @@ public final class KeyboardSessionClient {
         default:
             break
         }
+        let window = transport.payloads.latestResult()?.requestId == resumedRequestId
+            ? Self.awayInsertWindow : Transcript.insertWindow
         if pendingResult == nil, let latest = transport.payloads.latestResult(), latest.isInsertable,
-           clock().timeIntervalSince(latest.createdAt) < 120,
+           clock().timeIntervalSince(latest.createdAt) < window,
            !transport.payloads.isClaimed(latest.requestId) {
             pendingResult = latest
             notifyHost()
@@ -510,7 +545,7 @@ public final class KeyboardSessionClient {
             return
         }
         setPhase(.idle)
-        let sameField = result.documentIdentifier == nil
+        let sameField = result.requestId == resumedRequestId || result.documentIdentifier == nil
             || result.documentIdentifier == host?.currentDocumentIdentifier
         let fresh = clock().timeIntervalSince(result.createdAt) < 60
         if sameField, fresh, transport.payloads.claim(result.requestId) {
@@ -549,14 +584,17 @@ public final class KeyboardSessionClient {
     }
 
     /// The listening fields come from the phase, so the visibility heartbeat never clears them
-    /// (the app would end the dictation, thinking the keyboard was gone).
+    /// (the app would end the dictation, thinking the keyboard was gone). Off screen, a dictation
+    /// still listening is reported as away instead.
     private func writeKeyboardStatus(hidden: Bool = false) {
         guard let host else { return }
         let now = clock()
-        let listening: UUID? = if case .listening(let id, _) = phase { id } else { nil }
+        let listening: UUID? = if case .listening(let id, _) = phase, !hidden { id } else { nil }
+        let left = hidden ? away : nil
         let status = KeyboardStatus(
             fullAccessAt: host.hasFullAccess ? now : nil, lastSeenAt: now, hiddenAt: hidden ? now : nil,
-            listeningRequestId: listening, listeningHeartbeatAt: listening == nil ? nil : now)
+            listeningRequestId: listening, listeningHeartbeatAt: listening == nil ? nil : now,
+            awayRequestId: left?.requestId, awayListeningSince: left?.since)
         // Fails silently without Full Access, which is expected.
         try? transport.payloads.write(keyboardStatus: status)
     }

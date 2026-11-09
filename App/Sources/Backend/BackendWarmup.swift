@@ -14,12 +14,12 @@ protocol SessionRenewing: AnyObject {
 /// - The access token is refreshed if it would expire within `tokenLead`. A dictation lasts at
 ///   most 5 minutes, and in the background, where the hot mic waits, supabase-swift doesn't
 ///   refresh it on its own.
-/// - A translation sends `dictate` a warm-up, which opens the connection and has a worker check
-///   the token and open its own connections. Not when `dictate` answered within `debounce`, as
-///   that worker is likely still up.
+/// - A translation or an Improve my grammar dictation sends `dictate` a warm-up, which opens the
+///   connection and has a worker check the token and open its own connections. Not when
+///   `dictate` answered within `debounce`, as that worker is likely still up.
 ///
-/// Plain dictations get the token only, until the timings show `transcribe`'s and `cleanup`'s
-/// workers are cold often enough to be worth a ping.
+/// Word for word dictations get the token only, until the timings show `transcribe`'s and
+/// `cleanup`'s workers are cold often enough to be worth a ping.
 @MainActor
 final class BackendWarmup {
     private let session: any SessionRenewing
@@ -39,12 +39,13 @@ final class BackendWarmup {
         self.debounce = debounce
     }
 
-    /// `translating`: the dictation is translated with cloud transcription, so its request is
-    /// `dictate`'s. Ignored while a warm-up is still out: one at a time is enough.
-    func dictationDidStart(_ requestId: UUID, translating: Bool) {
+    /// `usesDictate`: the dictation is translated or its grammar improved, with cloud
+    /// transcription, so its request is `dictate`'s. Ignored while a warm-up is still out: one at
+    /// a time is enough.
+    func dictationDidStart(_ requestId: UUID, usesDictate: Bool) {
         guard running == nil else { return }
         running = Task { [weak self] in
-            await self?.warm(requestId, translating: translating)
+            await self?.warm(requestId, usesDictate: usesDictate)
             self?.running = nil
         }
     }
@@ -61,7 +62,7 @@ final class BackendWarmup {
         await running?.value
     }
 
-    private func warm(_ requestId: UUID, translating: Bool) async {
+    private func warm(_ requestId: UUID, usesDictate: Bool) async {
         do {
             try await session.ensureSession(validFor: tokenLead)
         } catch {
@@ -69,7 +70,7 @@ final class BackendWarmup {
             logger.notice("Warm-up skipped: \(error.localizedDescription, privacy: .public)")
             return
         }
-        guard translating, let dictate, dictate.isAvailable else { return }
+        guard usesDictate, let dictate, dictate.isAvailable else { return }
         if let last = dictate.lastReplyAt, ContinuousClock.now - last < debounce { return }
         switch await dictate.warm() {
         case .warmed(let timing):

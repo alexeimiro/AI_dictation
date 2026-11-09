@@ -1,10 +1,13 @@
 // POST /functions/v1/dictate
-// One request per translated dictation; the handler is _shared/dictate.ts. Three modes:
+// One request per translated or Improve my grammar dictation; the handler is _shared/dictate.ts.
+// Three modes:
 //   audio: multipart/form-data with a "metadata" JSON part { dictationId, format: "m4a" | "wav",
-//          language: BCP-47 | null, keywords?, targetLanguage, style?, dictionary?, snippets? } and an
-//          "audio" file part of raw bytes. The audio part needs a filename (any) in its
-//          Content-Disposition: without one it arrives as text, and gets 400. Transcribes, then
-//          translates on the same worker; a null or "und" language is the one it hears first.
+//          language: BCP-47 | null, keywords?, targetLanguage?, style?, dictionary?, snippets? } and
+//          an "audio" file part of raw bytes. targetLanguage is required unless style is "grammar".
+//          The audio part needs a filename (any) in its Content-Disposition: without one it arrives
+//          as text, and gets 400. Transcribes, then translates (or, with no target, improves the
+//          grammar) on the same worker; a null or "und" language is the one it hears first. Improve
+//          my grammar leaves 3 words or fewer as heard: "raw", reason "short".
 //   text:  application/json, a CleanupRequest with targetLanguage (see _shared/types.ts), plus
 //          speculative?: boolean and attempt?: integer, which are only logged.
 //   warm:  the header x-murmur-warm: 1 and no body. Checks the token and opens the connections to
