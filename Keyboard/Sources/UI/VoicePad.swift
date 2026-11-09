@@ -1,9 +1,11 @@
 import MurmurCore
 import SwiftUI
 
-/// The voice keyboard from Anton's mock, under the toolbar: the translate row (or a notice in its
-/// place), then the talk button with what it is doing under it. Space and return are the UIKit row
-/// below. Dragging in the empty space moves the cursor, like holding the space bar.
+/// The voice keyboard under the toolbar, Anton's big talk button in Wispr Flow's style: a flat
+/// white disc with the hint under it. While a dictation runs the row of keys below gives way to
+/// Wispr's listening view (dots and two lines), and the disc stays put as ✓, so one spot starts and
+/// finishes. A notice or the last dictation that couldn't be inserted sits above the disc. Dragging
+/// in the empty space moves the cursor, like holding the space bar.
 struct VoicePad: View {
     let model: KeyboardModel
     /// Trackpad distance already turned into cursor moves.
@@ -12,81 +14,71 @@ struct VoicePad: View {
     /// Points of drag per character.
     private static let cursorStep: CGFloat = 9
 
-    /// Sizes for the 320 pt keyboard, and for landscape, where it is 272 pt.
+    /// Sizes for the 278 pt keyboard, and for landscape.
     private struct Metrics {
+        /// From the toolbar to the disc, with no card above it.
         var top: CGFloat
         var mic: CGFloat
+        /// The disc under a card.
+        var smallMic: CGFloat
         var gap: CGFloat
-        var wave: CGFloat
-        var waveGap: CGFloat
-        /// The hint, the waveform with the status line, or the status line alone.
-        var block: CGFloat
+        var dots: CGFloat
 
-        // The soft ring reaches 8 pt (regular) or 6 pt (compact) past the disc; `top` clears it.
-        static let regular = Metrics(top: 12, mic: 74, gap: 12, wave: 26, waveGap: 6, block: 48)
-        static let compact = Metrics(top: 8, mic: 54, gap: 8, wave: 16, waveGap: 4, block: 34)
+        static let regular = Metrics(top: 24, mic: 76, smallMic: 56, gap: 12, dots: 28)
+        static let compact = Metrics(top: 12, mic: 60, smallMic: 46, gap: 8, dots: 20)
     }
 
     var body: some View {
         let metrics = model.compactHeight ? Metrics.compact : .regular
+        let card = showsCard
         VStack(spacing: 0) {
-            topSlot
-                .padding(.horizontal, 12)
-                .padding(.top, 6)
-                // Above the talk button's pulses, so they seem to come from behind it.
-                .zIndex(1)
-            centre(metrics)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .contentShape(.rect)
-                .gesture(trackpad)
+            if card {
+                topSlot
+                    .padding(.horizontal, 12)
+                    .padding(.top, 2)
+            }
+            VStack(spacing: metrics.gap) {
+                MicButton(model: model, size: card ? metrics.smallMic : metrics.mic)
+                if model.isCapturing {
+                    DotsWaveform(model: model, height: metrics.dots)
+                    ListeningCaption(model: model)
+                } else {
+                    PadHint(model: model)
+                }
+            }
+            .padding(.top, card ? 8 : metrics.top)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .contentShape(.rect)
+            .gesture(trackpad)
         }
         .foregroundStyle(.primary)
     }
 
-    /// The translate row, or in its place a notice or the last dictation that couldn't be inserted.
-    @ViewBuilder
-    private var topSlot: some View {
-        if let pending = model.pendingResult {
-            NoticeCard(symbol: "arrow.uturn.down", accent: true, title: "Insert last dictation",
-                       detail: pending.text, action: model.actions.insertPending,
-                       dismiss: model.actions.dismissPending)
-        } else {
-            switch model.phase {
-            case .needsFullAccess:
-                NoticeCard(symbol: "lock", title: "Almost there!",
-                           detail: "Turn on Allow Full Access in Settings › Murmur › Keyboards",
-                           dismiss: model.actions.dismissNotice)
-            case .notice(let message):
-                NoticeCard(symbol: "exclamationmark.bubble", title: nil, detail: message,
-                           dismiss: model.actions.dismissNotice)
-            default:
-                TranslateRow(model: model)
-            }
+    /// Cards wait while a dictation runs, so its view stays Wispr's.
+    private var showsCard: Bool {
+        guard !model.isCapturing else { return false }
+        if model.pendingResult != nil { return true }
+        switch model.phase {
+        case .needsFullAccess, .notice: return true
+        default: return false
         }
     }
 
-    private func centre(_ metrics: Metrics) -> some View {
-        VStack(spacing: metrics.gap) {
-            MicButton(model: model, size: metrics.mic)
-                .overlay {
-                    if model.isCapturing {
-                        CancelChip(model: model)
-                            .offset(x: -(metrics.mic / 2 + 28 + 22))
-                    }
-                }
-            Group {
-                if case .listening = model.phase {
-                    VStack(spacing: metrics.waveGap) {
-                        Waveform(model: model, height: metrics.wave)
-                        StatusLine(model: model)
-                    }
-                } else {
-                    StatusLine(model: model)
-                }
-            }
-            .frame(height: metrics.block)
+    /// A notice, or the last dictation that couldn't be inserted.
+    @ViewBuilder
+    private var topSlot: some View {
+        if let pending = model.pendingResult {
+            NoticeCard(symbol: "arrow.uturn.down", primary: true, title: "Insert last dictation",
+                       detail: pending.text, action: model.actions.insertPending,
+                       dismiss: model.actions.dismissPending)
+        } else if case .notice(let message) = model.phase {
+            NoticeCard(symbol: "exclamationmark.bubble", title: nil, detail: message,
+                       dismiss: model.actions.dismissNotice)
+        } else {
+            NoticeCard(symbol: "lock", title: "Almost there!",
+                       detail: "Turn on Allow Full Access in Settings › Murmur › Keyboards",
+                       dismiss: model.actions.dismissNotice)
         }
-        .padding(.top, metrics.top)
     }
 
     private var trackpad: some Gesture {
@@ -101,11 +93,11 @@ struct VoicePad: View {
     }
 }
 
-/// A card the size of the translate row that takes its place for a notice: a tile, the message,
-/// and ✕. With an `action` the whole card is the button (Insert last dictation).
+/// A flat card above the talk button for a notice: a tile, the message, and ✕. With an `action`
+/// the whole card is the button (Insert last dictation), and its tile is white like the disc.
 private struct NoticeCard: View {
     let symbol: String
-    var accent = false
+    var primary = false
     let title: String?
     let detail: String
     var action: (() -> Void)?
@@ -129,7 +121,7 @@ private struct NoticeCard: View {
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.primary)
                     .frame(width: 30, height: 30)
-                    .background(KeyboardChrome.backdrop, in: .circle)
+                    .background { KeyboardSurface(shape: Circle()) }
                     .frame(width: 44, height: 44)
                     .contentShape(.rect)
             }
@@ -140,16 +132,17 @@ private struct NoticeCard: View {
         .padding(.trailing, 3)
         .padding(.vertical, 4)
         .frame(minHeight: 54)
-        .background { KeyboardSurface(shape: RoundedRectangle(cornerRadius: 18, style: .continuous)) }
+        .background { KeyboardSurface(shape: RoundedRectangle(cornerRadius: 14, style: .continuous),
+                                      fill: KeyboardChrome.card) }
     }
 
     private var message: some View {
         HStack(spacing: 10) {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(accent ? KeyboardChrome.accentGlyph : KeyboardChrome.tileGlyph)
+                .foregroundStyle(primary ? KeyboardChrome.primaryGlyph : Color.primary)
                 .frame(width: 36, height: 36)
-                .background(accent ? KeyboardChrome.accent : KeyboardChrome.tile,
+                .background(primary ? KeyboardChrome.primary : KeyboardChrome.key,
                             in: .rect(cornerRadius: 10, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {

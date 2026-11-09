@@ -2,12 +2,12 @@ import MurmurCore
 import Observation
 import SwiftUI
 
-/// What opens over the keyboard, under the toolbar.
+/// A page that takes the place of the pad or the keys under the toolbar, as Wispr Flow's menu does.
 enum KeyboardOverlay {
+    /// The writing styles, from the style pill.
     case style
-    case settings
-    /// The language sheet of the key layouts; the voice keyboard has the translate row instead.
-    case languages
+    /// ☰: translation, the keyboard's settings, and the way to Murmur's letters and Settings.
+    case menu
 }
 
 /// Observable state behind the SwiftUI parts of the keyboard (toolbar, voice pad, listening panel,
@@ -33,18 +33,15 @@ final class KeyboardModel {
     var levels: [Double] = Array(repeating: 0.06, count: 30)
     /// Debug builds: the extension's memory, shown in the toolbar.
     var debugMemory: String?
-    /// The voice keyboard is up: its toolbar has Delete where the key layouts have the mic and the
-    /// language pill.
+    /// The voice keyboard is up: its toolbar has Delete where the key layouts have the mic.
     var showsVoicePad = false
-    /// Landscape: the voice keyboard is as tall as the key layouts, with a smaller talk button.
+    /// Landscape: a shorter toolbar and a smaller talk button.
     var compactHeight = false
-    /// The field's return key title ("return", "send", …), for the pad's return button.
-    var returnTitle = "return"
     /// Words in the last dictation, while it can still be undone.
     var undoableWords: Int?
     /// A vibration will say when the text is ready, so the pad's hint can promise it.
     var announcesReady = false
-    /// The settings sheet's switches, mirrored from `SharedSettings` when the keyboard appears.
+    /// The ☰ menu's switches, mirrored from `SharedSettings` when the keyboard appears.
     var keyboardFeedback = true
     var readyHaptic = true
     var interactionSounds = true
@@ -64,6 +61,8 @@ final class KeyboardModel {
         var setLanguage: (DictationLanguage?) -> Void = { _ in }
         var showOverlay: (KeyboardOverlay) -> Void = { _ in }
         var hideOverlay: () -> Void = {}
+        /// The menu's ABC: the keyboard's own letters.
+        var showLetters: () -> Void = {}
         var setTranslationEnabled: (Bool) -> Void = { _ in }
         var setTargetLanguage: (DictationLanguage) -> Void = { _ in }
         var swapLanguages: () -> Void = {}
@@ -111,6 +110,9 @@ final class KeyboardModel {
 
     var effectiveLanguage: DictationLanguage { languageOverride ?? primaryLanguage }
 
+    /// The app runs a session, so the mic dictates without opening it first.
+    var isSessionLive: Bool { sessionStatus.isLive }
+
     var languageChoices: [DictationLanguage] {
         let preferred = [primaryLanguage] + (secondaryLanguage.map { [$0] } ?? [])
             + recentLanguages + Self.menuLanguages
@@ -123,21 +125,19 @@ final class KeyboardModel {
             .uniqued(by: \DictationLanguage.languageCode)
     }
 
-    var languagePillTitle: String {
-        translationEnabled ? "\(effectiveLanguage.shortCode) → \(targetLanguage.shortCode)" : effectiveLanguage.shortCode
+    /// The first line under the dots while a dictation runs, Wispr's "Listening".
+    var captionTitle: String {
+        if isProcessing { return translationEnabled ? "Translating…" : "Transcribing…" }
+        return "Listening"
     }
 
-    var idleHint: String {
-        guard translationEnabled else { return "Speak to type" }
-        let spoken = effectiveLanguage.isAutomatic ? "any language" : effectiveLanguage.localizedName
-        return "Speak \(spoken) → Type in \(targetLanguage.localizedName)"
-    }
-
-    /// After stop, what the dictation is waiting for. The options are locked while it runs, so they
-    /// are the ones it started with.
-    var stageText: String {
-        let stage = translationEnabled ? "Translating to \(targetLanguage.localizedName)" : "Transcribing"
-        return announcesReady ? "\(stage) · we'll tap when it's ready" : "\(stage)…"
+    /// The second line: where Wispr names the microphone, what this dictation will do. The options
+    /// are locked while it runs, so they are the ones it started with.
+    var captionDetail: String {
+        if isProcessing, announcesReady { return "We'll tap when it's ready" }
+        guard translationEnabled else { return style.title }
+        if effectiveLanguage.isAutomatic { return "Into \(targetLanguage.localizedName)" }
+        return "\(effectiveLanguage.localizedName) → \(targetLanguage.localizedName)"
     }
 
     /// Every language OpenAI's speech-to-text and GPT translation support (the Whisper language

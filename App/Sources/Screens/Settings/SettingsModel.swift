@@ -8,6 +8,7 @@ import Observation
 final class SettingsModel {
     var disableAfter: DisableAfter { didSet { settings.disableAfter = disableAfter } }
     var keyboardLayout: KeyboardLayoutPreference { didSet { settings.keyboardLayout = keyboardLayout } }
+    var keyboardFullQwerty: Bool { didSet { settings.keyboardFullQwerty = keyboardFullQwerty } }
     var keyboardAppearance: KeyboardAppearancePreference {
         didSet { settings.keyboardAppearance = keyboardAppearance }
     }
@@ -37,6 +38,7 @@ final class SettingsModel {
         self.settings = settings
         disableAfter = settings.disableAfter
         keyboardLayout = settings.keyboardLayout
+        keyboardFullQwerty = settings.keyboardFullQwerty
         keyboardAppearance = settings.keyboardAppearance
         keyboardFeedback = settings.keyboardFeedback
         readyHaptic = settings.readyHaptic
@@ -52,7 +54,7 @@ final class SettingsModel {
     }
 
     /// The keyboard changes these while the app waits in the background: the style pill sets the
-    /// default style, and its settings sheet the feedback and the appearance.
+    /// default style, and its ☰ menu the feedback and the appearance.
     func reloadFromKeyboard() {
         if defaultStyle != settings.defaultStyle { defaultStyle = settings.defaultStyle }
         if keyboardFeedback != settings.keyboardFeedback { keyboardFeedback = settings.keyboardFeedback }

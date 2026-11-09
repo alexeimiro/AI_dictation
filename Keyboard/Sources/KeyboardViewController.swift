@@ -21,14 +21,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     private var toolbarHost: UIHostingController<KeyboardToolbar>?
     private var panelHost: UIHostingController<ListeningPanel>?
     private var padHost: UIHostingController<VoicePad>?
-    /// The style menu, the settings sheet and the language sheet, above everything but the toolbar.
+    /// The ☰ menu and style pages, in place of everything but the toolbar.
     private var overlayHost: UIHostingController<KeyboardOverlayView>?
     private var heightConstraint: NSLayoutConstraint?
     private var toolbarHeightConstraint: NSLayoutConstraint?
+    /// The pad ends at its row of keys, or at the bottom while a dictation hides them.
+    private var padAboveKeys: NSLayoutConstraint?
+    private var padToBottom: NSLayoutConstraint?
     private var client: KeyboardSessionClient?
     private var plane: KeyboardPlane = .numbers
     /// The voice layout: the pad is home, and the full keys get a key back to it.
     private var usesVoicePad = false
+    /// `SharedSettings.keyboardFullQwerty`: ABC shows these letters instead of the next keyboard.
+    private var showsFullQwerty = false
     private var shift: ShiftState = .off
     private var lastShiftTap = Date.distantPast
     /// The last dictation, while the text before the cursor still ends with it (the pad's Undo).
@@ -47,18 +52,21 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     private lazy var haptics = UIImpactFeedbackGenerator(style: .light, view: view)
     private lazy var readyHaptics = UINotificationFeedbackGenerator(view: view)
 
-    /// The voice keyboard is taller, as in Anton's mock, except in landscape.
-    private static let voiceHeight: CGFloat = 320
-    private static let keysHeight: CGFloat = 272
-    private static let voiceToolbarHeight: CGFloat = 56
-    private static let keysToolbarHeight: CGFloat = 50
+    /// Wispr Flow's 278 pt for every layout and state: a 66 pt toolbar (46 pt controls 12 pt from
+    /// the top) over four 53 pt rows of keys. Landscape keeps the shorter toolbar.
+    private static let keyboardHeight: CGFloat = 278
+    private static let compactKeyboardHeight: CGFloat = 272
+    private static let toolbarHeight: CGFloat = 66
+    private static let compactToolbarHeight: CGFloat = 50
+    private static let padKeysHeight: CGFloat = 53
+    /// A keyboard extension gets no touches where it draws nothing, so the backdrop is barely there.
+    private static let touchFill = UIColor(white: 0, alpha: 0.001)
 
     // MARK: Lifecycle
 
     override func loadView() {
         let inputView = KeyboardInputView(frame: .zero, inputViewStyle: .keyboard)
         inputView.allowsSelfSizing = true
-        inputView.backgroundColor = KeyboardChrome.backdropUIColor
         self.inputView = inputView
     }
 
@@ -87,6 +95,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         model.style = settings.defaultStyle
         client?.styleOverride = model.style
         keepsScreenAwake = settings.keepScreenAwake
+        showsFullQwerty = settings.keyboardFullQwerty
         loadLanguages()
         loadTranslationSettings()
         if hasFullAccess { haptics.prepare() }
@@ -105,12 +114,18 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         startMemoryReadout()
     }
 
+    /// The window, and with it the host's style, is known only now.
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        updateKeyboardAppearance()
+    }
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         if model.overlay != nil {
             model.overlay = nil
             overlayHost?.view.isHidden = true
-            updateOverlayAccessibility(isPresented: false, postsFocusChange: false)
+            updateKeyAreas()
         }
         repeater.stop()
         client?.deactivate()
@@ -138,7 +153,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
 
     private func buildViews() {
         guard let view else { return }
-        view.backgroundColor = KeyboardChrome.backdropUIColor
+        // Like Wispr Flow's, the keyboard draws no backdrop of its own: the system's rounded panel
+        // shows through (`updateKeyboardAppearance`), and the barely-there fill keeps taps between
+        // the keys.
+        view.backgroundColor = Self.touchFill
         let toolbar = embed(KeyboardToolbar(model: model), in: view)
         let panel = embed(ListeningPanel(model: model), in: view)
         toolbarHost = toolbar
@@ -165,18 +183,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         padKeys.onSpaceTrackMove = { [weak self] offset in self?.moveCursor(offset) }
         view.addSubview(padKeys)
 
-        // Embedded last, so it covers everything below the toolbar.
+        // Embedded last, so it covers everything below the toolbar; its pages hide what's under them.
         let overlay = embed(KeyboardOverlayView(model: model), in: view)
+        overlay.view.backgroundColor = Self.touchFill
         overlayHost = overlay
 
-        // The layout as `viewWillAppear` will pick it, so the voice keyboard doesn't open short.
-        let tall = settings.keyboardLayout == .voice && hasFullAccess
-        let height = view.heightAnchor.constraint(equalToConstant: tall ? Self.voiceHeight : Self.keysHeight)
+        let height = view.heightAnchor.constraint(equalToConstant: Self.keyboardHeight)
         height.priority = UILayoutPriority(999)
         heightConstraint = height
-        let toolbarHeight = toolbar.view.heightAnchor.constraint(
-            equalToConstant: tall ? Self.voiceToolbarHeight : Self.keysToolbarHeight)
+        let toolbarHeight = toolbar.view.heightAnchor.constraint(equalToConstant: Self.toolbarHeight)
         toolbarHeightConstraint = toolbarHeight
+        let padAboveKeys = pad.view.bottomAnchor.constraint(equalTo: padKeys.topAnchor)
+        self.padAboveKeys = padAboveKeys
+        padToBottom = pad.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         NSLayoutConstraint.activate([
             height,
             toolbar.view.topAnchor.constraint(equalTo: view.topAnchor),
@@ -194,11 +213,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             pad.view.topAnchor.constraint(equalTo: keyGrid.topAnchor),
             pad.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             pad.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            pad.view.bottomAnchor.constraint(equalTo: padKeys.topAnchor),
+            padAboveKeys,
             padKeys.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             padKeys.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             padKeys.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            padKeys.heightAnchor.constraint(equalToConstant: 58),
+            padKeys.heightAnchor.constraint(equalToConstant: Self.padKeysHeight),
             overlay.view.topAnchor.constraint(equalTo: toolbar.view.bottomAnchor),
             overlay.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             overlay.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -218,15 +237,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         plane = usesVoicePad ? .voice : layout == .qwerty ? .letters : .numbers
     }
 
-    /// 320 pt for the voice keyboard; 272 for the key layouts, and in landscape, where the voice
-    /// keyboard switches to its compact sizes.
+    /// 278 pt with a 66 pt toolbar; in landscape 272 with a 50 pt one and the pad's compact sizes.
     private func updateHeights() {
         let compact = traitCollection.verticalSizeClass == .compact
-        let tall = usesVoicePad && !compact
-        heightConstraint?.constant = tall ? Self.voiceHeight : Self.keysHeight
-        toolbarHeightConstraint?.constant = tall ? Self.voiceToolbarHeight : Self.keysToolbarHeight
-        let compactPad = usesVoicePad && compact
-        if model.compactHeight != compactPad { model.compactHeight = compactPad }
+        heightConstraint?.constant = compact ? Self.compactKeyboardHeight : Self.keyboardHeight
+        toolbarHeightConstraint?.constant = compact ? Self.compactToolbarHeight : Self.toolbarHeight
+        if model.compactHeight != compact { model.compactHeight = compact }
     }
 
     private func embed<Content: View>(_ content: Content, in container: UIView) -> UIHostingController<Content> {
@@ -244,7 +260,6 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     /// held would cancel its touch (and stop delete auto-repeat).
     private func reloadKeys() {
         let returnTitle = KeyboardLayouts.returnTitle(for: textDocumentProxy.returnKeyType ?? .default)
-        if model.returnTitle != returnTitle { model.returnTitle = returnTitle }
         let showsGlobe = needsInputModeSwitchKey
         let typingLanguage = KeyboardLanguageDefaults.typingLanguage(source: model.effectiveLanguage,
                                                                       interface: interfaceLanguage)
@@ -258,18 +273,26 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         updateKeyAreas()
     }
 
-    /// The keys, the voice pad or the listening panel, whichever fits the plane and the phase. The
-    /// pad shows its own listening state, so it keeps the panel hidden; its space and return stay
-    /// in view, dimmed, while a dictation runs.
+    /// The keys, the voice pad or the listening panel, whichever fits the plane and the phase, or
+    /// none under an open page. As in Wispr Flow, a dictation hides the keys: the key layouts show
+    /// the listening panel, and the pad grows over its row of keys to show its own.
     private func updateKeyAreas() {
         let capturing = model.isCapturing
         let onPad = plane == .voice
+        let paged = model.overlay != nil
         if model.showsVoicePad != onPad { model.showsVoicePad = onPad }
-        padHost?.view.isHidden = !onPad
-        padKeys.isHidden = !onPad
+        padHost?.view.isHidden = !onPad || paged
+        padKeys.isHidden = !onPad || capturing || paged
         padKeys.typingEnabled = !capturing
-        keyGrid.isHidden = onPad || capturing
-        panelHost?.view.isHidden = onPad || !capturing
+        if capturing {
+            padAboveKeys?.isActive = false
+            padToBottom?.isActive = true
+        } else {
+            padToBottom?.isActive = false
+            padAboveKeys?.isActive = true
+        }
+        keyGrid.isHidden = onPad || capturing || paged
+        panelHost?.view.isHidden = onPad || !capturing || paged
     }
 
     private func wireActions() {
@@ -306,6 +329,13 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             },
             showOverlay: { [weak self] overlay in self?.showOverlay(overlay) },
             hideOverlay: { [weak self] in self?.hideOverlay() },
+            showLetters: { [weak self] in
+                guard let self else { return }
+                hideOverlay()
+                plane = .letters
+                updateAutoShift()
+                reloadKeys()
+            },
             setTranslationEnabled: { [weak self] enabled in self?.setTranslationEnabled(enabled) },
             setTargetLanguage: { [weak self] language in self?.selectTargetLanguage(language) },
             swapLanguages: { [weak self] in self?.swapTranslationLanguages() },
@@ -342,47 +372,49 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             moveCursor: { [weak self] offset in self?.moveCursor(offset) })
     }
 
+    /// A page takes the place of the pad or the keys, which hide at once, as Wispr's menu does.
     private func showOverlay(_ overlay: KeyboardOverlay) {
         overlayHost?.view.isHidden = false
-        withAnimation(.easeOut(duration: 0.18)) { model.overlay = overlay }
+        withAnimation(.easeOut(duration: 0.15)) { model.overlay = overlay }
+        updateKeyAreas()
         updateOverlayAccessibility(isPresented: true)
     }
 
     private func hideOverlay() {
-        withAnimation(.easeIn(duration: 0.15)) { model.overlay = nil }
+        guard model.overlay != nil else { return }
+        withAnimation(.easeIn(duration: 0.12)) { model.overlay = nil }
+        updateKeyAreas()
+        updateOverlayAccessibility(isPresented: false)
         Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(170))
+            try? await Task.sleep(for: .milliseconds(140))
             guard let self, self.model.overlay == nil else { return }
             self.overlayHost?.view.isHidden = true
-            self.updateOverlayAccessibility(isPresented: false)
         }
     }
 
-    /// An open overlay is modal for VoiceOver; each one has its own close button and the escape
-    /// gesture.
+    /// VoiceOver moves to the page when it opens and back to the toolbar, whose ✕ closes it, when
+    /// it closes. The page also answers the escape gesture.
     private func updateOverlayAccessibility(isPresented: Bool, postsFocusChange: Bool = true) {
-        overlayHost?.view.accessibilityViewIsModal = isPresented
-        toolbarHost?.view.accessibilityElementsHidden = isPresented
-        panelHost?.view.accessibilityElementsHidden = isPresented
-        padHost?.view.accessibilityElementsHidden = isPresented
-        keyGrid.accessibilityElementsHidden = isPresented
-        padKeys.accessibilityElementsHidden = isPresented
-
-        if postsFocusChange {
-            let focusTarget = isPresented ? overlayHost?.view : toolbarHost?.view
-            DispatchQueue.main.async {
-                UIAccessibility.post(notification: .screenChanged, argument: focusTarget)
-            }
+        guard postsFocusChange else { return }
+        let focusTarget = isPresented ? overlayHost?.view : toolbarHost?.view
+        DispatchQueue.main.async {
+            UIAccessibility.post(notification: .screenChanged, argument: focusTarget)
         }
     }
 
-    /// The settings sheet's choice, or else the field's keyboard appearance.
+    /// The menu's choice, or else the field's keyboard appearance. The system's panel behind the
+    /// keys keeps the host's style, so a choice that differs gets the keyboard's own backdrop.
     private func updateKeyboardAppearance() {
-        overrideUserInterfaceStyle = switch model.appearance {
+        let chosen: UIUserInterfaceStyle = switch model.appearance {
         case .light: .light
         case .dark: .dark
         case .automatic: fieldAppearance
         }
+        overrideUserInterfaceStyle = chosen
+        let host = fieldAppearance != .unspecified
+            ? fieldAppearance : view.window?.traitCollection.userInterfaceStyle ?? .unspecified
+        let ownBackdrop = chosen != .unspecified && host != .unspecified && chosen != host
+        view.backgroundColor = ownBackdrop ? KeyboardChrome.panelUIColor : Self.touchFill
     }
 
     private var fieldAppearance: UIUserInterfaceStyle {
@@ -393,7 +425,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         }
     }
 
-    /// The settings sheet's switches and the appearance, as the app or the sheet last left them.
+    /// The menu's switches and the appearance, as the app or the menu last left them.
     private func loadKeyboardSettings() {
         model.keyboardFeedback = settings.keyboardFeedback
         model.readyHaptic = settings.readyHaptic
@@ -531,6 +563,15 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             plane = newPlane
             updateAutoShift()
             reloadKeys()
+        case .abc:
+            // Wispr Flow's ABC: the next keyboard types letters, unless these are wanted.
+            if showsFullQwerty {
+                plane = .letters
+                updateAutoShift()
+                reloadKeys()
+            } else {
+                advanceToNextInputMode()
+            }
         case .globe:
             break
         }
@@ -714,8 +755,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         let id = UUID()
         model.pendingResult = nil
         model.undoableWords = nil
+        model.sessionStatus = demo.state == .off ? .off : .ready
         switch demo.state {
-        case .idle:
+        case .idle, .off:
             model.phase = .idle
         case .translate:
             model.phase = .idle
@@ -748,13 +790,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         case .style:
             model.phase = .idle
             showOverlay(.style)
-        case .settings:
-            model.phase = .idle
-            showOverlay(.settings)
-        case .languages:
+        case .menu:
             model.phase = .idle
             model.translationEnabled = true
-            showOverlay(.languages)
+            showOverlay(.menu)
         }
         updateKeyAreas()
     }

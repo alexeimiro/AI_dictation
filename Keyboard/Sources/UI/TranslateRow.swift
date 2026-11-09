@@ -1,7 +1,7 @@
 import MurmurCore
 import SwiftUI
 
-/// The translate row from Anton's mock: the A/文 tile, From and To, swap, and the switch. From is
+/// The translate row on the ☰ page: the translate tile, From and To, swap, and the switch. From is
 /// also the dictation language (Auto or a pinned one), so it stays usable with translation off;
 /// To and swap follow the switch. While a dictation runs its options are locked, but the row stays
 /// readable.
@@ -12,10 +12,11 @@ struct TranslateRow: View {
         let on = model.translationEnabled
         let canSwap = on && !model.effectiveLanguage.isAutomatic
         HStack(spacing: 8) {
-            TranslateGlyph(tile: on ? KeyboardChrome.translateTile : KeyboardChrome.offTrack)
-                .frame(width: 26, height: 26)
+            Image(systemName: "translate")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(on ? KeyboardChrome.primaryGlyph : Color.primary)
                 .frame(width: 36, height: 36)
-                .background(on ? KeyboardChrome.translateTile : KeyboardChrome.offTrack,
+                .background(on ? KeyboardChrome.primary : KeyboardChrome.key,
                             in: .rect(cornerRadius: 10, style: .continuous))
                 .accessibilityHidden(true)
 
@@ -51,21 +52,20 @@ struct TranslateRow: View {
                 get: { model.translationEnabled },
                 set: { model.actions.setTranslationEnabled($0) }))
                 .labelsHidden()
-                .tint(KeyboardChrome.accent)
+                .tint(KeyboardChrome.switchTint)
                 .accessibilityLabel("Translate")
                 .padding(.trailing, 2)
         }
         .foregroundStyle(.primary)
-        .padding(.leading, 7)
-        .padding(.trailing, 7)
+        .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background { KeyboardSurface(shape: RoundedRectangle(cornerRadius: 18, style: .continuous)) }
+        .background { KeyboardSurface(shape: RoundedRectangle(cornerRadius: 14, style: .continuous),
+                                      fill: KeyboardChrome.card) }
         .disabled(model.locksSessionOptions)
     }
 }
 
 /// A From or To button that opens the language list, with a check on the current language.
-/// Shared by the translate row and the languages sheet.
 struct LanguageMenu: View {
     let title: String
     let accessibilityTitle: String
@@ -98,7 +98,7 @@ struct LanguageMenu: View {
             }
             .padding(.horizontal, 10)
             .frame(minWidth: 62, minHeight: 40, alignment: .leading)
-            .background(KeyboardChrome.backdrop, in: .rect(cornerRadius: 12, style: .continuous))
+            .background { KeyboardSurface(shape: RoundedRectangle(cornerRadius: 10, style: .continuous)) }
             .frame(minHeight: 44)
             .contentShape(.rect)
         }
@@ -107,35 +107,35 @@ struct LanguageMenu: View {
     }
 }
 
-/// The mock's translate glyph on a 24 pt grid: a white speech bubble with "A" and a dark one with
-/// "文", ringed in the colour of the tile behind it.
-struct TranslateGlyph: View {
-    var tile: Color
+/// The toolbar's sign that translation is on, "AUTO → RU" ("→ RU" where that doesn't fit). Wispr's
+/// keyboard has no translation, so this is the one grey capsule in its bar; it opens the ☰ page.
+struct TranslateChip: View {
+    let model: KeyboardModel
+    var height: CGFloat = 46
 
     var body: some View {
-        Canvas { context, size in
-            let unit = size.width / 24
-            func rect(_ x: CGFloat, _ y: CGFloat, _ width: CGFloat, _ height: CGFloat) -> CGRect {
-                CGRect(x: x * unit, y: y * unit, width: width * unit, height: height * unit)
+        Button { model.actions.showOverlay(.menu) } label: {
+            ViewThatFits(in: .horizontal) {
+                chip("\(model.effectiveLanguage.shortCode) → \(model.targetLanguage.shortCode)")
+                chip("→ \(model.targetLanguage.shortCode)")
             }
-            func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * unit, y: y * unit) }
-            let ink = Color(uiColor: UIColor(hex: 0x14161C))
-
-            var light = Path(roundedRect: rect(1.5, 2.5, 12, 10), cornerRadius: 2.5 * unit)
-            light.addLines([point(4.5, 12), point(4.5, 15.2), point(7.7, 12)])
-            light.closeSubpath()
-            context.fill(light, with: .color(.white))
-            context.draw(Text("A").font(.system(size: 8 * unit, weight: .bold)).foregroundStyle(ink),
-                         at: point(7.5, 7.7))
-
-            let bubble = Path(roundedRect: rect(10, 9, 12.5, 10), cornerRadius: 2.5 * unit)
-            var dark = bubble
-            dark.addLines([point(19.5, 18.6), point(19.5, 22), point(16.1, 18.6)])
-            dark.closeSubpath()
-            context.fill(dark, with: .color(ink))
-            context.stroke(bubble, with: .color(tile), lineWidth: 1.2 * unit)
-            context.draw(Text("文").font(.system(size: 7.5 * unit, weight: .semibold)).foregroundStyle(.white),
-                         at: point(16.25, 14.1))
         }
+        .buttonStyle(.keyboardPress)
+        .accessibilityLabel(model.effectiveLanguage.isAutomatic
+            ? "Translating into \(model.targetLanguage.localizedName)"
+            : "Translating \(model.effectiveLanguage.localizedName) to \(model.targetLanguage.localizedName)")
+        .accessibilityHint("Opens the menu")
+    }
+
+    private func chip(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 15, weight: .semibold))
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 14)
+            .frame(height: height)
+            .background { KeyboardSurface(shape: Capsule()) }
+            .contentShape(.capsule)
     }
 }

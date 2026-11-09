@@ -96,7 +96,8 @@ public final class SharedSettings: @unchecked Sendable {
     }
 
     private enum Key: String {
-        case disableAfter, keyboardLayout, keyboardFeedback, readyHaptic, interactionSounds, defaultStyle
+        case disableAfter, keyboardLayout, keyboardFullQwerty, keyboardFeedback, readyHaptic, interactionSounds
+        case defaultStyle
         case useBuiltInMic, transcriberEngine, liveActivities, transcriptRetention, autoReturn, keepScreenAwake
         case translateInOneRequest
         case primaryLanguage, secondaryLanguage, verifiedEngines
@@ -117,7 +118,14 @@ public final class SharedSettings: @unchecked Sendable {
         set { defaults.set(newValue.rawValue, forKey: Key.keyboardLayout.rawValue) }
     }
 
-    /// Set from the keyboard's own settings sheet or the app's Settings.
+    /// ABC shows the keyboard's own letters instead of switching to the next keyboard for typing
+    /// letters, Wispr Flow's "Show full QWERTY keyboard". Off by default.
+    public var keyboardFullQwerty: Bool {
+        get { bool(.keyboardFullQwerty, default: false) }
+        set { defaults.set(newValue, forKey: Key.keyboardFullQwerty.rawValue) }
+    }
+
+    /// Set from the keyboard's ☰ menu or the app's Settings.
     public var keyboardAppearance: KeyboardAppearancePreference {
         get { enumValue(.keyboardAppearance) ?? .automatic }
         set { defaults.set(newValue.rawValue, forKey: Key.keyboardAppearance.rawValue) }

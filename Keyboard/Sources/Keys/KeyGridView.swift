@@ -12,7 +12,7 @@ final class KeyButton: UIControl {
         super.init(frame: .zero)
         isExclusiveTouch = true
         background.isUserInteractionEnabled = false
-        background.layer.cornerRadius = 12
+        background.layer.cornerRadius = 8.5
         background.layer.cornerCurve = .continuous
         addSubview(background)
 
@@ -32,13 +32,11 @@ final class KeyButton: UIControl {
         if let label = spec.label {
             titleLabel.text = label
             let isCharacter = spec.style == .character && label.count == 1
-            titleLabel.font = isCharacter
-                ? .systemFont(ofSize: 23, weight: .regular)
-                : .systemFont(ofSize: 16, weight: spec.style == .returnKey ? .medium : .regular)
+            titleLabel.font = .systemFont(ofSize: isCharacter ? 24 : 17, weight: .regular)
         }
         if let systemImage = spec.systemImage {
             iconView.image = UIImage(systemName: systemImage,
-                                     withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular))
+                                     withConfiguration: UIImage.SymbolConfiguration(pointSize: 19, weight: .regular))
         }
         isAccessibilityElement = true
         accessibilityTraits = .keyboardKey
@@ -64,39 +62,25 @@ final class KeyButton: UIControl {
         }
     }
 
+    /// Wispr's key face: 43 pt tall in a 53 pt row, 3 pt in from the sides plus the spec's gaps.
     override func layoutSubviews() {
         super.layoutSubviews()
-        let inset = bounds.insetBy(dx: 3, dy: 4)
-        background.frame = inset
-        titleLabel.frame = inset.insetBy(dx: 2, dy: 0)
-        iconView.frame = inset
+        var face = bounds.insetBy(dx: 3, dy: 5)
+        face.origin.x += spec.leadingGap
+        face.size.width -= spec.leadingGap + spec.trailingGap
+        background.frame = face
+        titleLabel.frame = face.insetBy(dx: 2, dy: 0)
+        iconView.frame = face
     }
 
-    /// The mock's keys: white (graphite) letters, grey function keys and an ink return key, each
-    /// with a 1 pt hard shadow. Increase Contrast adds a hairline.
+    /// Wispr's keys: every key the same flat grey (white in light), no shadow. Increase Contrast
+    /// adds a hairline.
     private func updateColors() {
-        let base: UIColor
-        switch spec.style {
-        case .character:
-            base = KeyboardChrome.keyUIColor
-        case .function:
-            base = KeyboardChrome.functionKeyUIColor
-        case .returnKey:
-            base = KeyboardChrome.returnKeyUIColor
-        }
-        let highlighted = spec.style == .returnKey
-            ? KeyboardChrome.returnKeyUIColor.withAlphaComponent(0.72)
-            : KeyboardChrome.pressedKeyUIColor
-        background.backgroundColor = isHighlighted ? highlighted : base
-        let foreground = spec.style == .returnKey ? KeyboardChrome.returnGlyphUIColor : UIColor.label
-        titleLabel.textColor = foreground
-        iconView.tintColor = foreground
+        background.backgroundColor = isHighlighted ? KeyboardChrome.pressedKeyUIColor : KeyboardChrome.keyUIColor
+        titleLabel.textColor = .label
+        iconView.tintColor = .label
         background.layer.borderWidth = traitCollection.accessibilityContrast == .high ? 1 : 0
         background.layer.borderColor = KeyboardChrome.borderUIColor.resolvedColor(with: traitCollection).cgColor
-        background.layer.shadowColor = KeyboardChrome.keyShadowUIColor.resolvedColor(with: traitCollection).cgColor
-        background.layer.shadowOpacity = 1
-        background.layer.shadowOffset = CGSize(width: 0, height: isHighlighted ? 0 : 1)
-        background.layer.shadowRadius = 0
     }
 
     private static func accessibilityLabel(for spec: KeySpec) -> String {
@@ -110,6 +94,7 @@ final class KeyButton: UIControl {
         case .plane(.numbers): "Numbers"
         case .plane(.symbols): "More symbols"
         case .plane(.voice): "Voice pad"
+        case .abc: "Letters"
         case .globe: "Next keyboard"
         }
     }
@@ -125,6 +110,7 @@ final class KeyGridView: UIView {
     weak var globeTarget: UIInputViewController?
 
     private var rows: [[KeyButton]] = []
+    /// Wispr's row pitch; rows share a shorter grid evenly.
     private let rowHeight: CGFloat = 54
     private var spaceTrackOrigin: CGPoint = .zero
     private var consumedSpaceTranslation: CGFloat = 0
@@ -159,7 +145,7 @@ final class KeyGridView: UIView {
     }
 
     override var intrinsicContentSize: CGSize {
-        CGSize(width: UIView.noIntrinsicMetric, height: rowHeight * 4 + 8)
+        CGSize(width: UIView.noIntrinsicMetric, height: rowHeight * 4)
     }
 
     /// Off while a dictation runs: the typing keys dim and stop responding (return could send a
@@ -183,7 +169,7 @@ final class KeyGridView: UIView {
         let horizontalPadding: CGFloat = 3
         let width = bounds.width - horizontalPadding * 2
         let rowCount = CGFloat(max(rows.count, 1))
-        let height = min(rowHeight, (bounds.height - 4) / rowCount)
+        let height = min(rowHeight, bounds.height / rowCount)
         // Reference unit: a 10-key row fills the width.
         let unit = width / 10
 
@@ -193,7 +179,7 @@ final class KeyGridView: UIView {
             let rowWidth = min(width, totalWeight * unit)
             let scale = rowWidth / (totalWeight * unit)
             var x = horizontalPadding + (width - rowWidth) / 2
-            let y = 2 + CGFloat(rowIndex) * height
+            let y = CGFloat(rowIndex) * height
             for button in row {
                 let keyWidth = button.spec.weight * unit * scale
                 button.frame = CGRect(x: x, y: y, width: keyWidth, height: height)

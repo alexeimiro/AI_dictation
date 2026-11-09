@@ -1,99 +1,73 @@
 import MurmurCore
 import SwiftUI
 
-/// The row above the keys. The voice keyboard's (Anton's mock): settings, the style pill and
-/// Delete. The key layouts': settings, then the style and language pills (or a notice, a caption
-/// or the last dictation in their place), then the mic.
+/// The row above the keys, laid out like Wispr Flow's: ☰ on the left and the main controls on the
+/// right, 46 pt tall and 12 pt in from the edges, with no divider. The voice keyboard keeps Delete
+/// there; the key layouts have the mic, or Start while no session runs. While a dictation runs a
+/// grey ✕ takes ☰'s place and the style pill dims; while a page is open a white ✕ closes it.
 struct KeyboardToolbar: View {
     let model: KeyboardModel
 
     var body: some View {
-        Group {
-            if model.showsVoicePad {
-                voiceBar
-            } else {
-                keysBar
+        let metrics = BarMetrics.of(model)
+        HStack(spacing: 4) {
+            leading(metrics)
+            // The spacer keeps the right-hand controls at the edge when the centre is empty.
+            HStack(spacing: 0) {
+                centre(metrics)
+                Spacer(minLength: 0)
             }
-        }
-        .foregroundStyle(.primary)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(KeyboardChrome.border).frame(height: 1)
-        }
-    }
-
-    private var voiceBar: some View {
-        HStack(spacing: 8) {
-            settingsButton
-            StylePill(model: model)
-            Spacer(minLength: 0)
+            .padding(.leading, 4)
             memoryReadout
-            DeleteKey(model: model)
+            trailing(metrics)
         }
         .padding(.horizontal, 12)
+        .padding(.top, metrics.top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .foregroundStyle(.primary)
     }
 
-    private var keysBar: some View {
-        HStack(spacing: 6) {
-            settingsButton
-            keysCenter
-                .frame(maxWidth: .infinity, alignment: .leading)
-            memoryReadout
-            if !model.isCapturing {
-                MicButton(model: model, size: 40, ringed: false)
-                    .frame(width: 44, height: 44)
+    @ViewBuilder
+    private func leading(_ metrics: BarMetrics) -> some View {
+        if let overlay = model.overlay {
+            CircleButton(size: metrics.control, label: overlay == .menu ? "Close menu" : "Close styles",
+                         action: model.actions.hideOverlay) {
+                Image(systemName: "xmark")
+                    .font(.system(size: metrics.control * 0.36, weight: .medium))
             }
+        } else if model.isCapturing {
+            CancelChip(model: model, size: metrics.control)
+        } else {
+            Button { model.actions.showOverlay(.menu) } label: {
+                Image(systemName: "line.3.horizontal")
+                    .font(.system(size: 20))
+                    .frame(width: metrics.control, height: metrics.control)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.keyboardPress)
+            .accessibilityLabel("Menu")
         }
-        .padding(.horizontal, 6)
     }
 
-    private var settingsButton: some View {
-        let open = model.overlay == .settings
-        let size: CGFloat = model.showsVoicePad ? 44 : 36
-        return Button {
-            open ? model.actions.hideOverlay() : model.actions.showOverlay(.settings)
-        } label: {
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: model.showsVoicePad ? 17 : 15, weight: .semibold))
-                .foregroundStyle(open ? KeyboardChrome.accentGlyph : Color.primary)
-                .frame(width: size, height: size)
-                .background {
-                    if open {
-                        Circle().fill(KeyboardChrome.accent)
-                    } else {
-                        KeyboardSurface(shape: Circle())
+    @ViewBuilder
+    private func centre(_ metrics: BarMetrics) -> some View {
+        if model.overlay != nil || model.isCapturing {
+            EmptyView()
+        } else if model.showsVoicePad {
+            // The voice pad shows its notices over the talk button.
+            if model.translationEnabled {
+                TranslateChip(model: model, height: metrics.control)
+            }
+        } else if let pending = model.pendingResult {
+            HStack(spacing: 4) {
+                Button(action: model.actions.insertPending) {
+                    ViewThatFits(in: .horizontal) {
+                        insertLabel("Insert last dictation", height: metrics.control)
+                        insertLabel("Insert", height: metrics.control)
                     }
                 }
-                .frame(width: 44, height: 44)
-                .contentShape(.rect)
-        }
-        .buttonStyle(.keyboardPress)
-        .accessibilityLabel("Keyboard settings")
-    }
-
-    @ViewBuilder
-    private var memoryReadout: some View {
-        if let memory = model.debugMemory {
-            Text(memory)
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(KeyboardChrome.muted)
-        }
-    }
-
-    @ViewBuilder
-    private var keysCenter: some View {
-        if let pending = model.pendingResult {
-            HStack(spacing: 6) {
-                Button(action: model.actions.insertPending) {
-                    Label("Insert last dictation", systemImage: "arrow.uturn.down")
-                        .font(.system(size: 14, weight: .medium))
-                        .lineLimit(1)
-                        .padding(.horizontal, 10)
-                        .frame(height: 32)
-                        .background { KeyboardSurface(shape: Capsule(), active: true) }
-                        .frame(minHeight: 44)
-                }
                 .buttonStyle(.keyboardPress)
+                .accessibilityLabel("Insert last dictation")
                 .accessibilityHint(pending.text)
                 dismissButton(model.actions.dismissPending)
             }
@@ -106,55 +80,74 @@ struct KeyboardToolbar: View {
             case .notice(let message):
                 banner(title: nil, detail: message, dismiss: model.actions.dismissNotice)
             case .needsReconnect:
-                caption("Tap the mic to reconnect")
+                caption("Tap Start to reconnect")
             case .openingApp:
                 caption("Opening Murmur…")
             case .starting:
                 caption("Starting…")
             case .idle, .listening, .processing:
-                ViewThatFits(in: .horizontal) {
-                    pills(tiles: true)
-                    pills(tiles: false)
+                if model.translationEnabled {
+                    TranslateChip(model: model, height: metrics.control)
                 }
             }
         }
     }
 
-    private func pills(tiles: Bool) -> some View {
-        HStack(spacing: 6) {
-            StylePill(model: model, compact: true, showsDisc: tiles)
-            languagePill(tile: tiles)
+    @ViewBuilder
+    private func trailing(_ metrics: BarMetrics) -> some View {
+        switch model.overlay {
+        case .menu:
+            HStack(spacing: 4) {
+                CircleButton(size: metrics.control, label: "Letters", action: model.actions.showLetters) {
+                    Text("ABC")
+                        .font(.system(size: 15, weight: .medium))
+                }
+                CircleButton(size: metrics.control, label: "Murmur settings", action: model.actions.openApp) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: metrics.control * 0.42))
+                }
+                .disabled(!model.hasFullAccess)
+                .opacity(model.hasFullAccess ? 1 : 0.4)
+            }
+        case .style:
+            StylePill(model: model, height: metrics.control)
+        case nil:
+            if model.showsVoicePad {
+                HStack(spacing: 4) {
+                    StylePill(model: model, height: metrics.control)
+                    if !model.isCapturing {
+                        DeleteKey(model: model, size: metrics.control)
+                    }
+                }
+            } else if model.isSessionLive || model.isCapturing || model.isTransitioning {
+                HStack(spacing: 4) {
+                    StylePill(model: model, height: metrics.control)
+                    MicButton(model: model, size: metrics.control)
+                }
+            } else {
+                StartPill(model: model, height: metrics.control)
+            }
         }
     }
 
-    /// Opens the language sheet over the keys.
-    private func languagePill(tile: Bool) -> some View {
-        Button { model.actions.showOverlay(.languages) } label: {
-            HStack(spacing: 6) {
-                if tile, model.translationEnabled {
-                    TranslateGlyph(tile: KeyboardChrome.translateTile)
-                        .frame(width: 19, height: 19)
-                        .frame(width: 26, height: 26)
-                        .background(KeyboardChrome.translateTile, in: .rect(cornerRadius: 8, style: .continuous))
-                }
-                Text(model.languagePillTitle)
-                    .font(.system(size: 14, weight: .bold))
-                    .lineLimit(1)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 10, weight: .bold))
-            }
-            .padding(.leading, tile && model.translationEnabled ? 5 : 12)
-            .padding(.trailing, 11)
-            .frame(height: 36)
+    @ViewBuilder
+    private var memoryReadout: some View {
+        if let memory = model.debugMemory {
+            Text(memory)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(KeyboardChrome.muted)
+        }
+    }
+
+    private func insertLabel(_ title: String, height: CGFloat) -> some View {
+        Label(title, systemImage: "arrow.uturn.down")
+            .font(.system(size: 15, weight: .semibold))
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 14)
+            .frame(height: height)
             .background { KeyboardSurface(shape: Capsule()) }
-            .frame(minHeight: 44)
-            .contentShape(.rect)
-        }
-        .buttonStyle(.keyboardPress)
-        .disabled(model.locksSessionOptions)
-        .accessibilityLabel(model.translationEnabled
-            ? "Translate from \(model.effectiveLanguage.localizedName) to \(model.targetLanguage.localizedName)"
-            : "Dictation language: \(model.effectiveLanguage.localizedName)")
+            .contentShape(.capsule)
     }
 
     private func caption(_ text: String) -> some View {
@@ -165,7 +158,7 @@ struct KeyboardToolbar: View {
     }
 
     private func banner(title: String?, detail: String, dismiss: @escaping () -> Void) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             VStack(alignment: .leading, spacing: 1) {
                 if let title {
                     Text(title).font(.system(size: 13, weight: .semibold))
@@ -187,35 +180,99 @@ struct KeyboardToolbar: View {
                 .frame(width: 30, height: 30)
                 .background { KeyboardSurface(shape: Circle()) }
                 .frame(width: 44, height: 44)
+                .contentShape(.rect)
         }
         .buttonStyle(.keyboardPress)
         .accessibilityLabel("Dismiss")
     }
 }
 
-/// Replaces the key layouts' keys while a dictation runs: the voice keyboard's talk button, ✕
-/// beside it, and the waveform and status line under it.
+/// A white (light: ink) circle in the toolbar, like Wispr's mic, ✕, ABC and ⚙.
+private struct CircleButton<Content: View>: View {
+    let size: CGFloat
+    let label: String
+    let action: () -> Void
+    let content: Content
+
+    init(size: CGFloat, label: String, action: @escaping () -> Void, @ViewBuilder content: () -> Content) {
+        self.size = size
+        self.label = label
+        self.action = action
+        self.content = content()
+    }
+
+    var body: some View {
+        Button(action: action) {
+            content
+                .foregroundStyle(KeyboardChrome.primaryGlyph)
+                .frame(width: size, height: size)
+                .background(KeyboardChrome.primary, in: .circle)
+                .contentShape(.circle)
+        }
+        .buttonStyle(.keyboardPress)
+        .accessibilityLabel(label)
+    }
+}
+
+/// Wispr's "Start" capsule for the key layouts while no session runs: it opens Murmur, which starts
+/// one and listens straight away.
+private struct StartPill: View {
+    let model: KeyboardModel
+    var height: CGFloat
+
+    var body: some View {
+        Button(action: model.actions.mic) {
+            HStack(spacing: 13) {
+                Text("Start")
+                    .font(.system(size: 17, weight: .medium))
+                LogoMarkShape()
+                    .fill(KeyboardChrome.primaryGlyph)
+                    .frame(width: 20, height: 19)
+            }
+            .foregroundStyle(KeyboardChrome.primaryGlyph)
+            .padding(.horizontal, 17)
+            .frame(height: height)
+            .background(KeyboardChrome.primary, in: .capsule)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.keyboardPress)
+        .accessibilityLabel("Start Murmur")
+        .accessibilityHint("Opens Murmur to start listening")
+        .accessibilityAddTraits(.startsMediaSession)
+    }
+}
+
+/// Murmur's mark, three bars and a dot, as `LogoMarkShape` in MurmurUI draws it. The keyboard
+/// links only MurmurCore, so it keeps its own copy for the Start capsule.
+private struct LogoMarkShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let barHeights: [CGFloat] = [0.48, 1.0, 0.7]
+        let unit = rect.width / 8.2
+        let barWidth = unit * 1.3
+        let gap = unit * 0.9
+        var path = Path()
+        for (index, height) in barHeights.enumerated() {
+            let barRect = CGRect(x: rect.minX + CGFloat(index) * (barWidth + gap),
+                                 y: rect.midY - rect.height * height / 2,
+                                 width: barWidth, height: rect.height * height)
+            path.addRoundedRect(in: barRect, cornerSize: CGSize(width: barWidth / 2, height: barWidth / 2))
+        }
+        let dotSize = barWidth * 1.15
+        let dotX = rect.minX + 3 * (barWidth + gap) + unit * 0.1
+        path.addEllipse(in: CGRect(x: dotX, y: rect.midY - dotSize / 2, width: dotSize, height: dotSize))
+        return path
+    }
+}
+
+/// Replaces the key layouts' keys while a dictation runs, Wispr's listening panel: the dots and two
+/// lines. The toolbar holds ✕ and ✓.
 struct ListeningPanel: View {
     let model: KeyboardModel
 
     var body: some View {
-        VStack(spacing: 12) {
-            MicButton(model: model, size: 64)
-                .overlay {
-                    CancelChip(model: model)
-                        .offset(x: -(32 + 28 + 22))
-                }
-            Group {
-                if case .listening = model.phase {
-                    VStack(spacing: 6) {
-                        Waveform(model: model, height: 24)
-                        StatusLine(model: model)
-                    }
-                } else {
-                    StatusLine(model: model)
-                }
-            }
-            .frame(height: 48)
+        VStack(spacing: 18) {
+            DotsWaveform(model: model, height: 28)
+            ListeningCaption(model: model)
         }
         .foregroundStyle(.primary)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

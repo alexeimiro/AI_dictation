@@ -338,6 +338,17 @@ struct SharedSettingsTests {
         #expect(reread.keyboardLayout == .qwerty)
     }
 
+    @Test func abcSwitchesKeyboardsUntilFullQwertyIsOn() throws {
+        let suite = "test.murmur.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = SharedSettings(defaults: defaults)
+        #expect(!settings.keyboardFullQwerty)
+        settings.keyboardFullQwerty = true
+        #expect(SharedSettings(defaults: defaults).keyboardFullQwerty)
+    }
+
     @Test func keyboardAppearanceFollowsTheFieldUntilPicked() throws {
         let suite = "test.murmur.settings.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -358,6 +369,9 @@ struct SharedSettingsTests {
 
         #expect(KeyboardDemo("listening@numbers") == KeyboardDemo(state: .listening, layout: .numbers))
         #expect(KeyboardDemo("style")?.layout == nil)
+        #expect(KeyboardDemo("menu@voice") == KeyboardDemo(state: .menu, layout: .voice))
+        #expect(KeyboardDemo("off")?.state == .off)
+        #expect(KeyboardDemo("settings") == nil)
         #expect(KeyboardDemo("listening@dvorak") == nil)
         #expect(KeyboardDemo("dancing") == nil)
 

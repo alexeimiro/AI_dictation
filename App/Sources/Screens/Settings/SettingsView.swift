@@ -34,6 +34,8 @@ struct SettingsView: View {
                     Text("Numbers first").tag(KeyboardLayoutPreference.numbers)
                     Text("QWERTY").tag(KeyboardLayoutPreference.qwerty)
                 }
+                Toggle("Show full QWERTY keyboard", isOn: $settings.keyboardFullQwerty)
+                    .tint(Palette.toggleGreen)
                 Picker("Appearance", selection: $settings.keyboardAppearance) {
                     ForEach(KeyboardAppearancePreference.allCases) { Text($0.title).tag($0) }
                 }
@@ -46,7 +48,7 @@ struct SettingsView: View {
             } header: {
                 Text("Keyboard")
             } footer: {
-                Text("The voice keyboard needs Allow Full Access; until it's on, the keyboard shows Numbers first.")
+                Text("ABC switches to your default keyboard for letters, unless Show full QWERTY keyboard is on. The voice keyboard needs Allow Full Access; until it's on, the keyboard shows Numbers first.")
             }
             Section("System") {
                 Toggle("Live Activities", isOn: $settings.liveActivities)

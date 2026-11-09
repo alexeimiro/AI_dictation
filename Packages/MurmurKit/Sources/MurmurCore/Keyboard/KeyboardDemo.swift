@@ -5,8 +5,9 @@ import Foundation
 /// `listening@numbers`; without a layout the keyboard keeps the user's.
 public struct KeyboardDemo: Equatable, Sendable {
     public enum State: String, CaseIterable, Sendable {
-        case idle, translate, starting, opening, reconnect, listening, processing, inserted
-        case notice, pending, fullAccess, style, settings, languages
+        /// `idle` has a live session; `off` has none, so the key layouts show Start.
+        case idle, off, translate, starting, opening, reconnect, listening, processing, inserted
+        case notice, pending, fullAccess, style, menu
     }
 
     public var state: State
