@@ -112,6 +112,8 @@ targets:
         MurmurSupabaseAnonKey: $(SUPABASE_ANON_KEY)
         MurmurTermsURL: $(MURMUR_TERMS_URL)
         MurmurPrivacyURL: $(MURMUR_PRIVACY_URL)
+        MurmurSupportURL: $(MURMUR_SUPPORT_URL)
+        MurmurInviteURL: $(MURMUR_INVITE_URL)
     entitlements:
       path: App/Murmur.entitlements
       properties:

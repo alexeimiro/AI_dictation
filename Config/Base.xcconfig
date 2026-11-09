@@ -7,9 +7,13 @@ MURMUR_APP_NAME = Murmur
 MURMUR_BUNDLE_PREFIX = com.antonmironenko
 MURMUR_URL_SCHEME = murmur
 MURMUR_APP_GROUP = group.$(MURMUR_BUNDLE_PREFIX).murmur
-// Legal pages linked from sign-in. `//` starts a comment here, so write https:/$()/example.com/terms.
-MURMUR_TERMS_URL =
-MURMUR_PRIVACY_URL =
+// The website (scripts/publish_site.sh): the legal pages linked from sign-in, the paywall and
+// Account, the Help center, and the page invite links open. `//` starts a comment here, so write
+// https:/$()/example.com/terms.
+MURMUR_TERMS_URL = https:/$()/alexeimiro.github.io/AI_dictation/terms/
+MURMUR_PRIVACY_URL = https:/$()/alexeimiro.github.io/AI_dictation/privacy/
+MURMUR_SUPPORT_URL = https:/$()/alexeimiro.github.io/AI_dictation/support/
+MURMUR_INVITE_URL = https:/$()/alexeimiro.github.io/AI_dictation/invite/
 
 MARKETING_VERSION = 0.1.0
 CURRENT_PROJECT_VERSION = 2

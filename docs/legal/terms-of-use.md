@@ -1,6 +1,6 @@
 # Murmur Terms of Use
 
-Effective [DATE]
+Effective November 9, 2026
 
 These terms are between you and OKNENOR L.L.C-FZ ("we"), the maker of Murmur. By using Murmur you
 agree to them, and to Apple's Licensed Application End User License Agreement
@@ -19,6 +19,11 @@ at any time in the app.
   Payment is charged to your Apple Account when you confirm the purchase. It renews
   automatically, at the same price and for the same period, unless you cancel it at least 24
   hours before the period ends. Manage or cancel it in Settings › Apple Account › Subscriptions.
+- Invites: a friend who enters your invite code within 14 days of creating their Murmur account
+  gets a month of Murmur Pro, and you get a month once they finish their first dictation, up to
+  12 months in total. Free months start when they're given, alongside any subscription. They
+  have no cash value, and we may withhold them if invites are abused, for example with fake
+  accounts.
 - Refunds are handled by Apple, under its policies.
 - We may change prices. A new price applies to your subscription only after Apple tells you about
   it, as App Store rules require.
@@ -52,9 +57,9 @@ break these terms.
 
 ## Law
 
-These terms are governed by the laws of [JURISDICTION], without regard to its conflict-of-law
+These terms are governed by the laws of the United Arab Emirates as applied in the Emirate of Dubai, without regard to its conflict-of-law
 rules, unless the law where you live says otherwise.
 
 ## Contact
 
-[CONTACT EMAIL]
+miralex13@gmail.com

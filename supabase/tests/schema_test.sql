@@ -13,7 +13,9 @@ select is((select full_name from public.profiles where id = '11111111-1111-1111-
 select ok((select trial_ends_at between now() + interval '13 days 23 hours' and now() + interval '14 days 1 hour'
            from public.entitlements where user_id = '11111111-1111-1111-1111-111111111111'),
           'new users get a 14-day trial');
-select is((select count(*)::int from public.referrals), 2, 'each user gets a referral code');
+select is((select count(*)::int from public.referrals
+           where user_id in ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222')),
+          2, 'each user gets a referral code');
 
 -- Styles: Word for word by default; Improve my grammar, and the styles older builds still write.
 select is((select default_style from public.profiles where id = '11111111-1111-1111-1111-111111111111'),

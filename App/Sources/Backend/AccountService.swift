@@ -1,11 +1,13 @@
 import Foundation
+import MurmurCore
 import os
 import Supabase
 import UIKit
 
-/// The account screens' server calls: the plan and this week's words (`my_quota`), support
-/// messages (`issue_reports`) and deleting the account (`delete-account`). Without a backend the
-/// reads return nil and the writes throw, so builds without one still show the screens.
+/// The account screens' server calls: the plan and this week's words (`my_quota`), invites
+/// (`my_referrals`, `redeem_referral`), support messages (`issue_reports`) and deleting the account
+/// (`delete-account`). Without a backend the reads return nil and the writes throw, so builds
+/// without one still show the screens.
 @MainActor
 final class AccountService {
     /// `my_quota()`: what the menu and the Account screen show about the plan.
@@ -18,6 +20,9 @@ final class AccountService {
         /// Nil on Pro: no weekly limit.
         let weeklyLimit: Int?
         let remaining: Int?
+        /// When the current free stretch started: the trial, or months from invites. Nil from
+        /// `verify-purchase`, which answers with `quota_status`.
+        var trialStartedAt: Date?
 
         enum CodingKeys: String, CodingKey {
             case plan
@@ -26,10 +31,17 @@ final class AccountService {
             case wordsThisWeek = "words_this_week"
             case weeklyLimit = "weekly_limit"
             case remaining
+            case trialStartedAt = "trial_started_at"
         }
 
         /// The trial the signup trigger grants (`handle_new_user`).
         static let trialDays = 14
+
+        /// Days in the current free stretch: 14 for the trial, more with a month from an invite.
+        var trialLength: Int {
+            guard let trialStartedAt, let trialEndsAt else { return Self.trialDays }
+            return max(1, Int((trialEndsAt.timeIntervalSince(trialStartedAt) / 86_400).rounded()))
+        }
 
         var isPro: Bool { plan == "pro" }
 
@@ -48,8 +60,8 @@ final class AccountService {
         /// paid plan, which has nothing to count.
         func usageLine(now: Date = Date()) -> String? {
             if let left = trialDaysLeft(now: now) {
-                let used = min(Self.trialDays, max(0, Self.trialDays - left))
-                return "\(used) of \(Self.trialDays) days used in trial"
+                let used = min(trialLength, max(0, trialLength - left))
+                return "\(used) of \(trialLength) days used in trial"
             }
             guard let weeklyLimit else { return nil }
             return "\(wordsThisWeek.formatted()) of \(weeklyLimit.formatted()) words used this week"
@@ -58,11 +70,67 @@ final class AccountService {
         /// How full the bar under `usageLine` is, 0…1.
         func usageFraction(now: Date = Date()) -> Double? {
             if let left = trialDaysLeft(now: now) {
-                return Double(Self.trialDays - min(Self.trialDays, left)) / Double(Self.trialDays)
+                return Double(trialLength - min(trialLength, left)) / Double(trialLength)
             }
             guard let weeklyLimit, weeklyLimit > 0 else { return nil }
             return min(1, Double(wordsThisWeek) / Double(weeklyLimit))
         }
+    }
+
+    /// `my_referrals()`: Refer a friend's code and counts.
+    struct Referrals: Decodable, Equatable, Sendable {
+        let code: String
+        let friendsJoined: Int
+        /// Friends whose first dictation earned the caller a month.
+        let monthsEarned: Int
+        /// The caller entered a friend's code.
+        let redeemed: Bool
+        /// The caller can still enter one: a new account (14 days) that hasn't.
+        let canRedeem: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case code, redeemed
+            case friendsJoined = "friends_joined"
+            case monthsEarned = "months_earned"
+            case canRedeem = "can_redeem"
+        }
+
+        /// The most months invites earn (`reward_referrer`).
+        static let maxMonths = 12
+
+        /// "2 friends joined · 1 month of Pro earned"; nil before anyone joins.
+        var summary: String? {
+            guard friendsJoined > 0 else { return nil }
+            let friends = friendsJoined == 1 ? "1 friend joined" : "\(friendsJoined) friends joined"
+            let months = monthsEarned == 1 ? "1 month of Pro earned" : "\(monthsEarned) months of Pro earned"
+            return "\(friends) · \(months)"
+        }
+    }
+
+    /// What entering a friend's code did (`redeem_referral`).
+    enum RedeemOutcome: String, Equatable, Sendable {
+        case ok, invalid
+        case ownCode = "own_code"
+        case alreadyRedeemed = "already_redeemed"
+        case tooLate = "too_late"
+        case signInRequired = "sign_in_required"
+
+        var message: String {
+            switch self {
+            case .ok: "You've got a month of \(Brand.name) Pro, thanks to your friend."
+            case .invalid: "That code doesn't match an invite. Check it and try again."
+            case .ownCode: "That's your own code. Share it with a friend instead."
+            case .alreadyRedeemed: "You've already used an invite code."
+            case .tooLate: "Invite codes work within 14 days of creating your account."
+            case .signInRequired: "Sign in to use an invite code."
+            }
+        }
+    }
+
+    /// A code as people type or paste it: "A1B2 C3D4" → "a1b2c3d4"; nil when nothing's left.
+    nonisolated static func normalizedCode(_ text: String) -> String? {
+        let code = text.lowercased().filter { $0.isLetter || $0.isNumber }
+        return code.isEmpty || code.count > 32 ? nil : code
     }
 
     /// What the support sheet sends.
@@ -112,6 +180,31 @@ final class AccountService {
         try await backend.ensureSession()
         let rows: [Quota] = try await backend.client.rpc("my_quota").execute().value
         return rows.first
+    }
+
+    /// The caller's invite code and counts; nil without a backend or a signed-in account.
+    func referrals() async throws -> Referrals? {
+        guard let backend, backend.client.auth.currentSession != nil else { return nil }
+        try await backend.ensureSession()
+        let rows: [Referrals] = try await backend.client.rpc("my_referrals").execute().value
+        return rows.first
+    }
+
+    /// Enters a friend's invite code: a month of Pro for the caller, and one for the friend once
+    /// the caller first dictates.
+    func redeem(code: String) async throws -> RedeemOutcome {
+        guard let backend else { throw Failure.notConfigured }
+        guard let code = Self.normalizedCode(code) else { return .invalid }
+        guard backend.client.auth.currentSession != nil else { return .signInRequired }
+        do {
+            try await backend.ensureSession()
+            let answer: String = try await backend.client.rpc("redeem_referral", params: ["p_code": code])
+                .execute().value
+            return RedeemOutcome(rawValue: answer) ?? .invalid
+        } catch {
+            logger.error("Redeeming an invite failed: \(error.localizedDescription, privacy: .public)")
+            throw Failure.unavailable("Couldn't use that code. Check your connection and try again.")
+        }
     }
 
     /// Writes a support message to `issue_reports`, with what's needed to look into it.

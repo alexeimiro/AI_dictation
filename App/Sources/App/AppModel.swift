@@ -257,6 +257,7 @@ final class AppModel {
         librarySync?.syncSoon()
         let answers = record.answers
         Task { await onboardingServices.profile.sync(answers) }
+        redeemPendingInvite()
     }
 
     /// Dictations whose cleanup never finished keep their raw transcript; a recent one is
@@ -282,6 +283,44 @@ final class AppModel {
     private func feedLibraryToPipeline() {
         pipeline.dictionary = library.dictionaryTerms
         pipeline.snippets = library.snippets
+    }
+
+    // MARK: Invites
+
+    private static let pendingInviteKey = "pendingInviteCode"
+
+    /// A friend's code from an invite link, kept until there's an account to give the month to.
+    private(set) var pendingInvite = UserDefaults.standard.string(forKey: AppModel.pendingInviteKey)
+    /// What a code from an invite link did, for the alert.
+    var inviteMessage: String?
+    @ObservationIgnored private var redeemingInvite = false
+
+    /// `murmur://invite?code=…`: the code is used now when signed in, else after sign-in.
+    func receiveInvite(_ code: String) {
+        guard let code = AccountService.normalizedCode(code) else { return }
+        pendingInvite = code
+        UserDefaults.standard.set(code, forKey: Self.pendingInviteKey)
+        redeemPendingInvite()
+    }
+
+    /// Uses a code from an invite link once the account is signed in; offline, it waits for the
+    /// next time Murmur comes to the front.
+    func redeemPendingInvite() {
+        guard let code = pendingInvite, !redeemingInvite, onboarding.isComplete, account?.isSignedIn == true,
+              !launchOptions.useFixtures, launchOptions.accountState == nil else { return }
+        redeemingInvite = true
+        Task {
+            defer { redeemingInvite = false }
+            guard let outcome = try? await accountService.redeem(code: code), outcome != .signInRequired else { return }
+            forgetPendingInvite()
+            inviteMessage = outcome.message
+            if outcome == .ok { refreshQuota() }
+        }
+    }
+
+    private func forgetPendingInvite() {
+        pendingInvite = nil
+        UserDefaults.standard.removeObject(forKey: Self.pendingInviteKey)
     }
 
     // MARK: Account
@@ -353,6 +392,7 @@ final class AppModel {
         librarySync?.reset()
         UserDefaults.standard.removeObject(forKey: Self.dataSharingKey)
         dataSharing = false
+        forgetPendingInvite()
         deleteAllHistory()
         library.deleteAll()
         quota = nil
@@ -479,6 +519,10 @@ final class AppModel {
             signInSheet = nil
             router.isMenuOpen = false
             showsPaywall = true
+        case .invite(let code):
+            showSwipeBack = false
+            router.isMenuOpen = false
+            receiveInvite(code)
         case .openSettings:
             showSwipeBack = false
             guard onboarding.isComplete else { return }
@@ -541,6 +585,7 @@ final class AppModel {
             history.reconcileInsertions(payloads: transport.payloads)
             importKeyboardAdditions()
             refreshQuota()
+            redeemPendingInvite()
             librarySync?.syncSoon(after: .milliseconds(500))
         case .background:
             activeSince = nil
@@ -563,6 +608,8 @@ enum DeepLink: Equatable {
     case openSettings
     /// `murmur://pro` — "Get unlimited words", from the keyboard's limit message.
     case pro
+    /// `murmur://invite?code=a1b2c3d4` — Open in Murmur, on a friend's invite page.
+    case invite(code: String)
     /// `murmur://auth-callback?…` — the emailed sign-in link and OAuth redirects.
     case authCallback(URL)
 
@@ -576,6 +623,9 @@ enum DeepLink: Equatable {
             self = .openSettings
         case ("pro", ""), ("pro", "/"):
             self = .pro
+        case ("invite", ""), ("invite", "/"):
+            guard let code = components?.queryItems?.first(where: { $0.name == "code" })?.value else { return nil }
+            self = .invite(code: code)
         case ("auth-callback", _):
             self = .authCallback(url)
         default:
@@ -587,7 +637,7 @@ enum DeepLink: Equatable {
 /// Screens reachable with `-route <name>` for screenshot comparison.
 enum LaunchRoute: String {
     case home, settings, languages, debug, transcript, swipeBack
-    case dictionary, snippets, style, scratchpad, menu, account, paywall
+    case dictionary, snippets, style, scratchpad, menu, account, paywall, referral
 
     init?(arguments: [String]) {
         guard let index = arguments.firstIndex(of: "-route"), arguments.indices.contains(index + 1) else {

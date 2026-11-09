@@ -53,6 +53,13 @@ struct RootView: View {
         } message: {
             Text("A link asked Murmur to start listening.")
         }
+        // A code from an invite link, used once signed in.
+        .alert("Your invite", isPresented: Binding(get: { model.inviteMessage != nil && !held },
+                                                   set: { if !$0 { model.inviteMessage = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.inviteMessage ?? "")
+        }
         // Home's signed-out card, Settings' Sign in… and onboarding's offer page open it.
         .sheet(item: $model.signInSheet, onDismiss: { signInSheetOnScreen = false }) { start in
             SignInAgainView(start: start)
@@ -110,6 +117,7 @@ private struct TabStack<Root: View>: View {
                     case .debug: DebugView()
                     case .transcript(let id): TranscriptDetailView(id: id)
                     case .account: AccountView()
+                    case .referral: ReferralView()
                     case .note(let id): NoteEditorView(id: id)
                     }
                 }

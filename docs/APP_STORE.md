@@ -1,7 +1,8 @@
 # Murmur on the App Store: listing, review notes, privacy answers
 
 Drafts for App Store Connect, app "Murmur: Voice Keyboard" (Apple ID 6829429992), version 1.0.
-Paste each block into the field named above it. Character limits are App Store Connect's.
+`node scripts/fill_app_store_listing.mjs` puts them there (all but the App Privacy answers, which
+App Store Connect only takes in its web page). Character limits are App Store Connect's.
 
 ## Listing
 
@@ -11,13 +12,13 @@ Paste each block into the field named above it. Character limits are App Store C
 > Speak in any app and Murmur types it, clean and spelled your way. Translate as you talk, keep your names in a personal dictionary, and dictate from the Action Button.
 
 **Keywords** (100):
-`dictation,voice typing,speech to text,keyboard,transcribe,translate,voice notes,talk to text,whisper`
+`dictation,voice typing,speech to text,keyboard,transcribe,translate,voice notes,talk to text,dictate`
 
 **Description** (4,000):
 > Murmur is a voice keyboard. Tap the mic in any app, say what you mean, and Murmur types it in seconds: punctuated, with "um" and "uh" gone, and with names spelled the way you spell them.
 >
 > WRITE IN ANY APP
-> Murmur works wherever you type: messages, email, notes, documents, chat with AI. Switch to the Murmur keyboard, tap the mic, talk, and tap ✓.
+> Murmur works wherever you type: messages, email, notes, documents, chat with AI. Switch to the Murmur keyboard, tap the mic, talk, and tap the check mark.
 >
 > YOUR WORDS, OR POLISHED
 > Word for word keeps exactly what you said. Improve my grammar fixes mistakes and drops false starts without changing your tone.
@@ -43,14 +44,16 @@ Paste each block into the field named above it. Character limits are App Store C
 > MURMUR PRO
 > Murmur is free with 1,000 words a week, after a 14-day trial of Pro. Murmur Pro has no weekly limit: $9.99 a month or $79.99 a year. Payment is charged to your Apple Account, and the subscription renews automatically unless cancelled at least 24 hours before the end of the period. Manage or cancel it in Settings › Apple Account › Subscriptions.
 >
-> Terms of Use: [TERMS URL]
-> Privacy Policy: [PRIVACY URL]
+> Terms of Use: https://alexeimiro.github.io/AI_dictation/terms/
+> Privacy Policy: https://alexeimiro.github.io/AI_dictation/privacy/
 
 **Category**: Productivity (secondary: Utilities)
 
-**Support URL**: [SUPPORT URL]. A page with a contact email is enough.
+**Support URL**: `https://alexeimiro.github.io/AI_dictation/support/`
 
-**Privacy Policy URL**: [PRIVACY URL]. Apple requires it before review; draft in `docs/legal/privacy-policy.md`.
+**Marketing URL**: `https://alexeimiro.github.io/AI_dictation/`
+
+**Privacy Policy URL**: `https://alexeimiro.github.io/AI_dictation/privacy/`, from `docs/legal/privacy-policy.md`.
 
 **Copyright**: `2026 OKNENOR L.L.C-FZ`
 
@@ -101,9 +104,10 @@ No objectionable content. The app isn't made for children. "Unrestricted web acc
 ## Before submitting
 
 - [ ] Paid Apps agreement signed by the account holder (Business › Agreements), with banking and tax.
-- [ ] Privacy Policy and Terms of Use hosted. Their URLs go in App Information and in the build settings `MURMUR_PRIVACY_URL` and `MURMUR_TERMS_URL`, which the app links to.
-- [ ] Support URL.
-- [ ] Screenshots for the 6.9" iPhone (1320 × 2868).
+- [x] Privacy Policy, Terms of Use and support page hosted on GitHub Pages (`scripts/publish_site.sh`), and in the build settings `MURMUR_PRIVACY_URL`, `MURMUR_TERMS_URL` and `MURMUR_SUPPORT_URL`.
+- [x] Listing, URLs, category, age rating, review notes and the 6.9" screenshots (1320 × 2868) in App Store Connect (`scripts/fill_app_store_listing.mjs`).
+- [ ] App Privacy answers (below), entered in App Store Connect › App Privacy.
+- [ ] App Review contact: name, phone and email, in the version's App Review Information.
 - [ ] The two subscriptions attached to version 1.0 under "In-App Purchases and Subscriptions", so they're reviewed with the app.
 
 ## Risks to know about

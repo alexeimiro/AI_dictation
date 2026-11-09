@@ -13,6 +13,7 @@ enum Route: Hashable {
     case debug
     case transcript(UUID)
     case account
+    case referral
     case note(UUID)
 }
 
@@ -53,6 +54,7 @@ final class Router {
         case .languages: [.settings, .debug, .languages]
         case .debug: [.settings, .debug]
         case .account: [.account]
+        case .referral: [.referral]
         case .home, .transcript, .swipeBack, .dictionary, .snippets, .style, .scratchpad, .menu, .paywall, nil: []
         }
     }

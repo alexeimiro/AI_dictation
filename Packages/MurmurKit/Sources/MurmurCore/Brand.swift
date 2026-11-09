@@ -51,6 +51,28 @@ public enum Brand {
         infoValue("MurmurPrivacyURL").flatMap(URL.init(string:))
     }
 
+    /// The menu's Help center; nil until `MURMUR_SUPPORT_URL` is set.
+    public static var supportURL: URL? {
+        infoValue("MurmurSupportURL").flatMap(URL.init(string:))
+    }
+
+    /// The page an invite shares (`MURMUR_INVITE_URL?code=a1b2c3d4`); nil until it's set.
+    public static func inviteURL(code: String) -> URL? {
+        guard let base = infoValue("MurmurInviteURL"),
+              var components = URLComponents(string: base) else { return nil }
+        components.queryItems = [URLQueryItem(name: "code", value: code)]
+        return components.url
+    }
+
+    /// Opening an invite in Murmur (`murmur://invite?code=a1b2c3d4`), from the invite page.
+    public static func inviteDeepLink(code: String) -> URL {
+        var components = URLComponents()
+        components.scheme = urlScheme
+        components.host = "invite"
+        components.queryItems = [URLQueryItem(name: "code", value: code)]
+        return components.url!
+    }
+
     private static func infoValue(_ key: String) -> String? {
         guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
               !value.isEmpty, !value.hasPrefix("$(") else { return nil }

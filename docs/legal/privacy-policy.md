@@ -1,9 +1,9 @@
 # Murmur Privacy Policy
 
-Effective [DATE]
+Effective November 9, 2026
 
 Murmur is a voice keyboard for iPhone made by OKNENOR L.L.C-FZ ("we"). This policy explains what
-Murmur collects, why, and the choices you have. Questions: [CONTACT EMAIL].
+Murmur collects, why, and the choices you have. Questions: miralex13@gmail.com.
 
 ## What stays on your iPhone
 
@@ -22,6 +22,8 @@ Murmur collects, why, and the choices you have. Questions: [CONTACT EMAIL].
   its models, and it may keep them for up to 30 days to detect abuse.
 - **Your dictionary, snippets and notes:** while you're signed in, they're saved to your account
   so they're on every device you use. They aren't shared with anyone.
+- **Invites:** if you join with a friend's invite code, we record whose code it was, so you each
+  get your month of Murmur Pro. Your friend sees how many people joined with their code, not who.
 - **How much you dictate:** the number of words in each dictation, to apply the free plan's weekly
   limit. Not the words themselves.
 - **Purchases:** if you subscribe to Murmur Pro, Apple tells us which plan you bought and when it
@@ -54,7 +56,7 @@ Subscriptions.
 ## Your rights
 
 You can see, correct, download or delete your data. Most of it is in the app; for anything else,
-write to [CONTACT EMAIL]. Depending on where you live, you may also have the right to object to
+write to miralex13@gmail.com. Depending on where you live, you may also have the right to object to
 processing, and to complain to your data protection authority.
 
 ## Children

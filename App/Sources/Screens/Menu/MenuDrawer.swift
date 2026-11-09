@@ -1,3 +1,4 @@
+import MurmurCore
 import MurmurUI
 import SwiftUI
 
@@ -59,6 +60,14 @@ struct MenuDrawer: View {
                     .padding(.top, 16)
                 }
                 Divider().padding(.vertical, 22)
+                item("Refer a friend", systemImage: "gift") { model.router.openFromMenu(.referral) }
+                Divider().padding(.vertical, 22)
+                if let help = Brand.supportURL {
+                    Link(destination: help) {
+                        row("Help center", systemImage: "questionmark.circle", external: true)
+                    }
+                    .buttonStyle(.plain)
+                }
                 item("Talk to Support", systemImage: "bubble.left.and.text.bubble.right") {
                     support = .issue
                 }
@@ -75,6 +84,14 @@ struct MenuDrawer: View {
 
     private func item(_ title: String, systemImage: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
+            row(title, systemImage: systemImage)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// A menu row; `external` adds Wispr's ↗ for a page that opens in Safari.
+    private func row(_ title: String, systemImage: String, external: Bool = false) -> some View {
+        HStack {
             Label {
                 Text(title).font(.ui(18))
             } icon: {
@@ -82,11 +99,17 @@ struct MenuDrawer: View {
                     .font(.system(size: 20))
                     .frame(width: 28)
             }
-            .foregroundStyle(Palette.text)
-            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
-            .contentShape(.rect)
+            Spacer(minLength: 8)
+            if external {
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Palette.textSecondary)
+                    .accessibilityHidden(true)
+            }
         }
-        .buttonStyle(.plain)
+        .foregroundStyle(Palette.text)
+        .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+        .contentShape(.rect)
     }
 
     private func close() {

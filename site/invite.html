@@ -1,0 +1,48 @@
+<h1>A month of Murmur Pro, from a friend</h1>
+<div class="gift" aria-hidden="true">
+  <p class="gift-mark"><span class="gift-word">Murmur</span><span class="gift-pro">Pro</span></p>
+  <p class="gift-line">Unlimited words for a month</p>
+</div>
+<p id="invite-intro">Murmur is a voice keyboard for iPhone: talk in any app and it types for you.
+Your friend's invite gives you a month of Murmur Pro, with no weekly word limit.</p>
+<div id="invite-code-box" class="codebox" hidden>
+  <span class="codebox-label">Invite code</span>
+  <span id="invite-code" class="codebox-code"></span>
+  <button id="invite-copy" class="codebox-copy" type="button">Copy</button>
+</div>
+<a id="invite-open" class="button" href="murmur://invite" hidden>Open in Murmur</a>
+<a class="button secondary" href="https://apps.apple.com/app/id6829429992">Get Murmur on the App Store</a>
+
+<h2>How it works</h2>
+<ol>
+<li>Get Murmur on your iPhone and create your account.</li>
+<li>Open this page again on that iPhone and tap <strong>Open in Murmur</strong>, or enter the code
+in Murmur under ☰ › Refer a friend.</li>
+<li>Enter it within 14 days of creating your account, and Murmur Pro is yours for a month.</li>
+</ol>
+<p class="fineprint">Invites follow Murmur's <a href="../terms/">Terms of Use</a>.</p>
+
+<script>
+  // The code comes from the link the app shares: …/invite/?code=a1b2c3d4.
+  (() => {
+    const code = (new URLSearchParams(location.search).get("code") || "").trim().toLowerCase();
+    if (!/^[a-z0-9]{4,32}$/.test(code)) {
+      document.getElementById("invite-intro").textContent =
+        "This invite link is missing its code. Ask your friend to send it again.";
+      return;
+    }
+    document.getElementById("invite-code").textContent = code.toUpperCase();
+    document.getElementById("invite-code-box").hidden = false;
+    const open = document.getElementById("invite-open");
+    open.href = "murmur://invite?code=" + encodeURIComponent(code);
+    open.hidden = false;
+    document.getElementById("invite-copy").addEventListener("click", async (event) => {
+      try {
+        await navigator.clipboard.writeText(code.toUpperCase());
+        event.target.textContent = "Copied";
+      } catch {
+        event.target.textContent = "Select and copy";
+      }
+    });
+  })();
+</script>
