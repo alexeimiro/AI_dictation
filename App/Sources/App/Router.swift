@@ -53,7 +53,7 @@ final class Router {
         case .languages: [.settings, .debug, .languages]
         case .debug: [.settings, .debug]
         case .account: [.account]
-        case .home, .transcript, .swipeBack, .dictionary, .snippets, .style, .scratchpad, .menu, nil: []
+        case .home, .transcript, .swipeBack, .dictionary, .snippets, .style, .scratchpad, .menu, .paywall, nil: []
         }
     }
 

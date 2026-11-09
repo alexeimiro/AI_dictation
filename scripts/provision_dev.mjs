@@ -7,6 +7,8 @@
 // Prerequisite — portal only, the public API has no App Groups endpoint:
 //   App Group group.com.antonmironenko.murmur, and the three App IDs below with the
 //   App Groups capability enabled and that group assigned.
+// The app's ID also gets Sign in with Apple here (`capabilities` below), turned on through the API
+// if it's off, since the app's entitlements ask for it.
 //
 // Usage: node scripts/provision_dev.mjs              development profiles (reads Config/asc.env)
 //        node scripts/provision_dev.mjs --appstore  App Store profiles for TestFlight uploads,
@@ -32,7 +34,7 @@ const APP_STORE = process.argv.includes("--appstore");
 const PROFILE_PREFIX = APP_STORE ? "Murmur AppStore" : "Murmur Dev";
 const APP_GROUP = "group.com.antonmironenko.murmur";
 const TARGETS = [
-  { identifier: "com.antonmironenko.murmur", profile: `${PROFILE_PREFIX} App` },
+  { identifier: "com.antonmironenko.murmur", profile: `${PROFILE_PREFIX} App`, capabilities: ["APPLE_ID_AUTH"] },
   { identifier: "com.antonmironenko.murmur.keyboard", profile: `${PROFILE_PREFIX} Keyboard` },
   { identifier: "com.antonmironenko.murmur.widgets", profile: `${PROFILE_PREFIX} Widgets` },
 ];
@@ -147,6 +149,22 @@ for (const target of TARGETS) {
   const capabilities = await api("GET", `/v1/bundleIds/${bundleId.id}/bundleIdCapabilities`);
   if (!capabilities.data.some((capability) => capability.attributes.capabilityType === "APP_GROUPS")) {
     fail(`${target.identifier} doesn't have the App Groups capability enabled.`);
+  }
+  for (const type of target.capabilities ?? []) {
+    if (capabilities.data.some((capability) => capability.attributes.capabilityType === type)) continue;
+    await api("POST", "/v1/bundleIdCapabilities", {
+      data: {
+        type: "bundleIdCapabilities",
+        attributes: {
+          capabilityType: type,
+          ...(type === "APPLE_ID_AUTH"
+            ? { settings: [{ key: "APPLE_ID_AUTH_APP_CONSENT", options: [{ key: "PRIMARY_APP_CONSENT" }] }] }
+            : {}),
+        },
+        relationships: { bundleId: { data: { type: "bundleIds", id: bundleId.id } } },
+      },
+    });
+    console.log(`✔ turned on ${type} for ${target.identifier}`);
   }
 
   // 4. Replace any previous profile with this name (profiles snapshot capabilities when created).

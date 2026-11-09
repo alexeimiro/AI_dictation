@@ -26,6 +26,11 @@ struct HomeView: View {
                     SessionCard()
                 }
             }
+            if let quota = model.quota, quota.remaining == 0, !model.pro.isSubscribed {
+                Section {
+                    LimitCard(weeklyLimit: quota.weeklyLimit) { model.showsPaywall = true }
+                }
+            }
             if !model.setup.isComplete, records.isEmpty {
                 Section {
                     SetupChecklistCard()
@@ -187,6 +192,27 @@ struct HomeView: View {
         case .yesterday: "Yesterday"
         case .other: day.formatted(.dateTime.weekday(.wide).month(.wide).day())
         }
+    }
+}
+
+/// Basic's weekly words are used up: they come back next week, or Pro has no limit.
+private struct LimitCard: View {
+    let weeklyLimit: Int?
+    let upgrade: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("You've used this week's \(weeklyLimit?.formatted() ?? "free") words")
+                .font(.ui(17, .semibold))
+                .foregroundStyle(Palette.text)
+            Text("Dictation picks up again next week. \(Brand.name) Pro has no weekly limit.")
+                .font(.ui(15))
+                .foregroundStyle(Palette.textSecondary)
+            Button("Get unlimited words", action: upgrade)
+                .buttonStyle(.pill(.ink, height: 46))
+                .padding(.top, 4)
+        }
+        .padding(.vertical, 8)
     }
 }
 

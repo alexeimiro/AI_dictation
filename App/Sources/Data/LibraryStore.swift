@@ -69,8 +69,38 @@ enum LibraryRules {
     }
 }
 
+/// The three kinds of things in the library, as sync names them.
+enum LibraryKind: String, Codable, CaseIterable, Sendable {
+    case entry, snippet, note
+}
+
+/// One thing in the library with what sync needs to send it.
+enum LibraryItem: Equatable, Sendable {
+    case entry(DictionaryEntry)
+    case snippet(SnippetDefinition, createdAt: Date)
+    case note(Note)
+
+    var kind: LibraryKind {
+        switch self {
+        case .entry: .entry
+        case .snippet: .snippet
+        case .note: .note
+        }
+    }
+
+    var id: UUID {
+        switch self {
+        case .entry(let entry): entry.id
+        case .snippet(let snippet, _): snippet.id
+        case .note(let note): note.id
+        }
+    }
+}
+
 /// The personal dictionary, snippets and Scratchpad notes, in the app's private container. Words
-/// and snippets feed the dictation pipeline through `onChange`; notes never leave the iPhone.
+/// and snippets feed the dictation pipeline through `onChange`. Signed in, `LibrarySync` keeps
+/// them in step with the account: every change made here goes through `onLocalChange`, and the
+/// other devices' changes come in through `applyRemote`.
 @MainActor
 @Observable
 final class LibraryStore {
@@ -82,6 +112,8 @@ final class LibraryStore {
     private(set) var notes: [Note] = []
     /// Called after the dictionary or the snippets change (not notes).
     @ObservationIgnored var onChange: (() -> Void)?
+    /// A word, snippet or note was saved (`false`) or deleted (`true`) on this iPhone.
+    @ObservationIgnored var onLocalChange: ((LibraryKind, UUID, _ deleted: Bool) -> Void)?
 
     @ObservationIgnored private let context: ModelContext
     @ObservationIgnored private let logger = Logger(subsystem: "Murmur", category: "Library")
@@ -138,6 +170,7 @@ final class LibraryStore {
             context.insert(DictionaryEntryRecord(saved))
         }
         commit(notifying: true)
+        onLocalChange?(.entry, saved.id, false)
         return saved
     }
 
@@ -145,6 +178,7 @@ final class LibraryStore {
         guard let record = entryRecord(id) else { return }
         context.delete(record)
         commit(notifying: true)
+        onLocalChange?(.entry, id, true)
     }
 
     // MARK: Snippets
@@ -164,6 +198,7 @@ final class LibraryStore {
             context.insert(SnippetRecord(id: saved.id, trigger: saved.trigger, expansion: saved.expansion, createdAt: Date()))
         }
         commit(notifying: true)
+        onLocalChange?(.snippet, saved.id, false)
         return saved
     }
 
@@ -171,6 +206,7 @@ final class LibraryStore {
         guard let record = snippetRecord(id) else { return }
         context.delete(record)
         commit(notifying: true)
+        onLocalChange?(.snippet, id, true)
     }
 
     // MARK: Notes
@@ -184,6 +220,7 @@ final class LibraryStore {
         let note = Note(createdAt: now)
         context.insert(NoteRecord(note))
         commit(notifying: false)
+        onLocalChange?(.note, note.id, false)
         return note
     }
 
@@ -194,12 +231,14 @@ final class LibraryStore {
         record.body = note.body
         record.updatedAt = now
         commit(notifying: false)
+        onLocalChange?(.note, note.id, false)
     }
 
     func deleteNote(_ id: UUID) {
         guard let record = noteRecord(id) else { return }
         context.delete(record)
         commit(notifying: false)
+        onLocalChange?(.note, id, true)
     }
 
     /// Leaving a note with no title and no text deletes it, so "Create a note" leaves nothing behind.
@@ -218,6 +257,97 @@ final class LibraryStore {
             logger.error("Couldn't clear the library: \(error.localizedDescription, privacy: .public)")
         }
         commit(notifying: true)
+    }
+
+    // MARK: Sync
+
+    /// Everything in the library, to send it all the first time sync runs.
+    var allIDs: [(LibraryKind, UUID)] {
+        entries.map { (.entry, $0.id) } + snippets.map { (.snippet, $0.id) } + notes.map { (.note, $0.id) }
+    }
+
+    /// What sync sends for `id`; nil once it's gone.
+    func item(_ kind: LibraryKind, _ id: UUID) -> LibraryItem? {
+        switch kind {
+        case .entry: entryRecord(id).map { .entry($0.snapshot) }
+        case .snippet: snippetRecord(id).map {
+            .snippet(SnippetDefinition(id: $0.id, trigger: $0.trigger, expansion: $0.expansion), createdAt: $0.createdAt)
+        }
+        case .note: noteRecord(id).map { .note($0.snapshot) }
+        }
+    }
+
+    /// Another device's changes, saved without being reported as local ones. Duplicates under
+    /// another ID are settled the same way on every device: of two equal words the older stays,
+    /// and a snippet from the server replaces this iPhone's with its trigger (the server allows one
+    /// live snippet per trigger). The IDs that lost are returned, for sync to delete them on the
+    /// server too.
+    @discardableResult
+    func applyRemote(_ items: [LibraryItem], deletions: [(LibraryKind, UUID)]) -> [(LibraryKind, UUID)] {
+        struct EntryKey: Hashable { let term: String; let misspelling: String? }
+        func key(_ entry: DictionaryEntry) -> EntryKey {
+            EntryKey(term: LibraryRules.normalized(entry.term), misspelling: entry.misspelling.map(LibraryRules.normalized))
+        }
+        /// The word that stays: the older, then the lower ID, so every device picks the same.
+        func keeps(_ entry: DictionaryEntry, over other: DictionaryEntry) -> Bool {
+            (entry.createdAt, entry.id.uuidString) < (other.createdAt, other.id.uuidString)
+        }
+        var entryOwners = Dictionary(entries.map { (key($0), $0) }, uniquingKeysWith: { first, _ in first })
+        var snippetOwners = Dictionary(snippets.map { (LibraryRules.normalized($0.trigger), $0.id) },
+                                       uniquingKeysWith: { first, _ in first })
+        var replaced: [(LibraryKind, UUID)] = []
+        for item in items {
+            switch item {
+            case .entry(let entry):
+                if let other = entryOwners[key(entry)], other.id != entry.id {
+                    guard keeps(entry, over: other) else {
+                        if let record = entryRecord(entry.id) { context.delete(record) }
+                        replaced.append((.entry, entry.id))
+                        continue
+                    }
+                    if let record = entryRecord(other.id) { context.delete(record) }
+                    replaced.append((.entry, other.id))
+                }
+                entryOwners[key(entry)] = entry
+                if let record = entryRecord(entry.id) {
+                    record.term = entry.term
+                    record.misspelling = entry.misspelling
+                } else {
+                    context.insert(DictionaryEntryRecord(entry))
+                }
+            case .snippet(let snippet, let createdAt):
+                let trigger = LibraryRules.normalized(snippet.trigger)
+                if let other = snippetOwners[trigger], other != snippet.id {
+                    if let record = snippetRecord(other) { context.delete(record) }
+                    replaced.append((.snippet, other))
+                }
+                snippetOwners[trigger] = snippet.id
+                if let record = snippetRecord(snippet.id) {
+                    record.trigger = snippet.trigger
+                    record.expansion = snippet.expansion
+                } else {
+                    context.insert(SnippetRecord(id: snippet.id, trigger: snippet.trigger, expansion: snippet.expansion,
+                                                 createdAt: createdAt))
+                }
+            case .note(let note):
+                if let record = noteRecord(note.id) {
+                    record.title = note.title
+                    record.body = note.body
+                    record.updatedAt = note.updatedAt
+                } else {
+                    context.insert(NoteRecord(note))
+                }
+            }
+        }
+        for (kind, id) in deletions {
+            switch kind {
+            case .entry: if let record = entryRecord(id) { context.delete(record) }
+            case .snippet: if let record = snippetRecord(id) { context.delete(record) }
+            case .note: if let record = noteRecord(id) { context.delete(record) }
+            }
+        }
+        commit(notifying: true)
+        return replaced
     }
 
     // MARK: Plumbing

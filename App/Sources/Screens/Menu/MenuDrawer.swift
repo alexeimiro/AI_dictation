@@ -50,6 +50,14 @@ struct MenuDrawer: View {
                     .padding(.top, 24)
                 PlanUsage(quota: model.quota)
                     .padding(.top, 20)
+                if !model.pro.isSubscribed {
+                    Button("Get unlimited words") {
+                        close()
+                        model.showsPaywall = true
+                    }
+                    .buttonStyle(.pill(.lavender, height: 46))
+                    .padding(.top, 16)
+                }
                 Divider().padding(.vertical, 22)
                 item("Talk to Support", systemImage: "bubble.left.and.text.bubble.right") {
                     support = .issue

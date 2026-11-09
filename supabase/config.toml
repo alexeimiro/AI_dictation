@@ -444,3 +444,9 @@ verify_jwt = false
 
 [functions.signup-status]
 verify_jwt = false
+
+[functions.verify-purchase]
+verify_jwt = false
+
+[functions.app-store-notifications]
+verify_jwt = false

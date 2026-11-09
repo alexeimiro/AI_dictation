@@ -64,6 +64,8 @@ final class KeyboardModel {
         var dismissPending: () -> Void = {}
         var dismissNotice: () -> Void = {}
         var openApp: () -> Void = {}
+        /// The limit message's way to "Get unlimited words" in Murmur.
+        var openPro: () -> Void = {}
         var setStyle: (StylePreset) -> Void = { _ in }
         var setLanguage: (DictationLanguage?) -> Void = { _ in }
         var showOverlay: (KeyboardOverlay) -> Void = { _ in }

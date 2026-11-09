@@ -87,6 +87,9 @@ struct MainTabs: View {
         }
         .tint(Palette.tabSelectedLabel)
         .overlay { MenuDrawer() }
+        .fullScreenCover(isPresented: Binding(get: { model.showsPaywall }, set: { model.showsPaywall = $0 })) {
+            PaywallView()
+        }
     }
 }
 

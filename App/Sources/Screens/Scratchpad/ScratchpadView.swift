@@ -2,7 +2,7 @@ import MurmurCore
 import MurmurUI
 import SwiftUI
 
-/// Quick notes, dictated with the Murmur keyboard inside the app. They stay on this iPhone.
+/// Quick notes, typed or dictated with the mic. Signed in, they're on every device (`LibrarySync`).
 struct ScratchpadView: View {
     @Environment(AppModel.self) private var model
     @State private var search = ""

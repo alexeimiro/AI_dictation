@@ -1,0 +1,74 @@
+{
+  "identifier" : "6E1F4A21",
+  "nonRenewingSubscriptions" : [],
+  "products" : [],
+  "settings" : {
+    "_failTransactionsEnabled" : false,
+    "_locale" : "en_US",
+    "_storefront" : "USA",
+    "_storeKitErrors" : []
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "21FA9C70",
+      "localizations" : [
+        {
+          "description" : "Unlimited words, every week",
+          "displayName" : "Murmur Pro",
+          "locale" : "en_US"
+        }
+      ],
+      "name" : "Murmur Pro",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "79.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "5C3A1B01",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Unlimited words, every week, billed yearly",
+              "displayName" : "Murmur Pro Annual",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.antonmironenko.murmur.pro.annual",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Murmur Pro Annual",
+          "subscriptionGroupID" : "21FA9C70",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : []
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "9.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "5C3A1B02",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Unlimited words, every week, billed monthly",
+              "displayName" : "Murmur Pro Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.antonmironenko.murmur.pro.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Murmur Pro Monthly",
+          "subscriptionGroupID" : "21FA9C70",
+          "type" : "RecurringSubscription",
+          "winbackOffers" : []
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

@@ -48,6 +48,14 @@ struct SettingsView: View {
                 Toggle(isOn: $settings.liveActivities) {
                     SettingLabel("Allow Live Activities", detail: "Show \(Brand.name) on the Lock Screen and in the Dynamic Island while it's on")
                 }
+                if !model.pro.isSubscribed {
+                    Button { model.showsPaywall = true } label: {
+                        SettingLabel("Upgrade to Pro", detail: "Unlimited words, every week") {
+                            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                                .accessibilityHidden(true)
+                        }
+                    }
+                }
             }
             Section("Keyboard") {
                 SettingPicker("Layout", detail: "What the \(Brand.name) keyboard shows first",
@@ -101,10 +109,25 @@ struct SettingsView: View {
                               value: Self.retentionTitle(settings.transcriptRetention)) {
                     ForEach(TranscriptRetention.allCases) { Text(Self.retentionTitle($0)).tag($0) }
                 }
+                if let sync = model.librarySync, model.account?.isSignedIn == true {
+                    Button {
+                        Task {
+                            await sync.sync(full: true)
+                            toast = sync.lastError ?? "Your words, snippets and notes are up to date"
+                        }
+                    } label: {
+                        SettingLabel("Refresh from cloud", detail: Self.syncDetail(sync.lastSyncedAt)) {
+                            if sync.isSyncing { ProgressView() }
+                        }
+                    }
+                    .disabled(sync.isSyncing)
+                }
             } header: {
                 Text("Data and privacy")
             } footer: {
-                Text("Transcripts and recordings stay on this iPhone. To write your text, the recording and its transcript go to OpenAI, which doesn't train on them; Murmur's servers don't keep either.")
+                Text(model.account?.isSignedIn == true
+                     ? "Your dictionary, snippets and notes are saved to your account, so they're on every device you sign in on. Transcripts and recordings stay on this iPhone. To write your text, the recording and its transcript go to OpenAI, which doesn't train on them; Murmur's servers don't keep either."
+                     : "Transcripts, recordings, your dictionary, snippets and notes stay on this iPhone; sign in to have the dictionary, snippets and notes on your other devices too. To write your text, the recording and its transcript go to OpenAI, which doesn't train on them; Murmur's servers don't keep either.")
             }
             Section {
                 NavigationLink("Debug", value: Route.debug)
@@ -149,6 +172,15 @@ struct SettingsView: View {
         case .numbers: "Numbers first"
         case .qwerty: "QWERTY"
         }
+    }
+
+    /// "Get the latest words, snippets and notes · Synced 5 min. ago".
+    static func syncDetail(_ lastSyncedAt: Date?, now: Date = Date()) -> String {
+        let detail = "Get your words, snippets and notes from your account"
+        guard let lastSyncedAt else { return detail }
+        let ago = now.timeIntervalSince(lastSyncedAt) < 60
+            ? "just now" : lastSyncedAt.formatted(.relative(presentation: .named, unitsStyle: .abbreviated))
+        return "\(detail). Synced \(ago)"
     }
 
     static func retentionTitle(_ retention: TranscriptRetention) -> String {

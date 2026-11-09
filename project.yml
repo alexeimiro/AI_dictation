@@ -117,6 +117,9 @@ targets:
       properties:
         com.apple.security.application-groups:
           - $(MURMUR_APP_GROUP)
+        # Sign in with Apple (the app's ID has the capability; scripts/provision_dev.mjs).
+        com.apple.developer.applesignin:
+          - Default
 
   MurmurKeyboard:
     type: app-extension
@@ -227,6 +230,8 @@ schemes:
         MurmurTests: [test]
     run:
       config: Debug
+      # Murmur Pro's two subscriptions for purchases in the simulator, without App Store Connect.
+      storeKitConfiguration: Config/Murmur.storekit
     test:
       config: Debug
       gatherCoverageData: false

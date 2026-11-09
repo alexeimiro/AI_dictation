@@ -17,6 +17,9 @@ final class AppModel {
     let library: LibraryStore
     /// Scratchpad's mic.
     let noteDictation: NoteDictation
+    /// The library on every device signed in to the account; nil without a backend, and in
+    /// screenshot runs.
+    let librarySync: LibrarySync?
     /// Each dictation's timings, for the Debug screen.
     let timingsLog: TimingsLog
     let settings = SettingsModel()
@@ -44,6 +47,10 @@ final class AppModel {
     var quota: AccountService.Quota?
     /// "Improve Murmur for everyone": onboarding's data choice, as Settings changed it since.
     private(set) var dataSharing = false
+    /// Murmur Pro on the App Store.
+    let pro: ProStore
+    /// "Get unlimited words" is on screen.
+    var showsPaywall = false
     /// The "Sign in again" sheet while it's up, and where it opened. RootView presents it, so it
     /// also opens during onboarding; the swipe-back screen and the start dialog close it first.
     var signInSheet: SignInAgainView.Start?
@@ -88,6 +95,14 @@ final class AppModel {
         let pipeline = DictationPipeline(cleanup: cleanup)
         self.pipeline = pipeline
         accountService = AccountService(backend: backend, functions: functions)
+        if let backend, !launchOptions.useFixtures, !launchOptions.usesOnboardingFixtures {
+            let account = backend.account
+            librarySync = LibrarySync(library: library, remote: SupabaseLibraryRemote(backend: backend),
+                                      isEnabled: { account.isSignedIn })
+        } else {
+            librarySync = nil
+        }
+        pro = ProStore(functions: functions, accountToken: { backend?.client.auth.currentUser?.id })
         if launchOptions.useFixtures { quota = .fixture }
         let assets = SpeechAssetManager()
         self.assets = assets
@@ -139,12 +154,18 @@ final class AppModel {
         history.applyRetention()
         recoverInterruptedDictations()
         session.inAppResultHandler = { [weak self] result in self?.noteDictation.deliver(result) }
+        library.onLocalChange = { [weak self] kind, id, deleted in
+            self?.librarySync?.noteLocalChange(kind, id, deleted: deleted)
+        }
         dictionaryObservation = transport.observe(.dictionaryAdded) { [weak self] in
             MainActor.assumeIsolated { self?.importKeyboardAdditions() }
         }
         importKeyboardAdditions()
         dataSharing = UserDefaults.standard.object(forKey: Self.dataSharingKey) as? Bool
             ?? (onboarding.answers.dataChoice?.choice == .improveModel)
+        pro.onSynced = { [weak self] in self?.refreshQuota() }
+        if !launchOptions.useFixtures && !launchOptions.usesOnboardingFixtures { pro.start() }
+        if launchOptions.route == .paywall { showsPaywall = true }
         LiveActivityActions.model = self
         // Learns whether iOS's Low Data Mode is on before the first dictation.
         _ = NetworkConditions.shared
@@ -233,6 +254,7 @@ final class AppModel {
         practiceBuffer.activeExercise = nil
         practiceBuffer.flushToHistory()
         onboarding.markHistorySeeded()
+        librarySync?.syncSoon()
         let answers = record.answers
         Task { await onboardingServices.profile.sync(answers) }
     }
@@ -301,8 +323,22 @@ final class AppModel {
     /// Deletes the account on the server, then everything on this iPhone. Returns a message when
     /// the server couldn't delete it (nothing local is touched then).
     func deleteAccount() async -> String? {
+        // Signed in with Apple: Apple confirms first, and its code lets the server revoke the
+        // sign-in. Cancelling keeps the account.
+        var appleCode: String?
+        if account?.state?.account.provider == "apple" {
+            do {
+                let credential = try await AppleSignInCoordinator().signIn(
+                    hashedNonce: SupabaseOnboardingAuth.sha256(SupabaseOnboardingAuth.randomNonce()))
+                appleCode = credential.authorizationCode.flatMap { String(data: $0, encoding: .utf8) }
+            } catch .cancelled {
+                return "Your account wasn't deleted."
+            } catch {
+                // Apple can't be asked (Sign in with Apple is off in this build): delete anyway.
+            }
+        }
         do {
-            try await accountService.deleteAccount()
+            try await accountService.deleteAccount(appleAuthorizationCode: appleCode)
         } catch {
             return error.localizedDescription
         }
@@ -313,6 +349,8 @@ final class AppModel {
 
     private func resetAfterAccountEnded() {
         session.stop()
+        // Before the library goes: what's deleted here stays in the account.
+        librarySync?.reset()
         UserDefaults.standard.removeObject(forKey: Self.dataSharingKey)
         dataSharing = false
         deleteAllHistory()
@@ -435,6 +473,12 @@ final class AppModel {
                 signInSheet = nil
                 confirmUntrustedStart = true
             }
+        case .pro:
+            showSwipeBack = false
+            guard onboarding.isComplete else { return }
+            signInSheet = nil
+            router.isMenuOpen = false
+            showsPaywall = true
         case .openSettings:
             showSwipeBack = false
             guard onboarding.isComplete else { return }
@@ -497,6 +541,7 @@ final class AppModel {
             history.reconcileInsertions(payloads: transport.payloads)
             importKeyboardAdditions()
             refreshQuota()
+            librarySync?.syncSoon(after: .milliseconds(500))
         case .background:
             activeSince = nil
             returningFromBackground = true
@@ -516,6 +561,8 @@ enum DeepLink: Equatable {
     case startSession(token: String?)
     /// `murmur://settings` — the keyboard's settings button.
     case openSettings
+    /// `murmur://pro` — "Get unlimited words", from the keyboard's limit message.
+    case pro
     /// `murmur://auth-callback?…` — the emailed sign-in link and OAuth redirects.
     case authCallback(URL)
 
@@ -527,6 +574,8 @@ enum DeepLink: Equatable {
             self = .startSession(token: components?.queryItems?.first { $0.name == "t" }?.value)
         case ("settings", ""), ("settings", "/"):
             self = .openSettings
+        case ("pro", ""), ("pro", "/"):
+            self = .pro
         case ("auth-callback", _):
             self = .authCallback(url)
         default:
@@ -538,7 +587,7 @@ enum DeepLink: Equatable {
 /// Screens reachable with `-route <name>` for screenshot comparison.
 enum LaunchRoute: String {
     case home, settings, languages, debug, transcript, swipeBack
-    case dictionary, snippets, style, scratchpad, menu, account
+    case dictionary, snippets, style, scratchpad, menu, account, paywall
 
     init?(arguments: [String]) {
         guard let index = arguments.firstIndex(of: "-route"), arguments.indices.contains(index + 1) else {

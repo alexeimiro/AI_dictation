@@ -183,10 +183,14 @@ final class AccountService {
     }
 
     /// Deletes the account on the server; its rows cascade. Signing out locally is the caller's.
-    func deleteAccount() async throws {
+    /// `appleAuthorizationCode`: for an account that signed in with Apple, a fresh code the
+    /// server uses to revoke the sign-in, as Apple requires.
+    func deleteAccount(appleAuthorizationCode: String? = nil) async throws {
         guard let functions else { throw Failure.notConfigured }
+        var body: [String: String] = [:]
+        if let appleAuthorizationCode { body["appleAuthorizationCode"] = appleAuthorizationCode }
         do {
-            _ = try await functions.post("delete-account", body: [String: String](), timeout: 20)
+            _ = try await functions.post("delete-account", body: body, timeout: 25)
         } catch {
             logger.error("Account deletion failed: \(error.localizedDescription, privacy: .public)")
             throw Failure.unavailable("Couldn't delete your account. Check your connection and try again.")

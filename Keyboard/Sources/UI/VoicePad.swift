@@ -71,6 +71,10 @@ struct VoicePad: View {
             NoticeCard(symbol: "arrow.uturn.down", primary: true, title: "Insert last dictation",
                        detail: pending.text, action: model.actions.insertPending,
                        dismiss: model.actions.dismissPending)
+        } else if case .notice(let message) = model.phase, message == Brand.limitReachedMessage {
+            NoticeCard(symbol: "sparkles", primary: true, title: "Get unlimited words",
+                       detail: "You've used this week's free words. Tap to see Murmur Pro.",
+                       action: model.actions.openPro, dismiss: model.actions.dismissNotice)
         } else if case .notice(let message) = model.phase {
             NoticeCard(symbol: "exclamationmark.bubble", title: nil, detail: message,
                        dismiss: model.actions.dismissNotice)

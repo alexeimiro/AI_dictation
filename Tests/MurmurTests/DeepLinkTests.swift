@@ -1,4 +1,5 @@
 import Foundation
+import MurmurCore
 import Testing
 @testable import Murmur
 
@@ -11,6 +12,13 @@ struct DeepLinkTests {
     @Test func parsesSettings() {
         #expect(DeepLink(url: URL(string: "murmur://settings")!) == .openSettings)
         #expect(DeepLink(url: URL(string: "murmur://settings/")!) == .openSettings)
+    }
+
+    /// The keyboard's limit message opens "Get unlimited words".
+    @Test func parsesPro() {
+        #expect(DeepLink(url: Brand.proURL) == .pro)
+        #expect(DeepLink(url: URL(string: "murmur://pro/")!) == .pro)
+        #expect(LaunchRoute(rawValue: "paywall") == .paywall)
     }
 
     @Test func ignoresOtherSchemesAndPaths() {

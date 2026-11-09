@@ -284,7 +284,7 @@ final class DictationPipeline {
             }
         case .failure(.limitReached):
             outcome.status = .limitReached
-            outcome.message = "Dictation limit reached. Get unlimited access in Murmur."
+            outcome.message = Brand.limitReachedMessage
             outcome.errorReason = "Dictation limit reached."
         case .failure(let error):
             outcome.failure = error
@@ -312,7 +312,7 @@ final class DictationPipeline {
     /// What the keyboard shows when no text came back.
     static func transcriptionMessage(for error: Error) -> String {
         switch error as? CloudTranscriptionError {
-        case .limitReached: "Dictation limit reached. Get unlimited access in Murmur."
+        case .limitReached: Brand.limitReachedMessage
         case .rateLimited: "Too many dictations in a minute. Try again shortly."
         case .unavailable: "Couldn't reach transcription. Check your connection and try again."
         case .signedOut: signedOutMessage

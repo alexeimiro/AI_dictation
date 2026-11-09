@@ -31,6 +31,17 @@ public enum Brand {
         return components.url!
     }
 
+    /// "Get unlimited words" in Murmur (`murmur://pro`), from the keyboard's limit message.
+    public static var proURL: URL {
+        var components = URLComponents()
+        components.scheme = urlScheme
+        components.host = "pro"
+        return components.url!
+    }
+
+    /// What a dictation past Basic's weekly words says; the keyboard turns it into a way to Pro.
+    public static let limitReachedMessage = "Dictation limit reached. Get unlimited access in Murmur."
+
     /// Linked from the sign-in screen; nil until `MURMUR_TERMS_URL` / `MURMUR_PRIVACY_URL` are set.
     public static var termsURL: URL? {
         infoValue("MurmurTermsURL").flatMap(URL.init(string:))

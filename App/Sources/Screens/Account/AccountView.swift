@@ -1,4 +1,5 @@
 import MurmurUI
+import StoreKit
 import SwiftUI
 
 /// Who's signed in, their plan and stats, support, and signing out or deleting the account.
@@ -9,6 +10,7 @@ struct AccountView: View {
     @State private var confirmDelete = false
     @State private var working = false
     @State private var error: String?
+    @State private var managing = false
 
     var body: some View {
         let stats = model.history.lifetimeStats()
@@ -37,6 +39,14 @@ struct AccountView: View {
             } footer: {
                 if account?.isSignedIn != true {
                     Text("Sign in to keep your plan when you change iPhones.")
+                }
+            }
+
+            Section("Plan") {
+                if model.pro.isSubscribed {
+                    Button("Manage subscription") { managing = true }
+                } else {
+                    Button("Get unlimited words") { model.showsPaywall = true }
                 }
             }
 
@@ -75,6 +85,7 @@ struct AccountView: View {
         .disabled(working)
         .overlay { if working { ProgressView() } }
         .onAppear { model.refreshQuota() }
+        .manageSubscriptionsSheet(isPresented: $managing)
         .sheet(item: $support) { kind in
             SupportSheet(kind: kind)
         }
@@ -87,7 +98,7 @@ struct AccountView: View {
                 }
             }
         } message: {
-            Text("Your dictation history, dictionary, snippets and notes on this iPhone are deleted.")
+            Text("Your dictation history, dictionary, snippets and notes are deleted from this iPhone. The dictionary, snippets and notes stay in your account for when you sign in again.")
         }
         .alert("Delete your account?", isPresented: $confirmDelete) {
             Button("Delete Account", role: .destructive) {

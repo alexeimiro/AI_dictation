@@ -347,6 +347,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
                 guard let self else { return }
                 HostAppOpener.open(Brand.settingsURL, from: self)
             },
+            openPro: { [weak self] in
+                guard let self else { return }
+                client?.dismissNotice()
+                HostAppOpener.open(Brand.proURL, from: self)
+            },
             setStyle: { [weak self] style in
                 guard let self else { return }
                 // The pill sets the Default style, like the app's Settings, so it outlives this keyboard.
