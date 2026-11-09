@@ -82,11 +82,9 @@ final class Backend: SessionRenewing {
     /// Auth's events can be stale by the time they're handled here, so this goes by the session
     /// stored now; the event only says whether a missing one means the account's was lost.
     ///
-    /// Nothing in the app signs out on purpose, so every `.signedOut` is one the user didn't ask
-    /// for: the server rejected the session, at Auth's own refresh (launch, foreground) or at
-    /// `ensureSession`'s. A Sign out button would have to forget the account first, and again once
-    /// Auth has dropped the session (an event queued before it would bring the account back), or
-    /// the user would see "You're signed out". That, and the sign-out's scope, is left to it.
+    /// Apart from `signOut()`, which forgets the account first, every `.signedOut` is one the user
+    /// didn't ask for: the server rejected the session, at Auth's own refresh (launch, foreground)
+    /// or at `ensureSession`'s.
     static func update(_ account: AccountModel, after event: AuthChangeEvent, stored: Session?) {
         if adopt(stored, into: account) { return }
         switch event {
@@ -121,6 +119,19 @@ final class Backend: SessionRenewing {
     /// the user signed in with meanwhile instead of replacing it.
     func continueAsGuest() {
         account.continueAsGuest()
+    }
+
+    /// Sign out, or the end of a deleted account, on this iPhone only (`.local`: a deleted user
+    /// has no sessions left to revoke). The account is forgotten before Auth drops the session and
+    /// again after, since an event queued before the sign-out would remember it again.
+    func signOut() async {
+        account.forget()
+        do {
+            try await client.auth.signOut(scope: .local)
+        } catch {
+            logger.notice("Sign-out: \(error.localizedDescription, privacy: .public)")
+        }
+        account.forget()
     }
 
     // MARK: Session

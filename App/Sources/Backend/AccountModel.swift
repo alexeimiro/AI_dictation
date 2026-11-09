@@ -110,6 +110,14 @@ final class AccountModel {
         if case .signedOut(let account) = state { move(to: .guest(account)) }
     }
 
+    /// The user signed out or deleted the account: nothing is remembered, so Auth dropping the
+    /// session afterwards isn't taken for a lost one ("You're signed out").
+    func forget() {
+        guard state != nil else { return }
+        state = nil
+        defaults.removeObject(forKey: Self.key)
+    }
+
     /// Only a real change is written, so a launch that changes nothing leaves the stored state alone.
     private func move(to next: State) {
         guard next != state else { return }

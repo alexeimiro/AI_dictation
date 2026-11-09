@@ -3,8 +3,9 @@ import MurmurUI
 import SwiftData
 import SwiftUI
 
-/// Home: the signed-out card while the account's session is lost, the session switch, the keyboard
-/// setup checklist until it's done, and the history by day.
+/// Home: the signed-out card while the account's session is lost, the session's status when it
+/// needs attention (the switch is in the toolbar), the keyboard setup checklist until it's done,
+/// a nudge to try Murmur in another app, and the history by day.
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Query(sort: \TranscriptRecord.createdAt, order: .reverse) private var records: [TranscriptRecord]
@@ -17,13 +18,26 @@ struct HomeView: View {
                     SignedOutCard(phrase: account.phrase) { model.signInSheet = .options }
                 }
             }
-            Section {
-                SessionCard()
+            if SessionCard.isShown(for: model.session.phase) {
+                Section {
+                    SessionCard()
+                }
             }
             if !model.setup.isComplete, records.isEmpty {
                 Section {
                     SetupChecklistCard()
                 }
+            } else {
+                Section {
+                    IntroCard(
+                        title: "Try Murmur in any app", accent: "any app",
+                        message: Text("Draft emails, send messages and jot down notes with your voice."),
+                        action: "Open Notes",
+                        dismissedKey: "intro.home.dismissed"
+                    ) { openNotes() }
+                }
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
             }
 
             if records.isEmpty {
@@ -51,13 +65,14 @@ struct HomeView: View {
         .background(Palette.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .principal) { Wordmark(height: 22) }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { model.router.open(.settings) } label: {
-                    Image(systemName: "gearshape")
+            ToolbarItem(placement: .topBarLeading) { MenuButton() }
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 8) {
+                    Wordmark(height: 22)
+                    if let quota = model.quota { PlanBadge(text: quota.badge) }
                 }
-                .accessibilityLabel("Settings")
             }
+            ToolbarItem(placement: .topBarTrailing) { SessionToggle() }
         }
         .toast($toast)
         .task { model.history.reconcileInsertions(payloads: model.transport.payloads) }
@@ -122,6 +137,11 @@ struct HomeView: View {
 
     // MARK: Actions
 
+    private func openNotes() {
+        guard let url = URL(string: "mobilenotes://") else { return }
+        UIApplication.shared.open(url)
+    }
+
     private func copy(_ transcript: Transcript) {
         guard !transcript.displayText.isEmpty else { return }
         UIPasteboard.general.string = transcript.displayText
@@ -153,7 +173,37 @@ struct HomeView: View {
     }
 }
 
-/// The session switch with its status, start progress and failure message.
+/// The session switch in Home's toolbar: green while Murmur is on. Drawn by hand, since a
+/// toolbar shows a `Toggle` as a text button.
+struct SessionToggle: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let isOn = model.session.isLive
+        Button {
+            if isOn { model.session.stop() } else { Task { await model.session.start() } }
+        } label: {
+            Capsule()
+                .fill(isOn ? Palette.toggleGreen : Palette.progressOff)
+                .frame(width: 40, height: 24)
+                .overlay(alignment: isOn ? .trailing : .leading) {
+                    Circle()
+                        .fill(.white)
+                        .padding(3)
+                        .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
+                }
+                .animation(.snappy(duration: 0.2), value: isOn)
+        }
+        .disabled(model.session.phase == .starting)
+        .accessibilityLabel("Murmur is on")
+        .accessibilityValue(isOn ? "On" : "Off")
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityHint(SessionCard.statusText(for: model.session.phase))
+        .sensoryFeedback(.selection, trigger: isOn)
+    }
+}
+
+/// The session's status while it needs attention: starting, failed or waiting to reconnect.
 struct SessionCard: View {
     @Environment(AppModel.self) private var model
 
@@ -168,13 +218,6 @@ struct SessionCard: View {
                 if model.session.phase == .starting {
                     ProgressView()
                 }
-                Toggle("Murmur is on", isOn: Binding(
-                    get: { model.session.isLive },
-                    set: { isOn in
-                        if isOn { Task { await model.session.start() } } else { model.session.stop() }
-                    }))
-                .labelsHidden()
-                .tint(Palette.toggleGreen)
             }
             if let detail = model.session.startDetail {
                 Text(detail)
@@ -200,8 +243,20 @@ struct SessionCard: View {
         .buttonStyle(.borderless)
     }
 
+    /// Off, on and listening show in the toolbar's switch alone.
+    static func isShown(for phase: SessionController.Phase) -> Bool {
+        switch phase {
+        case .starting, .failed, .needsReconnect: true
+        case .off, .ready, .recording, .processing: false
+        }
+    }
+
     private var statusText: String {
-        switch model.session.phase {
+        Self.statusText(for: model.session.phase)
+    }
+
+    static func statusText(for phase: SessionController.Phase) -> String {
+        switch phase {
         case .off: "Murmur is off"
         case .starting: "Turning on…"
         case .ready: "Murmur is on"

@@ -63,5 +63,26 @@ struct DeepLinkTests {
         #expect(Router.initialPath(for: .debug) == [.settings, .debug])
         #expect(Router.initialPath(for: .home) == [])
         #expect(Router.initialPath(for: nil) == [])
+        #expect(Router.initialPath(for: .account) == [.account])
+        #expect(Router.initialTab(for: .snippets) == .snippets)
+        #expect(Router.initialTab(for: .settings) == .home)
+    }
+
+    @Test @MainActor func eachTabKeepsItsOwnStackAndTheMenuOpensOnHome() {
+        let router = Router()
+        let note = UUID()
+        router.tab = .scratchpad
+        router.open(.note(note))
+        router.tab = .home
+        #expect(router.path == [])
+        router.isMenuOpen = true
+        router.tab = .dictionary
+        router.openFromMenu(.settings)
+        #expect(!router.isMenuOpen)
+        #expect(router.tab == .home)
+        #expect(router.path == [.settings])
+        #expect(router.paths[.scratchpad] == [.note(note)])
+        router.popToRoot()
+        #expect(router.path == [])
     }
 }

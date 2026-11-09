@@ -32,7 +32,7 @@ struct RootView: View {
         let held = model.signInSheet != nil || signInSheetOnScreen
         ZStack {
             if model.onboarding.isComplete {
-                MainStack()
+                MainTabs()
                     .transition(.opacity)
             } else {
                 OnboardingRootView()
@@ -61,20 +61,53 @@ struct RootView: View {
     }
 }
 
-/// Home and the screens pushed on top of it.
-struct MainStack: View {
+/// The tab bar (Home, Dictionary, Snippets, Style, Scratchpad), each tab with its own stack, and
+/// the side menu over them.
+struct MainTabs: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         @Bindable var router = model.router
-        NavigationStack(path: $router.path) {
-            HomeView()
+        TabView(selection: $router.tab) {
+            Tab("Home", systemImage: "house", value: MainTab.home) {
+                TabStack(tab: .home) { HomeView() }
+            }
+            Tab("Dictionary", systemImage: "character.book.closed", value: MainTab.dictionary) {
+                TabStack(tab: .dictionary) { DictionaryView() }
+            }
+            Tab("Snippets", systemImage: "scissors", value: MainTab.snippets) {
+                TabStack(tab: .snippets) { SnippetsView() }
+            }
+            Tab("Style", systemImage: "textformat.size", value: MainTab.style) {
+                TabStack(tab: .style) { StyleView() }
+            }
+            Tab("Scratchpad", systemImage: "note.text", value: MainTab.scratchpad) {
+                TabStack(tab: .scratchpad) { ScratchpadView() }
+            }
+        }
+        .tint(Palette.tabSelectedLabel)
+        .overlay { MenuDrawer() }
+    }
+}
+
+/// One tab's navigation stack, bound to its path in the router.
+private struct TabStack<Root: View>: View {
+    @Environment(AppModel.self) private var model
+    let tab: MainTab
+    @ViewBuilder let root: () -> Root
+
+    var body: some View {
+        let router = model.router
+        NavigationStack(path: Binding(get: { router.paths[tab] ?? [] }, set: { router.paths[tab] = $0 })) {
+            root()
                 .navigationDestination(for: Route.self) { route in
                     switch route {
                     case .settings: SettingsView()
                     case .languages: LanguagesView()
                     case .debug: DebugView()
                     case .transcript(let id): TranscriptDetailView(id: id)
+                    case .account: AccountView()
+                    case .note(let id): NoteEditorView(id: id)
                     }
                 }
         }

@@ -75,6 +75,17 @@ final class HistoryStore: TranscriptSink {
                 MetricsSummary.summarize(metrics.compactMap(\.totalMs)))
     }
 
+    /// Words dictated, and the average speaking pace over dictations with audio (Account).
+    func lifetimeStats() -> (words: Int, wordsPerMinute: Int?) {
+        let records = (try? context.fetch(FetchDescriptor<TranscriptRecord>())) ?? []
+        let words = records.reduce(0) { $0 + $1.words }
+        let timed = records.filter { $0.audioSeconds > 0 && $0.words > 0 }
+        let seconds = timed.reduce(0) { $0 + $1.audioSeconds }
+        guard seconds >= 1 else { return (words, nil) }
+        let wpm = Double(timed.reduce(0) { $0 + $1.words }) / (seconds / 60)
+        return (words, Int(wpm.rounded()))
+    }
+
     // MARK: Writes
 
     func record(_ transcript: Transcript) {

@@ -13,6 +13,8 @@ final class AppModel {
     let assets: SpeechAssetManager
     let languages: LanguageSettingsModel
     let history: HistoryStore
+    /// The personal dictionary, snippets and Scratchpad notes.
+    let library: LibraryStore
     /// Each dictation's timings, for the Debug screen.
     let timingsLog: TimingsLog
     let settings = SettingsModel()
@@ -33,6 +35,11 @@ final class AppModel {
     /// The account the backend signs in with, for the signed-out card and the sign-in sheet; nil
     /// without a backend.
     let account: AccountModel?
+    /// The plan, support messages and account deletion.
+    let accountService: AccountService
+    /// The plan and this week's words, refreshed when the app becomes active; nil until the
+    /// first answer, and without a backend.
+    var quota: AccountService.Quota?
     /// The "Sign in again" sheet while it's up, and where it opened. RootView presents it, so it
     /// also opens during onboarding; the swipe-back screen and the start dialog close it first.
     var signInSheet: SignInAgainView.Start?
@@ -58,6 +65,9 @@ final class AppModel {
         self.history = history
         if launchOptions.useFixtures { HistoryFixtures.seed(history) }
         if launchOptions.onboardingStep == .complete { OnboardingFixtures.seedCompletedHistory(history) }
+        let library = LibraryStore.open(inMemory: launchOptions.useFixtures || launchOptions.isOnboardingScreenshot)
+        self.library = library
+        if launchOptions.useFixtures { LibraryFixtures.seed(library) }
         let backend = Self.makeBackend(launchOptions: launchOptions)
         self.backend = backend
         account = backend?.account
@@ -66,6 +76,8 @@ final class AppModel {
         let cleanup = CleanupClient(functions: functions)
         let pipeline = DictationPipeline(cleanup: cleanup)
         self.pipeline = pipeline
+        accountService = AccountService(backend: backend, functions: functions)
+        if launchOptions.useFixtures { quota = .fixture }
         let assets = SpeechAssetManager()
         self.assets = assets
         let practiceBuffer = PracticeTranscriptBuffer(
@@ -102,7 +114,11 @@ final class AppModel {
             forwardSetupStatus()
         }
         onboarding.resumePendingCompletion()
+        router.tab = Router.initialTab(for: launchOptions.route)
         router.path = Router.initialPath(for: launchOptions.route)
+        if launchOptions.route == .menu { router.isMenuOpen = true }
+        feedLibraryToPipeline()
+        library.onChange = { [weak self] in self?.feedLibraryToPipeline() }
         if launchOptions.route == .swipeBack { showSwipeBack = true }
         if launchOptions.route == .transcript, let first = history.recent(limit: 1).first {
             router.path = [.transcript(first.id)]
@@ -208,6 +224,56 @@ final class AppModel {
         }
     }
 
+    /// Each dictation spells the dictionary's words and expands its snippets. The recognizer's
+    /// keywords come from the same list when the next session's transcriber is prepared.
+    private func feedLibraryToPipeline() {
+        pipeline.dictionary = library.dictionaryTerms
+        pipeline.snippets = library.snippets
+    }
+
+    // MARK: Account
+
+    func refreshQuota() {
+        guard !launchOptions.useFixtures, launchOptions.accountState == nil, onboarding.isComplete else { return }
+        Task {
+            do {
+                if let quota = try await accountService.quota() { self.quota = quota }
+            } catch {
+                // Offline or signed out: the menu keeps the last answer.
+            }
+        }
+    }
+
+    /// Sign out: this iPhone forgets the account and its data, and onboarding starts over.
+    func signOut() async {
+        await accountService.signOut()
+        resetAfterAccountEnded()
+    }
+
+    /// Deletes the account on the server, then everything on this iPhone. Returns a message when
+    /// the server couldn't delete it (nothing local is touched then).
+    func deleteAccount() async -> String? {
+        do {
+            try await accountService.deleteAccount()
+        } catch {
+            return error.localizedDescription
+        }
+        await accountService.signOut()
+        resetAfterAccountEnded()
+        return nil
+    }
+
+    private func resetAfterAccountEnded() {
+        session.stop()
+        deleteAllHistory()
+        library.deleteAll()
+        quota = nil
+        router.isMenuOpen = false
+        router.paths = [:]
+        router.tab = .home
+        onboarding.restart()
+    }
+
     /// Re-runs the cleanup on a stored transcript. Returns a message when it failed.
     func regenerate(_ id: UUID) async -> String? {
         guard let transcript = history.snapshot(id) else { return "Transcript not found" }
@@ -270,6 +336,7 @@ final class AppModel {
             guard onboarding.isComplete else { return }
             // Settings would open under it, out of sight.
             signInSheet = nil
+            router.isMenuOpen = false
             router.popToRoot()
             router.open(.settings)
         case .authCallback(let url):
@@ -320,6 +387,7 @@ final class AppModel {
             session.appDidBecomeActive()
             history.applyRetention()
             history.reconcileInsertions(payloads: transport.payloads)
+            refreshQuota()
         case .background:
             activeSince = nil
             showSwipeBack = false
@@ -359,6 +427,7 @@ enum DeepLink: Equatable {
 /// Screens reachable with `-route <name>` for screenshot comparison.
 enum LaunchRoute: String {
     case home, settings, languages, debug, transcript, swipeBack
+    case dictionary, snippets, style, scratchpad, menu, account
 
     init?(arguments: [String]) {
         guard let index = arguments.firstIndex(of: "-route"), arguments.indices.contains(index + 1) else {

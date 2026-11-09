@@ -121,12 +121,12 @@ final class OnboardingJourneyTests: XCTestCase {
         throughWrapUp()
         expectText("unlimited access for 2 weeks")
         tap("Get started")
-        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5), "Home after the offer")
+        XCTAssertTrue(app.buttons["Menu"].waitForExistence(timeout: 5), "Home after the offer")
 
         // The next launch opens Home directly.
         app.terminate()
         launch(reset: false)
-        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Menu"].waitForExistence(timeout: 5))
         XCTAssertFalse(button("Get started").exists)
     }
 
@@ -194,7 +194,7 @@ final class OnboardingJourneyTests: XCTestCase {
         relaunch()
         expectText("unlimited access")
         tap("Get started")
-        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Menu"].waitForExistence(timeout: 5))
     }
 
     private func relaunch() {
@@ -234,6 +234,6 @@ final class OnboardingJourneyTests: XCTestCase {
         tap("Continue as a guest")
         expectText("unlimited access for 2 weeks")
         tap("Get started")
-        XCTAssertTrue(app.buttons["Settings"].waitForExistence(timeout: 5), "Home after the offer")
+        XCTAssertTrue(app.buttons["Menu"].waitForExistence(timeout: 5), "Home after the offer")
     }
 }

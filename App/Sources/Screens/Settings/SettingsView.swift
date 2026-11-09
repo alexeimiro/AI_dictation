@@ -22,9 +22,6 @@ struct SettingsView: View {
                 NavigationLink(value: Route.languages) {
                     LabeledContent("Languages", value: languagesSummary)
                 }
-                Picker("Default style", selection: $settings.defaultStyle) {
-                    ForEach(StylePreset.allCases) { Text($0.title).tag($0) }
-                }
                 Toggle("Use built-in mic", isOn: $settings.useBuiltInMic)
                     .tint(Palette.toggleGreen)
                 Picker("Disable after", selection: $settings.disableAfter) {
@@ -75,6 +72,7 @@ struct SettingsView: View {
         .background(Palette.canvas)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
     }
 
     /// What signing in brings back, after a sign-out or "Continue without an account". No word on
