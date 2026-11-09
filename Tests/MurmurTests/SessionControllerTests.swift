@@ -29,7 +29,7 @@ private final class RecordingCloud: CloudTranscribing {
     let isConfigured = true
     private(set) var uploads: [(audio: Data, format: EncodedAudio.Format)] = []
 
-    func transcribe(audio: Data, format: EncodedAudio.Format, language: String?,
+    func transcribe(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
                     keywords: [String]) async throws(CloudTranscriptionError) -> CloudTranscript {
         uploads.append((audio, format))
         return CloudTranscript(text: "see you at five", timing: nil)
@@ -87,16 +87,18 @@ struct SessionControllerTests {
     private let micFormat = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
 
     /// A ready session on the in-memory transport, with its own settings (no sounds) and log.
-    private func makeHarness(transcriber: Transcriber = SpokenTranscriber()) -> Harness {
+    private func makeHarness(transcriber: Transcriber = SpokenTranscriber(), recordings: RecordingStore? = nil,
+                             configure: (SharedSettings) -> Void = { _ in }) -> Harness {
         let transport = InMemoryIPCTransport()
         let log = TimingsLog(directory: FileManager.default.temporaryDirectory
             .appendingPathComponent("session-timings-\(UUID().uuidString)", isDirectory: true))
         let history = HistorySpy()
         let settings = SharedSettings(defaults: UserDefaults(suiteName: "test.murmur.session.\(UUID().uuidString)"))
         settings.interactionSounds = false
+        configure(settings)
         let session = SessionController(
             transport: transport, pipeline: DictationPipeline(cleanup: NoCleanup()), assets: SpeechAssetManager(),
-            history: history, timingsLog: log, settings: settings)
+            history: history, recordings: recordings, timingsLog: log, settings: settings)
         session.startForTesting(with: transcriber, language: english)
         return Harness(session: session, transport: transport, log: log, history: history)
     }
@@ -242,5 +244,52 @@ struct SessionControllerTests {
         #expect(cloud.uploads.count == 1)
         let length = try seconds(of: #require(cloud.uploads.first))
         #expect(abs(length - 1) < 0.3)
+    }
+
+    /// The Action Button with the Murmur keyboard on screen: the app records a dictation the
+    /// keyboard can join (a pending start with the keyboard's options), as after a bounce.
+    @Test func aShortcutStartsADictationTheKeyboardJoins() async throws {
+        let harness = makeHarness { settings in
+            settings.defaultStyle = .grammar
+            settings.autoDetectDefaultApplied = true
+            settings.translationSourceLanguage = "en-US"
+            settings.translationEnabled = true
+            settings.translationTargetLanguage = "de-DE"
+        }
+        #expect(harness.session.beginDictationForKeyboard())
+        let pending = try #require(harness.transport.payloads.readPendingStart())
+        #expect(pending.autoStart == true && pending.documentIdentifier == nil)
+        #expect(pending.styleOverride == .grammar && pending.languageOverride == "en-US")
+        #expect(pending.translationTargetLanguage == "de-DE")
+        #expect(harness.session.phase == .recording(pending.requestId))
+        harness.session.endDictation(commit: true)
+        #expect(await waitUntil { harness.transport.payloads.readResult(pending.requestId) != nil })
+    }
+
+    /// Scratchpad's mic: the result goes to the note, not to the keyboard's files.
+    @Test func anInAppDictationGoesToItsHandler() async throws {
+        let harness = makeHarness()
+        var delivered: [DictationResult] = []
+        harness.session.inAppResultHandler = { delivered.append($0) }
+        let requestId = try #require(harness.session.beginInAppDictation())
+        harness.session.endDictation(commit: true)
+        #expect(await waitUntil { !delivered.isEmpty })
+        #expect(delivered.first?.requestId == requestId)
+        #expect(harness.transport.payloads.readResult(requestId) == nil)
+    }
+
+    /// The uploaded audio is kept for the transcript's playback, unless Keep recordings is off.
+    @Test(arguments: [true, false])
+    func theRecordingIsKeptWithTheTranscript(keep: Bool) async throws {
+        let cloud = RecordingCloud()
+        let transcriber = try await cloudTranscriber(cloud)
+        let recordings = RecordingStore.temporary()
+        defer { recordings.deleteAll() }
+        let harness = makeHarness(transcriber: transcriber, recordings: recordings) { $0.keepRecordings = keep }
+        let requestId = try #require(harness.session.beginInAppDictation())
+        feed(transcriber, seconds: 1)
+        harness.session.endDictation(commit: true)
+        #expect(await waitUntil { harness.history.checks.count == 1 })
+        #expect((recordings.url(for: requestId) != nil) == keep)
     }
 }

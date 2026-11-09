@@ -37,6 +37,7 @@ public final class IPCPayloadStore: @unchecked Sendable {
     private var launchTokenURL: URL { container.url("launch-token.json") }
     private var pendingStartURL: URL { container.url("pending-start.json") }
     private var sessionFailureURL: URL { container.url("session-failure.json") }
+    private var dictionaryAdditionsURL: URL { container.url("dictionary-additions.json") }
     private var resultsDirectory: URL { container.directory("results") }
     private var claimsDirectory: URL { container.directory("claimed") }
 
@@ -145,6 +146,25 @@ public final class IPCPayloadStore: @unchecked Sendable {
 
     public func clearSessionFailure() {
         JSONFile.remove(sessionFailureURL)
+    }
+
+    // MARK: Dictionary additions (keyboard → app)
+
+    /// Queues a word from the keyboard's ☰ menu; one already queued (in any case) isn't queued
+    /// twice. At most the newest 50 wait.
+    public func append(dictionaryAddition addition: DictionaryAddition) throws {
+        var queued = JSONFile.read([DictionaryAddition].self, from: dictionaryAdditionsURL) ?? []
+        let key = addition.term.lowercased()
+        guard !queued.contains(where: { $0.term.lowercased() == key }) else { return }
+        queued.append(addition)
+        try JSONFile.write(Array(queued.suffix(50)), to: dictionaryAdditionsURL)
+    }
+
+    /// Everything queued, oldest first, emptying the queue.
+    public func takeDictionaryAdditions() -> [DictionaryAddition] {
+        let queued = JSONFile.read([DictionaryAddition].self, from: dictionaryAdditionsURL) ?? []
+        if !queued.isEmpty { JSONFile.remove(dictionaryAdditionsURL) }
+        return queued
     }
 
     // MARK: Housekeeping

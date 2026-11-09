@@ -32,17 +32,21 @@ public struct LocalFormatter: Sendable {
     public var snippets: [SnippetDefinition]
     /// BCP-47 tag of the dictation; nil applies the English rules only.
     public var language: String?
+    /// "Smart formatting" drops "um" and "uh"; off, the speaker's hesitations stay.
+    public var removesFillers: Bool
 
-    public init(dictionary: [DictionaryTerm] = [], snippets: [SnippetDefinition] = [], language: String? = nil) {
+    public init(dictionary: [DictionaryTerm] = [], snippets: [SnippetDefinition] = [], language: String? = nil,
+                removesFillers: Bool = true) {
         self.dictionary = dictionary
         self.snippets = snippets
         self.language = language
+        self.removesFillers = removesFillers
     }
 
     public func format(_ raw: String) -> String {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return "" }
-        text = Self.removeFillers(text, language: language)
+        if removesFillers { text = Self.removeFillers(text, language: language) }
         text = applyDictionary(text)
         text = applySnippets(text)
         text = Self.collapseWhitespace(text)

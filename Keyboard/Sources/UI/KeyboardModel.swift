@@ -25,6 +25,9 @@ final class KeyboardModel {
     /// Set only when a verified secondary language exists; shows the language pill.
     var secondaryLanguage: DictationLanguage?
     var languageOverride: DictationLanguage?
+    /// The languages picked in the app's Settings › Languages (none: Auto-detect), first in the
+    /// Speak and Type in menus.
+    var spokenLanguages: [DictationLanguage] = []
     var translationEnabled = false
     var targetLanguage = DictationLanguage.englishUS
     var recentLanguages: [DictationLanguage] = []
@@ -46,6 +49,10 @@ final class KeyboardModel {
     var readyHaptic = true
     var interactionSounds = true
     var appearance = KeyboardAppearancePreference.automatic
+    /// The ☰ menu's "Add to dictionary": the selected word, or the one before the cursor.
+    var dictionaryCandidate: String?
+    /// The word just added, for the row's confirmation.
+    var addedToDictionary: String?
 
     @ObservationIgnored var actions = Actions()
 
@@ -70,6 +77,7 @@ final class KeyboardModel {
         var setReadyHaptic: (Bool) -> Void = { _ in }
         var setInteractionSounds: (Bool) -> Void = { _ in }
         var setAppearance: (KeyboardAppearancePreference) -> Void = { _ in }
+        var addToDictionary: (String) -> Void = { _ in }
         var deleteDown: () -> Void = {}
         var deleteUp: () -> Void = {}
         var deleteWord: () -> Void = {}
@@ -114,13 +122,13 @@ final class KeyboardModel {
     var isSessionLive: Bool { sessionStatus.isLive }
 
     var languageChoices: [DictationLanguage] {
-        let preferred = [primaryLanguage] + (secondaryLanguage.map { [$0] } ?? [])
-            + recentLanguages + Self.menuLanguages
+        let preferred = spokenLanguages + [primaryLanguage] + (secondaryLanguage.map { [$0] } ?? [])
+            + recentLanguages + DictationLanguage.cloudLanguagesByName
         return [DictationLanguage.automatic] + preferred.uniqued(by: \DictationLanguage.languageCode)
     }
 
     var targetLanguageChoices: [DictationLanguage] {
-        (recentLanguages + [primaryLanguage] + Self.menuLanguages)
+        (recentLanguages + spokenLanguages + [primaryLanguage] + DictationLanguage.cloudLanguagesByName)
             .filter { !$0.isAutomatic && $0.languageCode != effectiveLanguage.languageCode }
             .uniqued(by: \DictationLanguage.languageCode)
     }
@@ -138,23 +146,6 @@ final class KeyboardModel {
         guard translationEnabled else { return style.title }
         if effectiveLanguage.isAutomatic { return "Into \(targetLanguage.localizedName)" }
         return "\(effectiveLanguage.localizedName) → \(targetLanguage.localizedName)"
-    }
-
-    /// Every language OpenAI's speech-to-text and GPT translation support (the Whisper language
-    /// list). Recognition reaches them through the cloud even when no on-device speech model is
-    /// installed. Menus show `menuLanguages`.
-    static let commonLanguages: [DictationLanguage] = [
-        "en-US", "af-ZA", "ar-SA", "hy-AM", "az-AZ", "be-BY", "bs-BA", "bg-BG", "ca-ES", "zh-CN",
-        "hr-HR", "cs-CZ", "da-DK", "nl-NL", "et-EE", "fi-FI", "fr-FR", "gl-ES", "de-DE", "el-GR",
-        "he-IL", "hi-IN", "hu-HU", "is-IS", "id-ID", "it-IT", "ja-JP", "kn-IN", "kk-KZ", "ko-KR",
-        "lv-LV", "lt-LT", "mk-MK", "ms-MY", "mr-IN", "mi-NZ", "ne-NP", "nb-NO", "fa-IR", "pl-PL",
-        "pt-BR", "ro-RO", "ru-RU", "sr-RS", "sk-SK", "sl-SI", "es-ES", "sw-KE", "sv-SE", "tl-PH",
-        "ta-IN", "th-TH", "tr-TR", "uk-UA", "ur-PK", "vi-VN", "cy-GB",
-    ].map(DictationLanguage.init(tag:))
-
-    /// `commonLanguages` in alphabetical order of their names in the UI language.
-    static let menuLanguages: [DictationLanguage] = commonLanguages.sorted {
-        $0.localizedName.localizedStandardCompare($1.localizedName) == .orderedAscending
     }
 
     func update(from client: KeyboardSessionClient) {

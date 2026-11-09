@@ -73,7 +73,7 @@ struct SignInAgainView: View {
                 VStack(spacing: 15) {
                     providerButton(.google, title: "Continue with Google", style: .outline) { EmptyView() }
                     providerButton(.apple, title: "Continue with Apple", style: .ink) {
-                        Image(systemName: "apple.logo").font(.system(size: 21))
+                        Image(systemName: "apple.logo").font(.system(size: 21)).accessibilityHidden(true)
                     }
                     Button("Continue with Email") { path.append(.email) }
                         .buttonStyle(.pill(.subtle))

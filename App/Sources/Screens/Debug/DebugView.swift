@@ -26,10 +26,11 @@ struct DebugView: View {
                 }
                 LabeledContent("Running", value: model.session.engineName.isEmpty ? "—" : model.session.engineName)
                 LabeledContent("Memory", value: memory)
+                NavigationLink("On-device languages", value: Route.languages)
             } header: {
                 Text("Engine")
             } footer: {
-                Text("Recognizer changes apply the next time the session starts.")
+                Text("Recognizer changes apply the next time the session starts. On-device languages are the primary and secondary models the fallback uses.")
             }
             Section {
                 Toggle("Return to the app automatically", isOn: $settings.autoReturn)

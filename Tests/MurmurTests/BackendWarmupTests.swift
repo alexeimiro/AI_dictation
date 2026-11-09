@@ -25,8 +25,8 @@ private final class WarmedDictate: Dictating {
     private(set) var warmUps = 0
     private var held: [CheckedContinuation<Void, Never>] = []
 
-    func dictate(audio: Data, format: EncodedAudio.Format, language: String?, keywords: [String],
-                 request: ModelRequest) async throws(CloudTranscriptionError) -> DictateReply {
+    func dictate(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
+                 keywords: [String], request: ModelRequest) async throws(CloudTranscriptionError) -> DictateReply {
         throw .notDeployed
     }
 

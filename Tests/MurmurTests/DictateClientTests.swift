@@ -27,7 +27,7 @@ struct DictateClientTests {
     }
 
     private func dictate(with client: DictateClient, id: UUID = UUID()) async throws(CloudTranscriptionError) -> DictateReply {
-        try await client.dictate(audio: Data([0x00, 0x01, 0x02]), format: .m4a, language: "ru-RU",
+        try await client.dictate(audio: Data([0x00, 0x01, 0x02]), format: .m4a, language: "ru-RU", languageHints: [],
                                  keywords: ["Окафор"], request: translation(id: id))
     }
 

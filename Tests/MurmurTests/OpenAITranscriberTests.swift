@@ -15,13 +15,16 @@ private final class FakeCloud: CloudTranscribing {
     /// Requests wait for `releaseRequests()`, like a slow network.
     var holdsRequests = false
     private(set) var calls: [(audio: Data, format: EncodedAudio.Format, language: String?, keywords: [String])] = []
+    /// Each call's `languageHints`.
+    private(set) var hints: [[String]] = []
     /// When the last request answered.
     private(set) var answeredAt: ContinuousClock.Instant?
     private var held: [CheckedContinuation<Void, Never>] = []
 
-    func transcribe(audio: Data, format: EncodedAudio.Format, language: String?,
+    func transcribe(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
                     keywords: [String]) async throws(CloudTranscriptionError) -> CloudTranscript {
         calls.append((audio, format, language, keywords))
+        hints.append(languageHints)
         if holdsRequests { await withCheckedContinuation { held.append($0) } }
         answeredAt = .now
         return CloudTranscript(text: try result.get(), languages: languages, timing: timing)
@@ -42,10 +45,13 @@ private final class FakeDictate: Dictating {
     private(set) var calls: [(audio: Data, language: String?, request: ModelRequest)] = []
     /// What the fake heard, as `dictate` reports it.
     var languages = ["ru"]
+    /// Each call's `languageHints`.
+    private(set) var hints: [[String]] = []
 
-    func dictate(audio: Data, format: EncodedAudio.Format, language: String?, keywords: [String],
-                 request: ModelRequest) async throws(CloudTranscriptionError) -> DictateReply {
+    func dictate(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
+                 keywords: [String], request: ModelRequest) async throws(CloudTranscriptionError) -> DictateReply {
         calls.append((audio, language, request))
+        hints.append(languageHints)
         if let failure { throw failure }
         return DictateReply(
             transcript: "Привет из облака.", languages: languages,
@@ -384,6 +390,32 @@ struct OpenAITranscriberTests {
         feed(transcriber, seconds: 1)
         _ = try await transcriber.finishUtterance()
         #expect(cloud.calls.first?.language == nil)
+        #expect(cloud.hints.first == [])
+    }
+
+    /// Under Auto-detect the user's languages go along, so the cloud picks among them; a pinned
+    /// language goes alone.
+    @Test func automaticLanguageSendsTheUsersLanguagesAsHints() async throws {
+        let cloud = FakeCloud()
+        var automatic = ResolvedLanguage(tag: DictationLanguage.automatic.tag,
+                                         locale: Locale(identifier: "en-US"), engine: .speech)
+        automatic.languageHints = ["en-US", "ru-RU"]
+        let transcriber = OpenAITranscriber(client: cloud)
+        try await transcriber.prepare(micFormat: micFormat, language: automatic)
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        _ = try await transcriber.finishUtterance()
+        #expect(cloud.calls.last?.language == nil)
+        #expect(cloud.hints.last == ["en-US", "ru-RU"])
+
+        var pinned = russian
+        pinned.languageHints = ["en-US", "ru-RU"]
+        transcriber.setLanguage(pinned)
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        _ = try await transcriber.finishUtterance()
+        #expect(cloud.calls.last?.language == "ru-RU")
+        #expect(cloud.hints.last == [])
     }
 
     @Test func silenceShorterThanAThirdOfASecondIsNotSent() async throws {

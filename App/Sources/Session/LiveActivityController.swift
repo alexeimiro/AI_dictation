@@ -52,9 +52,21 @@ final class LiveActivityController {
     }
 }
 
-/// App-side handlers for the Live Activity intents (the widget target has no-op stubs).
+/// App-side handlers for the Live Activity intents and `DictateIntent` (the widget target has
+/// no-op stubs).
 enum LiveActivityActions {
     @MainActor static weak var session: SessionController?
+    @MainActor static weak var model: AppModel?
+
+    /// `DictateIntent`'s part that runs without opening Murmur; false when it has to open.
+    static func toggleDictation() async -> Bool {
+        await MainActor.run { model?.toggleDictationFromShortcut() ?? false }
+    }
+
+    /// `DictateIntent` once Murmur is on screen: a new note, dictated into.
+    static func dictateIntoNewNote() async {
+        await MainActor.run { model?.openNewNote(dictating: true) }
+    }
 
     static func stopDictation() async {
         await MainActor.run { session?.endDictation(commit: true) }

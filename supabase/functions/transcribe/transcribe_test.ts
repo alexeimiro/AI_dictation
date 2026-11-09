@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertFalse, assertRejects, assertStrictEquals } from "jsr:@std/assert@1";
 import {
   cleanKeywords,
+  cleanLanguageHints,
   isoLanguage,
   OpenAIError,
   openAIForm,
@@ -57,6 +58,18 @@ Deno.test("language is optional and odd tags fall back to detection", () => {
   assertEquals(isoLanguage(undefined), null);
 });
 
+Deno.test("the user's languages become ISO-639-1 hints, deduplicated and capped", () => {
+  const parsed = parseTranscribeRequest({ audio, format: "m4a", languages: ["en-US", "ru_RU", "en-GB", "nb-NO"] });
+  assert(parsed.ok);
+  assertEquals(parsed.value.language, null);
+  assertEquals(parsed.value.languageHints, ["en", "ru", "no"]);
+  // Not a list, or odd items: skipped, never refused.
+  assertEquals(cleanLanguageHints("en-US"), []);
+  assertEquals(cleanLanguageHints([42, "yue-Hant", "", "uk-UA"]), ["uk"]);
+  const many = ["en", "ru", "de", "fr", "es", "it", "pt", "nl", "pl", "uk", "tr", "ja"];
+  assertEquals(cleanLanguageHints(many).length, TRANSCRIBE_LIMITS.maxLanguageHints);
+});
+
 Deno.test("keywords are capped and deduplicated", () => {
   const many = Array.from({ length: 150 }, (_, index) => `term${index}`);
   assertEquals(cleanKeywords(many).length, TRANSCRIBE_LIMITS.maxKeywords);
@@ -69,6 +82,7 @@ const request: TranscribeRequest = {
   audio: new TextEncoder().encode("audio"),
   format: "m4a",
   language: "ru",
+  languageHints: [],
   keywords: ["Valerio", "Okafor"],
 };
 
@@ -81,6 +95,20 @@ Deno.test("gpt-transcribe gets languages[] and keywords[]", () => {
   const file = form.get("file") as File;
   assertEquals(file.name, "dictation.m4a");
   assertEquals(file.type, "audio/mp4");
+});
+
+Deno.test("without a language, gpt-transcribe gets the user's languages to detect it among", () => {
+  const form = openAIForm({ ...request, language: null, languageHints: ["en", "ru"] }, "gpt-transcribe");
+  assertEquals(form.getAll("languages[]"), ["en", "ru"]);
+  // A pinned language wins over the hints.
+  assertEquals(openAIForm({ ...request, languageHints: ["en", "ru"] }, "gpt-transcribe").getAll("languages[]"), ["ru"]);
+  // No language and no hints: any language.
+  assertEquals(openAIForm({ ...request, language: null }, "gpt-transcribe").getAll("languages[]"), []);
+});
+
+Deno.test("older models take one hint as the language, and detect among several", () => {
+  assertEquals(openAIForm({ ...request, language: null, languageHints: ["de"] }, "whisper-1").get("language"), "de");
+  assertEquals(openAIForm({ ...request, language: null, languageHints: ["de", "en"] }, "whisper-1").get("language"), null);
 });
 
 Deno.test("older models get language and the terms as a prompt", () => {

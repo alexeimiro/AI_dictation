@@ -59,7 +59,7 @@ struct DeepLinkTests {
     }
 
     @Test @MainActor func initialPathOpensNestedScreens() {
-        #expect(Router.initialPath(for: .languages) == [.settings, .languages])
+        #expect(Router.initialPath(for: .languages) == [.settings, .debug, .languages])
         #expect(Router.initialPath(for: .debug) == [.settings, .debug])
         #expect(Router.initialPath(for: .home) == [])
         #expect(Router.initialPath(for: nil) == [])

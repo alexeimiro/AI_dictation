@@ -2,7 +2,8 @@ import MurmurCore
 import MurmurUI
 import SwiftUI
 
-/// "Transcript information": cleaned vs raw text, stats, and the retry / insert actions.
+/// "Transcript information": cleaned vs raw text, the recording, 👍/👎, stats, and the retry /
+/// insert actions.
 struct TranscriptDetailView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -50,6 +51,14 @@ struct TranscriptDetailView: View {
                             .font(.ui(13))
                             .foregroundStyle(Palette.danger)
                     }
+                }
+
+                if let recording = model.history.recordings.url(for: transcript.id) {
+                    RecordingPlayerRow(url: recording)
+                }
+
+                if model.account != nil, transcript.status != .processing {
+                    TranscriptFeedbackRow(transcript: transcript, toast: $toast)
                 }
 
                 if transcript.cleanedText != nil, !transcript.rawText.isEmpty {

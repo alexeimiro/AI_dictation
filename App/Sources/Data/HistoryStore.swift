@@ -9,6 +9,8 @@ import SwiftData
 @Observable
 final class HistoryStore: TranscriptSink {
     let container: ModelContainer
+    /// The dictations' audio ("Keep recordings"), deleted with their transcripts.
+    let recordings: RecordingStore
     /// Bumped after every write so lists that don't use `@Query` can re-fetch.
     private(set) var revision = 0
 
@@ -16,7 +18,8 @@ final class HistoryStore: TranscriptSink {
     @ObservationIgnored private let settings: SharedSettings
     @ObservationIgnored private let logger = Logger(subsystem: "Murmur", category: "History")
 
-    init(inMemory: Bool = false, settings: SharedSettings = .shared) throws {
+    init(inMemory: Bool = false, settings: SharedSettings = .shared, recordings: RecordingStore? = nil) throws {
+        self.recordings = recordings ?? (inMemory ? .temporary() : RecordingStore())
         let schema = Schema(versionedSchema: HistorySchemaV1.self)
         let configuration: ModelConfiguration
         if inMemory {
@@ -102,6 +105,7 @@ final class HistoryStore: TranscriptSink {
     }
 
     func delete(_ id: UUID) {
+        recordings.delete(id)
         guard let existing = record(id) else { return }
         context.delete(existing)
         save()
@@ -109,12 +113,14 @@ final class HistoryStore: TranscriptSink {
 
     func deleteAll() {
         try? context.delete(model: TranscriptRecord.self)
+        recordings.deleteAll()
         save()
     }
 
     /// Removes transcripts older than the "Auto-delete transcripts" setting.
     func applyRetention(now: Date = Date()) {
         guard let cutoff = RetentionPolicy.cutoff(now: now, retention: settings.transcriptRetention) else { return }
+        recordings.prune(olderThan: cutoff)
         do {
             try context.delete(model: TranscriptRecord.self, where: #Predicate { $0.createdAt < cutoff })
             save()

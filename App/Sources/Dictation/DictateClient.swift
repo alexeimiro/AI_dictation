@@ -50,10 +50,11 @@ protocol Dictating: AnyObject, Sendable {
     var isAvailable: Bool { get }
     /// When `dictate` last answered, for the warm-up's debounce.
     var lastReplyAt: ContinuousClock.Instant? { get }
-    /// `language`: BCP-47 tag of the dictation, nil to detect it; `keywords`: personal dictionary
-    /// terms. Throws `.notDeployed` on a 404, and when unavailable.
-    func dictate(audio: Data, format: EncodedAudio.Format, language: String?, keywords: [String],
-                 request: ModelRequest) async throws(CloudTranscriptionError) -> DictateReply
+    /// `language`: BCP-47 tag of the dictation, nil to detect it; `languageHints`: then, the user's
+    /// languages to detect it among; `keywords`: personal dictionary terms. Throws `.notDeployed`
+    /// on a 404, and when unavailable.
+    func dictate(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
+                 keywords: [String], request: ModelRequest) async throws(CloudTranscriptionError) -> DictateReply
     func warm() async -> WarmupResult
 }
 
@@ -68,6 +69,8 @@ final class DictateClient: Dictating {
         let dictationId: UUID
         let format: String
         let language: String?
+        /// The user's languages while `language` is detected; left out when empty.
+        let languages: [String]?
         let keywords: [String]
         /// Left out for Improve my grammar.
         let targetLanguage: String?
@@ -109,11 +112,12 @@ final class DictateClient: Dictating {
 
     var isAvailable: Bool { functions != nil && deployed && settings.translateInOneRequest }
 
-    func dictate(audio: Data, format: EncodedAudio.Format, language: String?, keywords: [String],
-                 request: ModelRequest) async throws(CloudTranscriptionError) -> DictateReply {
+    func dictate(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
+                 keywords: [String], request: ModelRequest) async throws(CloudTranscriptionError) -> DictateReply {
         guard let functions, isAvailable else { throw .notDeployed }
         let metadata = Metadata(
             dictationId: request.dictationId, format: format.rawValue, language: language,
+            languages: language == nil && !languageHints.isEmpty ? languageHints : nil,
             keywords: Array(keywords.prefix(100)), targetLanguage: request.targetLanguage,
             style: request.style.rawValue, dictionary: CleanupClient.Entry.wire(request.dictionary),
             snippets: CleanupClient.Snippet.wire(request.snippets))

@@ -10,7 +10,7 @@ import os
 /// compressed to AAC. If the language's on-device model is already on the iPhone, an on-device
 /// transcriber listens alongside and is used when the request fails (offline, a server error,
 /// the free plan's weekly limit), so a dictation isn't lost.
-final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked Sendable {
+final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingProviding, @unchecked Sendable {
     static let sampleRate: Double = 16_000
     /// Shorter recordings are treated as silence instead of being sent.
     static let minimumSeconds: Double = 0.3
@@ -22,6 +22,8 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked
     private let client: any CloudTranscribing
     private let dictation: (any Dictating)?
     private let fallback: (any Transcriber)?
+    /// Low data mode: the audio uploads at `EncodedAudio.lowDataBitRate`.
+    private let savesData: @Sendable () -> Bool
     private let lock = NSLock()
     private let logger = Logger(subsystem: "Murmur", category: "CloudASR")
     private let targetFormat = AVAudioFormat(
@@ -48,16 +50,20 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked
     private var utteranceNumber = 0
     /// The last finished dictation's measurements, until `takeTimings`.
     private var timings: UtteranceTimings?
+    /// The last finished dictation's audio as uploaded, until `takeRecording`.
+    private var recording: EncodedAudio?
 
     /// `dictation`: translates in the request that transcribes; without it, translations go to
     /// `client` like any dictation. `fallbackLanguages`: languages whose on-device model is
     /// installed and verified.
     init(client: any CloudTranscribing, dictation: (any Dictating)? = nil, fallback: (any Transcriber)? = nil,
-         fallbackLanguages: [String: ResolvedLanguage] = [:]) {
+         fallbackLanguages: [String: ResolvedLanguage] = [:],
+         savesData: @escaping @Sendable () -> Bool = { NetworkConditions.shared.savesData() }) {
         self.client = client
         self.dictation = dictation
         self.fallback = fallback
         self.fallbackLanguages = fallbackLanguages
+        self.savesData = savesData
     }
 
     var displayName: String {
@@ -140,6 +146,7 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked
             capturing = true
             utteranceNumber += 1
             timings = nil
+            recording = nil
             // The fallback only helps when it recognizes the dictation's language (or, under
             // Auto-detect, the language it is most likely in).
             fallbackListening = fallbackPrepared && language.flatMap(onDeviceLanguage(for:)) != nil
@@ -193,23 +200,27 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked
         }
         do {
             let encodeStarted = ContinuousClock.now
-            let audio = try EncodedAudio(samples: pcm, sampleRate: Self.sampleRate)
+            let bitRate = savesData() ? EncodedAudio.lowDataBitRate : EncodedAudio.standardBitRate
+            let audio = try EncodedAudio(samples: pcm, sampleRate: Self.sampleRate, bitRate: bitRate)
             var measured = UtteranceTimings(encodeMs: encodeStarted.elapsedMilliseconds, audioBytes: audio.data.count)
             record(measured, for: utterance)
+            keep(audio, for: utterance)
             let spoken = automatic ? nil : language?.tag
+            let hints = automatic ? language?.languageHints ?? [] : []
             let keywords = language?.contextualStrings ?? []
             // What OpenAI heard matters only when it chose the language.
             let detected = { (languages: [String]) in automatic ? languages.first.map(DictationLanguage.normalize) : nil }
             let output: UtteranceOutput
             let timing: RequestTiming?
             if let request,
-               let reply = try await dictated(audio, language: spoken, keywords: keywords, request: request) {
+               let reply = try await dictated(audio, language: spoken, hints: hints, keywords: keywords,
+                                              request: request) {
                 output = UtteranceOutput(transcript: reply.transcript, modelReply: reply.modelReply,
                                          detectedLanguage: detected(reply.languages))
                 timing = reply.timing
             } else {
                 let transcript = try await client.transcribe(
-                    audio: audio.data, format: audio.format, language: spoken, keywords: keywords)
+                    audio: audio.data, format: audio.format, language: spoken, languageHints: hints, keywords: keywords)
                 output = UtteranceOutput(transcript: transcript.text, detectedLanguage: detected(transcript.languages))
                 timing = transcript.timing
             }
@@ -238,12 +249,13 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked
     /// `dictate`'s reply, or nil to send the same audio to `transcribe`: `dictate` is unavailable,
     /// or has just answered that it isn't deployed. Its other failures are the cloud's, as
     /// `transcribe`'s are.
-    private func dictated(_ audio: EncodedAudio, language: String?, keywords: [String],
+    private func dictated(_ audio: EncodedAudio, language: String?, hints: [String], keywords: [String],
                           request: ModelRequest) async throws -> DictateReply? {
         guard let dictation, await dictation.isAvailable else { return nil }
         do {
             return try await dictation.dictate(
-                audio: audio.data, format: audio.format, language: language, keywords: keywords, request: request)
+                audio: audio.data, format: audio.format, language: language, languageHints: hints,
+                keywords: keywords, request: request)
         } catch {
             // Rethrown by hand: Swift 6.3.3's optimizer crashes (OSSACompleteLifetime) on the
             // implicit rethrow of the other typed errors after `catch .notDeployed`, in Release only.
@@ -271,6 +283,7 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked
             samples.removeAll(keepingCapacity: true)
             utteranceNumber += 1
             timings = nil
+            recording = nil
             defer { fallbackListening = false }
             return fallbackListening
         }
@@ -298,6 +311,20 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked
         lock.withLock {
             defer { timings = nil }
             return timings
+        }
+    }
+
+    func takeRecording() -> EncodedAudio? {
+        lock.withLock {
+            defer { recording = nil }
+            return recording
+        }
+    }
+
+    /// Keeps `audio` for `takeRecording`, unless a newer dictation has begun meanwhile.
+    private func keep(_ audio: EncodedAudio, for utterance: Int) {
+        lock.withLock {
+            if utteranceNumber == utterance { recording = audio }
         }
     }
 
@@ -339,15 +366,25 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, @unchecked
 
 /// A dictation's audio, ready to upload: AAC in an M4A container, or WAV if AAC encoding fails.
 struct EncodedAudio: Sendable {
-    enum Format: String, Sendable {
+    enum Format: String, Sendable, CaseIterable {
         case m4a, wav
     }
 
     let data: Data
     let format: Format
 
-    init(samples: [Float], sampleRate: Double) throws {
-        if let aac = try? Self.aac(samples, sampleRate: sampleRate) {
+    /// 32 kbps mono AAC: about 4 KB a second, so even a five-minute dictation uploads quickly.
+    static let standardBitRate = 32_000
+    /// Low data mode: half that, still clear speech at 16 kHz.
+    static let lowDataBitRate = 16_000
+
+    init(data: Data, format: Format) {
+        self.data = data
+        self.format = format
+    }
+
+    init(samples: [Float], sampleRate: Double, bitRate: Int = EncodedAudio.standardBitRate) throws {
+        if let aac = try? Self.aac(samples, sampleRate: sampleRate, bitRate: bitRate) {
             data = aac
             format = .m4a
         } else {
@@ -356,15 +393,14 @@ struct EncodedAudio: Sendable {
         }
     }
 
-    /// 32 kbps mono AAC: about 4 KB a second, so even a five-minute dictation uploads quickly.
-    static func aac(_ samples: [Float], sampleRate: Double) throws -> Data {
+    static func aac(_ samples: [Float], sampleRate: Double, bitRate: Int = standardBitRate) throws -> Data {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("dictation-\(UUID().uuidString).m4a")
         defer { try? FileManager.default.removeItem(at: url) }
         let settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: sampleRate,
             AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: 32_000,
+            AVEncoderBitRateKey: bitRate,
         ]
         do {
             let file = try AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32,

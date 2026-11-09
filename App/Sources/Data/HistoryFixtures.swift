@@ -9,6 +9,19 @@ enum HistoryFixtures {
         for transcript in sample(now: now) {
             store.upsert(transcript)
         }
+        // The newest one has a recording to play (`-route transcript`).
+        if let first = sample(now: now).first, let audio = try? EncodedAudio(samples: tone(seconds: 6.2), sampleRate: 16_000) {
+            store.recordings.save(audio, for: first.id)
+        }
+    }
+
+    /// A soft hum that rises and falls like a voice, standing in for a recording.
+    static func tone(seconds: Double, sampleRate: Double = 16_000) -> [Float] {
+        (0..<Int(seconds * sampleRate)).map { index in
+            let time = Float(Double(index) / sampleRate)
+            let envelope = 0.5 + 0.5 * sin(2 * .pi * 1.7 * time)
+            return 0.12 * envelope * sin(2 * .pi * (180 + 40 * sin(2 * .pi * 0.6 * time)) * time)
+        }
     }
 
     static func sample(now: Date = Date()) -> [Transcript] {

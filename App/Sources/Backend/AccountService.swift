@@ -131,6 +131,57 @@ final class AccountService {
             .execute()
     }
 
+    /// 👍 or 👎 on a dictation, to `feedback`. Its text goes along only when the user agreed to
+    /// share dictations ("Improve Murmur for everyone") and left "Include the text" on.
+    struct DictationFeedback: Encodable, Equatable, Sendable {
+        let dictationId: UUID
+        /// 1 or -1.
+        let rating: Int
+        let comment: String?
+        let rawText: String?
+        let cleanedText: String?
+
+        enum CodingKeys: String, CodingKey {
+            case rating, comment
+            case dictationId = "dictation_id"
+            case rawText = "raw_text"
+            case cleanedText = "cleaned_text"
+        }
+    }
+
+    func send(_ feedback: DictationFeedback) async throws {
+        guard let backend else { throw Failure.notConfigured }
+        guard backend.client.auth.currentSession != nil else { throw Failure.unavailable("Sign in to send feedback.") }
+        do {
+            try await backend.ensureSession()
+            try await backend.client.from("feedback").insert(feedback).execute()
+        } catch {
+            logger.error("Feedback failed: \(error.localizedDescription, privacy: .public)")
+            throw Failure.unavailable("Couldn't send that. Check your connection and try again.")
+        }
+    }
+
+    /// "Improve Murmur for everyone" in Settings: the consent onboarding records (`DataChoiceView`),
+    /// with the policy it was given under and when. Needs a stored session: never starts one.
+    func setDataSharing(_ on: Bool, at date: Date = Date()) async throws {
+        guard let backend else { throw Failure.notConfigured }
+        guard backend.client.auth.currentSession != nil, let userID = backend.client.auth.currentUser?.id else {
+            throw Failure.unavailable("Sign in to change this.")
+        }
+        try await backend.ensureSession()
+        let update: [String: AnyJSON] = [
+            "data_sharing": .bool(on),
+            "data_sharing_policy_version": .integer(DataChoiceDecision.currentPolicyVersion),
+            "data_sharing_decided_at": .string(date.ISO8601Format()),
+        ]
+        do {
+            try await backend.client.from("profiles").update(update).eq("id", value: userID).execute()
+        } catch {
+            logger.error("Data sharing update failed: \(error.localizedDescription, privacy: .public)")
+            throw Failure.unavailable("Couldn't save that. Check your connection and try again.")
+        }
+    }
+
     /// Deletes the account on the server; its rows cascade. Signing out locally is the caller's.
     func deleteAccount() async throws {
         guard let functions else { throw Failure.notConfigured }

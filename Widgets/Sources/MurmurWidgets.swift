@@ -1,4 +1,5 @@
 import ActivityKit
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -6,6 +7,20 @@ import WidgetKit
 struct MurmurWidgetBundle: WidgetBundle {
     var body: some Widget {
         SessionLiveActivity()
+        DictateControl()
+    }
+}
+
+/// Control Center, the Lock Screen and the Action Button's Controls: "Dictate with Murmur".
+struct DictateControl: ControlWidget {
+    var body: some ControlWidgetConfiguration {
+        StaticControlConfiguration(kind: "MurmurDictateControl") {
+            ControlWidgetButton(action: DictateIntent()) {
+                Label("Dictate", systemImage: "waveform")
+            }
+        }
+        .displayName("Dictate with Murmur")
+        .description("Start or stop a dictation. With the Murmur keyboard open, the text is typed where you're writing.")
     }
 }
 
@@ -13,6 +28,8 @@ struct MurmurWidgetBundle: WidgetBundle {
 enum LiveActivityActions {
     static func stopDictation() async {}
     static func endSession() async {}
+    static func toggleDictation() async -> Bool { false }
+    static func dictateIntoNewNote() async {}
 }
 
 struct SessionLiveActivity: Widget {

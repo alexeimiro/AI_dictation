@@ -33,6 +33,8 @@ struct DictationOutcome: Sendable {
     let result: DictationResult
     let transcript: Transcript
     let timings: DictationTimings?
+    /// The audio as uploaded, for the transcript's playback; nil when none was encoded.
+    var recording: EncodedAudio?
 }
 
 /// The cleanup service as the pipeline sees it (`CleanupClient` in the app, a fake in tests).
@@ -92,6 +94,8 @@ final class DictationPipeline {
         } catch {
             logger.error("Transcription failed: \(error.localizedDescription, privacy: .public)")
             let utterance = (transcriber as? UtteranceTimingProviding)?.takeTimings()
+            // What the user said stays playable even when no text came of it.
+            let recording = (transcriber as? RecordingProviding)?.takeRecording()
             let limited = (error as? CloudTranscriptionError) == .limitReached
             // The on-device fallback failed after the cloud refused a signed-out account: trying
             // again won't help, signing in will.
@@ -102,10 +106,11 @@ final class DictationPipeline {
                 message: message, errorReason: error.localizedDescription,
                 style: style, cleanupModel: nil,
                 metrics: TranscriptMetrics(audioSeconds: audioSeconds, words: 0, asrMs: Self.milliseconds(since: stoppedAt)),
-                utterance: utterance)
+                utterance: utterance, recording: recording)
         }
         let finishedMs = Self.milliseconds(since: stoppedAt)
         let utterance = (transcriber as? UtteranceTimingProviding)?.takeTimings()
+        let recording = (transcriber as? RecordingProviding)?.takeRecording()
         // The model's part of a single request, so recognition stays comparable with two requests.
         let singleCallModelMs = output.modelReply == nil ? nil : utterance?.requests.first?.server?.modelMs
         let transcriptMs = max(0, finishedMs - (singleCallModelMs ?? 0))
@@ -121,12 +126,13 @@ final class DictationPipeline {
                 message: "We didn't catch anything. Please try speaking again.", errorReason: nil,
                 style: style, cleanupModel: nil,
                 metrics: TranscriptMetrics(audioSeconds: audioSeconds, words: 0, asrMs: transcriptMs),
-                utterance: utterance)
+                utterance: utterance, recording: recording)
         }
 
         // A translation never inserts the transcript, so it needs no local text.
         let localText = targetLanguage != nil
-            ? "" : LocalFormatter(dictionary: dictionary, snippets: snippets, language: spoken).format(trimmed)
+            ? "" : LocalFormatter(dictionary: dictionary, snippets: snippets, language: spoken,
+                                  removesFillers: settings.smartFormatting).format(trimmed)
         var cleaned: CleanupOutcome
         if let reply = output.modelReply {
             var judged = judge(reply, targetLanguage: targetLanguage, localText: localText)
@@ -159,7 +165,7 @@ final class DictationPipeline {
                 dictation, spoken: spoken, raw: trimmed, text: "", status: status,
                 message: cleaned.message ?? "Couldn't translate that. Check your connection and try again.",
                 errorReason: cleaned.errorReason, style: style, cleanupModel: cleaned.model, metrics: metrics,
-                utterance: utterance, cleanupRequest: cleaned.request)
+                utterance: utterance, cleanupRequest: cleaned.request, recording: recording)
         }
         // The cloud refused a signed-out account and the on-device fallback wrote the text. It still
         // goes in, and the keyboard says why, also when no cleanup ran to fail the same way (cleanup
@@ -170,14 +176,15 @@ final class DictationPipeline {
             message: cleaned.message ?? (signedOut ? Self.signedOutMessage : nil),
             errorReason: cleaned.errorReason ?? (signedOut ? BackendError.signedOut.localizedDescription : nil),
             style: style, cleanupModel: cleaned.model, metrics: metrics,
-            utterance: utterance, cleanupRequest: cleaned.request)
+            utterance: utterance, cleanupRequest: cleaned.request, recording: recording)
     }
 
     /// Re-runs the cleanup on a stored transcript (Retry / Regenerate). Throws when the service
     /// couldn't be reached, leaving the stored transcript untouched.
     func recleanup(_ transcript: Transcript) async throws(CleanupClient.Failure) -> Transcript {
         guard cleanup.isConfigured else { throw .notConfigured }
-        let localText = LocalFormatter(dictionary: dictionary, snippets: snippets, language: transcript.language)
+        let localText = LocalFormatter(dictionary: dictionary, snippets: snippets, language: transcript.language,
+                                       removesFillers: settings.smartFormatting)
             .format(transcript.rawText)
         let cleaned = await runCleanup(
             dictationId: transcript.id, raw: transcript.rawText, language: transcript.language,
@@ -228,7 +235,8 @@ final class DictationPipeline {
             return outcome
         }
         guard targetLanguage != nil || force
-                || (WordCounter.count(raw) > 3 && CleanupGate.needsModel(raw, style: style)) else {
+                || (WordCounter.count(raw) > 3
+                    && CleanupGate.needsModel(raw, style: style, smartFormatting: settings.smartFormatting)) else {
             return outcome
         }
         let started = ContinuousClock.now
@@ -330,7 +338,7 @@ final class DictationPipeline {
     private func outcome(
         _ dictation: ActiveDictation, spoken: String? = nil, raw: String, text: String, status: ResultStatus,
         message: String?, errorReason: String?, style: StylePreset, cleanupModel: String?, metrics: TranscriptMetrics,
-        utterance: UtteranceTimings?, cleanupRequest: RequestTiming? = nil
+        utterance: UtteranceTimings?, cleanupRequest: RequestTiming? = nil, recording: EncodedAudio? = nil
     ) -> DictationOutcome {
         let now = Date()
         let spoken = spoken ?? dictation.language
@@ -366,7 +374,7 @@ final class DictationPipeline {
             tokenMs: DictationTimings.sum(requests.map(\.tokenMs)), stopToResultMs: metrics.totalMs ?? metrics.asrMs,
             requests: requests, cleanupModel: cleanupModel, status: status.rawValue,
             insertable: result.isInsertable, cloudTranscript: utterance?.cloudTranscript ?? false)
-        return DictationOutcome(result: result, transcript: transcript, timings: timings)
+        return DictationOutcome(result: result, transcript: transcript, timings: timings, recording: recording)
     }
 
     static func milliseconds(since instant: ContinuousClock.Instant) -> Int {

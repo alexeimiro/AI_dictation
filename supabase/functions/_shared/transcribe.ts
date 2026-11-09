@@ -9,6 +9,8 @@ export const TRANSCRIBE_LIMITS = {
   maxAudioBytes: 16 * 1024 * 1024,
   maxKeywords: 100,
   maxKeywordChars: 59,
+  /** The languages a user picks in Settings, sent as hints while the language is detected. */
+  maxLanguageHints: 10,
 };
 
 export type AudioFormat = "m4a" | "wav";
@@ -19,6 +21,8 @@ export interface TranscribeRequest {
   format: AudioFormat;
   /** ISO-639-1 code ("ru"), or null to let the model detect the language. */
   language: string | null;
+  /** Without a `language`: the ISO-639-1 codes the speech is one of (the user's languages); empty for any. */
+  languageHints: string[];
   /** Personal dictionary terms, sent as keyword hints. */
   keywords: string[];
 }
@@ -27,7 +31,8 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
 
 /**
- * Body: { dictationId?: uuid, audio: base64, format: "m4a" | "wav", language?: BCP-47, keywords?: string[] }.
+ * Body: { dictationId?: uuid, audio: base64, format: "m4a" | "wav", language?: BCP-47, languages?: BCP-47[],
+ * keywords?: string[] }. `languages`: the user's languages, which the speech is detected among.
  */
 export function parseTranscribeRequest(body: unknown): Parsed<TranscribeRequest> {
   if (typeof body !== "object" || body === null) return { ok: false, error: "body must be a JSON object" };
@@ -57,6 +62,7 @@ export function parseTranscribeRequest(body: unknown): Parsed<TranscribeRequest>
       audio,
       format: raw.format,
       language: isoLanguage(language.tag),
+      languageHints: cleanLanguageHints(raw.languages),
       keywords: cleanKeywords(raw.keywords),
     },
   };
@@ -71,6 +77,23 @@ export function isoLanguage(tag: string | undefined | null): string | null {
   const primary = tag.split("-")[0].toLowerCase();
   const code = ISO_ALIASES[primary] ?? primary;
   return /^[a-z]{2}$/.test(code) ? code : null;
+}
+
+/**
+ * The user's languages as ISO-639-1 codes, deduplicated in order, at most 10. Anything that isn't a
+ * language tag is skipped rather than refused: the hints only narrow the detection.
+ */
+export function cleanLanguageHints(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const codes: string[] = [];
+  for (const item of raw) {
+    const tag = normalizeLanguageTag(item);
+    const code = tag.ok ? isoLanguage(tag.tag) : null;
+    if (!code || codes.includes(code)) continue;
+    codes.push(code);
+    if (codes.length === TRANSCRIBE_LIMITS.maxLanguageHints) break;
+  }
+  return codes;
 }
 
 /**
@@ -95,19 +118,21 @@ export function cleanKeywords(raw: unknown): string[] {
 }
 
 /**
- * The multipart body for POST /v1/audio/transcriptions. gpt-transcribe takes `languages[]` and
- * `keywords[]`; older models take a single `language` and the terms as a `prompt`.
+ * The multipart body for POST /v1/audio/transcriptions. gpt-transcribe takes `languages[]` (the
+ * language, else the user's languages to detect it among) and `keywords[]`; older models take a
+ * single `language` (a lone hint counts) and the terms as a `prompt`.
  */
 export function openAIForm(request: TranscribeRequest, model: string): FormData {
   const form = new FormData();
   const type = request.format === "m4a" ? "audio/mp4" : "audio/wav";
   form.append("file", new Blob([request.audio], { type }), `dictation.${request.format}`);
   form.append("model", model);
+  const languages = request.language ? [request.language] : request.languageHints;
   if (model.startsWith("gpt-transcribe")) {
-    if (request.language) form.append("languages[]", request.language);
+    for (const language of languages) form.append("languages[]", language);
     for (const keyword of request.keywords) form.append("keywords[]", keyword);
   } else {
-    if (request.language) form.append("language", request.language);
+    if (languages.length === 1) form.append("language", languages[0]);
     if (request.keywords.length > 0) form.append("prompt", request.keywords.join(", "));
   }
   return form;

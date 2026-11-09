@@ -5,12 +5,14 @@ import Foundation
 /// word keeps the speaker's words, so the model only earns its 1–3 s when there is something it
 /// writes differently: no punctuation at all, a spoken punctuation or layout command, or a
 /// spelled-out address. A miss costs polish, never words, and Regenerate runs the model anyway.
+/// With Smart formatting off, Word for word never needs it: the text goes in as recognized.
 public enum CleanupGate {
-    public static func needsModel(_ transcript: String, style: StylePreset) -> Bool {
+    public static func needsModel(_ transcript: String, style: StylePreset, smartFormatting: Bool = true) -> Bool {
         switch style {
         case .grammar:
             return true
         case .verbatim:
+            guard smartFormatting else { return false }
             // No punctuation at all means a recognizer that doesn't punctuate (on device).
             if transcript.rangeOfCharacter(from: sentencePunctuation) == nil { return true }
             let range = NSRange(transcript.startIndex..., in: transcript)

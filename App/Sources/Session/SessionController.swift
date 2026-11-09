@@ -51,6 +51,8 @@ final class SessionController {
     /// In the cloud, the on-device languages already installed, for when a request fails.
     @ObservationIgnored private var onDeviceFallbacks: [String: ResolvedLanguage] = [:]
     @ObservationIgnored private let history: any TranscriptSink
+    /// Where each dictation's audio is kept for playback ("Keep recordings"); nil keeps none.
+    @ObservationIgnored private let recordings: RecordingStore?
     /// Where each dictation's timings go (Debug screen); nil keeps none.
     @ObservationIgnored private let timingsLog: TimingsLog?
     @ObservationIgnored private let settings: SharedSettings
@@ -82,6 +84,8 @@ final class SessionController {
     @ObservationIgnored private var queuedStart: KeyboardCommand?
     /// Requests the keyboard cancelled, so a start armed or queued for them is dropped.
     @ObservationIgnored private var cancelledRequests: Set<UUID> = []
+    /// Where an in-app dictation's result goes (the Scratchpad note dictated into); nil drops it.
+    @ObservationIgnored var inAppResultHandler: ((DictationResult) -> Void)?
     /// "Disable after" counts from the latest of these and the keyboard leaving the screen.
     @ObservationIgnored private var idleSince = Date()
     @ObservationIgnored private var backgroundSince: Date?
@@ -101,7 +105,7 @@ final class SessionController {
     static let reconnectDelays: [Duration] = [.zero, .milliseconds(500), .seconds(1), .seconds(2)]
 
     init(transport: IPCTransport, pipeline: DictationPipeline, assets: SpeechAssetManager, history: any TranscriptSink,
-         transcription: (any CloudTranscribing)? = nil, dictate: (any Dictating)? = nil,
+         recordings: RecordingStore? = nil, transcription: (any CloudTranscribing)? = nil, dictate: (any Dictating)? = nil,
          warmup: BackendWarmup? = nil, timingsLog: TimingsLog? = nil, settings: SharedSettings = .shared) {
         self.transport = transport
         self.publisher = HotStatePublisher(transport: transport)
@@ -111,6 +115,7 @@ final class SessionController {
         self.dictate = dictate
         self.warmup = warmup
         self.history = history
+        self.recordings = recordings
         self.timingsLog = timingsLog
         self.settings = settings
         publisher.set(.off)
@@ -261,10 +266,12 @@ final class SessionController {
         return primary
     }
 
-    /// For OpenAI the language is just its tag, plus the dictionary terms as keyword hints.
+    /// For OpenAI the language is just its tag, plus the dictionary terms as keyword hints, and
+    /// under Auto-detect the languages picked in Settings, which the speech is detected among.
     private func cloudLanguage(_ tag: String) -> ResolvedLanguage {
         ResolvedLanguage(tag: tag, locale: Locale(identifier: tag), engine: .speech,
-                         contextualStrings: pipeline.contextualStrings())
+                         contextualStrings: pipeline.contextualStrings(),
+                         languageHints: DictationLanguage(tag: tag).isAutomatic ? settings.dictationLanguages : [])
     }
 
     /// The on-device model for `tag` if it's already downloaded and verified. Never downloads.
@@ -286,7 +293,8 @@ final class SessionController {
     /// has an installed model. None installed: no fallback under Auto.
     private func updateAutomaticFallback() {
         guard let cloud = transcriber as? OpenAITranscriber else { return }
-        let guesses = [settings.lastDetectedLanguage, Locale.preferredLanguages.first, primaryTag].compactMap { $0 }
+        let guesses = [settings.lastDetectedLanguage].compactMap { $0 } + settings.dictationLanguages
+            + [Locale.preferredLanguages.first, primaryTag].compactMap { $0 }
         let installed = guesses.lazy.compactMap { tag in
             let code = DictationLanguage(normalizing: tag).languageCode
             return self.onDeviceFallbacks.values.first { $0.language.languageCode == code }
@@ -442,11 +450,46 @@ final class SessionController {
 
     // MARK: Dictation
 
-    /// In-app dictation (e.g. Scratchpad) uses the same pipeline as the keyboard.
+    /// In-app dictation (Scratchpad's mic) uses the same pipeline as the keyboard, in the
+    /// keyboard's Speak language (Auto-detect until one is picked there). Its result goes to
+    /// `inAppResultHandler` instead of the keyboard.
     func beginInAppDictation() -> UUID? {
         let id = UUID()
-        return beginDictation(requestId: id, documentIdentifier: nil, style: nil, languageOverride: nil,
+        let speak = KeyboardLanguageDefaults.source(
+            saved: settings.translationSourceLanguage, autoDetectApplied: settings.autoDetectDefaultApplied)
+        return beginDictation(requestId: id, documentIdentifier: nil, style: nil, languageOverride: speak.tag,
                               translationTargetLanguage: nil, source: .inApp) ? id : nil
+    }
+
+    /// The Action Button, Control Center or a shortcut asked for a dictation while the Murmur
+    /// keyboard is on screen: recorded like one the keyboard asks for when it opens the app, with
+    /// the keyboard's options, so the keyboard joins it (`attachToPendingStart`) and types it out.
+    /// One still being processed is waited for. False without a session to record with.
+    func beginDictationForKeyboard() -> Bool {
+        guard isLive else { return false }
+        let speak = KeyboardLanguageDefaults.source(
+            saved: settings.translationSourceLanguage, autoDetectApplied: settings.autoDetectDefaultApplied)
+        let target = settings.translationEnabled ? KeyboardLanguageDefaults.target(
+            saved: settings.translationTargetLanguage.map(DictationLanguage.init(tag:)), source: speak,
+            preferred: Locale.preferredLanguages, available: DictationLanguage.cloudLanguages,
+            recent: settings.recentTranslationLanguages.map(DictationLanguage.init(tag:))) : nil
+        let request = PendingStart(
+            requestId: UUID(), documentIdentifier: nil, createdAt: Date(), autoStart: true,
+            styleOverride: settings.defaultStyle, languageOverride: speak.tag, translationTargetLanguage: target?.tag)
+        do {
+            try transport.payloads.write(pendingStart: request)
+        } catch {
+            logger.error("Couldn't hand a shortcut's dictation to the keyboard: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
+        requestedStart = request
+        beginRequestedStart()
+        return true
+    }
+
+    /// The Murmur keyboard is on screen in some app (its heartbeat is recent and it hasn't left).
+    var keyboardIsOnScreen: Bool {
+        transport.payloads.readKeyboardStatus().map { $0.inactiveSince > Date() } ?? false
     }
 
     @discardableResult
@@ -464,7 +507,10 @@ final class SessionController {
             !usesCloud && DictationLanguage(tag: tag).isAutomatic ? nil : tag
         }
         if let languageOverride, languageOverride != primaryTag {
-            if let ready = languages[languageOverride] {
+            if usesCloud, DictationLanguage(tag: languageOverride).isAutomatic {
+                // Fresh each time: the languages picked in Settings may have changed since.
+                language = cloudLanguage(languageOverride)
+            } else if let ready = languages[languageOverride] {
                 language = ready
             } else if usesCloud {
                 let cloud = cloudLanguage(languageOverride)
@@ -504,7 +550,10 @@ final class SessionController {
         playSound(.start)
         // After the acknowledgement: nothing here may delay it.
         let usesDictate = translationTargetLanguage != nil || (style ?? settings.defaultStyle) == .grammar
-        warmup?.dictationDidStart(requestId, usesDictate: usesDictate && usesCloud)
+        // Low data mode sends nothing ahead of the dictation.
+        if !NetworkConditions.shared.savesData(settings: settings) {
+            warmup?.dictationDidStart(requestId, usesDictate: usesDictate && usesCloud)
+        }
         liveActivity.update(.recording, since: Date())
         capTask?.cancel()
         capTask = Task { [weak self] in
@@ -562,9 +611,17 @@ final class SessionController {
         Task {
             let outcome = await pipeline.complete(
                 dictation, transcriber: transcriber, audioSeconds: audioSeconds, stoppedAt: stoppedAt)
-            // The keyboard first, then history and the timings, so saving never delays the insertion.
-            deliver(outcome.result)
+            // The keyboard (or the note) first, then history and the timings, so saving never
+            // delays the insertion.
+            if dictation.source == .inApp {
+                inAppResultHandler?(outcome.result)
+            } else {
+                deliver(outcome.result)
+            }
             history.record(outcome.transcript)
+            if let recording = outcome.recording, settings.keepRecordings {
+                recordings?.save(recording, for: outcome.transcript.id)
+            }
             if var timings = outcome.timings {
                 timings.warmup = warmup?.takeTiming(for: dictation.requestId)
                 timingsLog?.append(timings)

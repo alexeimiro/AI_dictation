@@ -301,7 +301,7 @@ struct BackendSessionTests {
         let functions = EdgeFunctionClient(backend: try backend(storing: storedSession(anonymous: false, expired: true)))
         await #expect(throws: CloudTranscriptionError.signedOut) {
             try await TranscriptionClient(functions: functions).transcribe(
-                audio: Data("audio".utf8), format: .m4a, language: nil, keywords: [])
+                audio: Data("audio".utf8), format: .m4a, language: nil, languageHints: [], keywords: [])
         }
 
         // `CleanupClient.Failure` isn't Equatable.

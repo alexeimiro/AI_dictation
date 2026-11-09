@@ -63,6 +63,36 @@ struct PayloadStoreTests {
         #expect(store.readResult(result.requestId)?.text == "Hello")
         #expect(store.latestResult()?.requestId == result.requestId)
     }
+
+    /// The keyboard's ☰ menu queues words; the app takes them all at once, each word once.
+    @Test func dictionaryAdditionsQueueOnceAndAreTakenTogether() throws {
+        let store = IPCPayloadStore(container: .temporary())
+        #expect(store.takeDictionaryAdditions().isEmpty)
+        let now = Date()
+        try store.append(dictionaryAddition: DictionaryAddition(term: "Mironenko", createdAt: now))
+        try store.append(dictionaryAddition: DictionaryAddition(term: "mironenko", createdAt: now))
+        try store.append(dictionaryAddition: DictionaryAddition(term: "Supabase", createdAt: now))
+        #expect(store.takeDictionaryAdditions().map(\.term) == ["Mironenko", "Supabase"])
+        #expect(store.takeDictionaryAdditions().isEmpty)
+    }
+}
+
+struct DictionaryCandidateTests {
+    @Test func theSelectionWinsWhenItFits() {
+        #expect(DictionaryCandidate.word(selected: " Anton Mironenko ", before: "Hi Anton Mironenko") == "Anton Mironenko")
+        #expect(DictionaryCandidate.word(selected: "two\nlines", before: "x") == nil)
+        #expect(DictionaryCandidate.word(selected: String(repeating: "a", count: 60), before: "x") == nil)
+    }
+
+    @Test func otherwiseTheWordBeforeTheCursor() {
+        #expect(DictionaryCandidate.word(selected: nil, before: "I met Mironenko. ") == "Mironenko")
+        #expect(DictionaryCandidate.word(selected: "", before: "ping (Supabase)") == "Supabase")
+        #expect(DictionaryCandidate.word(selected: nil, before: "it's Node.js") == "Node.js")
+        #expect(DictionaryCandidate.word(selected: nil, before: "Привет, Валерио") == "Валерио")
+        #expect(DictionaryCandidate.word(selected: nil, before: "call 555 ") == nil)
+        #expect(DictionaryCandidate.word(selected: nil, before: "   ") == nil)
+        #expect(DictionaryCandidate.word(selected: nil, before: nil) == nil)
+    }
 }
 
 struct TextJoinerTests {
@@ -117,6 +147,13 @@ struct LocalFormatterTests {
         #expect(formatter.format("um so, uh, we should ship it") == "So, we should ship it")
         #expect(formatter.format("I think, um, yes") == "I think, yes")
         #expect(formatter.format("uh, okay hmm let's go") == "Okay let's go")
+    }
+
+    /// Smart formatting off: the hesitations stay; the dictionary and snippets still apply.
+    @Test func keepsFillersWithoutSmartFormatting() {
+        let formatter = LocalFormatter(dictionary: [DictionaryTerm(term: "Valerio", misspelling: "valeria")],
+                                       removesFillers: false)
+        #expect(formatter.format("um so, uh, ask valeria") == "Um so, uh, ask Valerio")
     }
 
     @Test func appliesDictionaryReplacementsAndCasing() {
@@ -196,6 +233,13 @@ struct CleanupGateTests {
         }
     }
 
+    /// Smart formatting off: Word for word goes in as recognized, cues and all; grammar still asks.
+    @Test func wordForWordSkipsTheModelWithoutSmartFormatting() {
+        #expect(!CleanupGate.needsModel("Send it today comma please.", style: .verbatim, smartFormatting: false))
+        #expect(!CleanupGate.needsModel("can you send me the report by friday", style: .verbatim, smartFormatting: false))
+        #expect(CleanupGate.needsModel("Me and him was going.", style: .grammar, smartFormatting: false))
+    }
+
     @Test func cuesAreWholeWords() {
         #expect(!CleanupGate.needsModel("Check the dashboard and the dotted line.", style: .verbatim))
         #expect(!CleanupGate.needsModel("Стоит купить сорочку.", style: .verbatim))
@@ -247,6 +291,23 @@ struct DictationLanguageTests {
         #expect(russian.shortCode == "RU")
         #expect(russian.isRussian)
         #expect(!DictationLanguage.englishUS.isRussian)
+    }
+
+    /// The language lists: the name in the UI language, then the language's own where it differs.
+    @Test func pickerNamesAddTheNativeName() {
+        #expect(DictationLanguage(tag: "ru-RU").nativeName == "Русский")
+        #expect(DictationLanguage(tag: "ru-RU").pickerName == "Russian (Русский)")
+        #expect(DictationLanguage.englishUS.pickerName == "English")
+        #expect(DictationLanguage.automatic.nativeName == nil)
+        #expect(DictationLanguage.automatic.pickerName == "Auto-detect")
+    }
+
+    @Test func cloudLanguagesAreUniqueAndSortedByName() {
+        let codes = DictationLanguage.cloudLanguages.map(\.languageCode)
+        #expect(Set(codes).count == codes.count)
+        #expect(codes.contains("ru") && codes.contains("en") && !codes.contains("und"))
+        let names = DictationLanguage.cloudLanguagesByName.map(\.localizedName)
+        #expect(names == names.sorted { $0.localizedStandardCompare($1) == .orderedAscending })
     }
 }
 
@@ -321,6 +382,35 @@ struct SharedSettingsTests {
         settings.verifiedEngines = ["ru-RU": record]
         #expect(settings.verifiedEngines["ru-RU"]?.engine == "speech")
         #expect(settings.transcriberEngine == nil)
+    }
+
+    /// Settings › Languages: normalized, one per language, and empty is Auto-detect.
+    @Test func dictationLanguagesAreNormalizedAndDeduplicatedByLanguage() throws {
+        let suite = "test.murmur.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = SharedSettings(defaults: defaults)
+        #expect(settings.dictationLanguages.isEmpty)
+        settings.dictationLanguages = ["en_US", "ru-RU", "en-GB"]
+        #expect(SharedSettings(defaults: defaults).dictationLanguages == ["en-US", "ru-RU"])
+        settings.dictationLanguages = []
+        #expect(defaults.object(forKey: "dictationLanguages") == nil)
+    }
+
+    /// Smart formatting and recordings start on; low data mode and Auto open note start off.
+    @Test func newSettingsDefaults() throws {
+        let suite = "test.murmur.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = SharedSettings(defaults: defaults)
+        #expect(settings.smartFormatting && settings.keepRecordings)
+        #expect(!settings.lowDataMode && !settings.autoOpenNote)
+        settings.lowDataMode = true
+        settings.smartFormatting = false
+        #expect(SharedSettings(defaults: defaults).lowDataMode)
+        #expect(!SharedSettings(defaults: defaults).smartFormatting)
     }
 
     @Test func readyHapticAndTheVoiceLayoutAreDefaultsAndAPickedLayoutPersists() throws {

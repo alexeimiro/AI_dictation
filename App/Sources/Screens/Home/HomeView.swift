@@ -1,5 +1,6 @@
 import MurmurCore
 import MurmurUI
+import StoreKit
 import SwiftData
 import SwiftUI
 
@@ -10,6 +11,8 @@ struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Query(sort: \TranscriptRecord.createdAt, order: .reverse) private var records: [TranscriptRecord]
     @State private var toast: String?
+    @State private var tryingIt = false
+    @Environment(\.requestReview) private var requestReview
 
     var body: some View {
         List {
@@ -32,9 +35,9 @@ struct HomeView: View {
                     IntroCard(
                         title: "Try Murmur in any app", accent: "any app",
                         message: Text("Draft emails, send messages and jot down notes with your voice."),
-                        action: "Open Notes",
+                        action: "Try it now",
                         dismissedKey: "intro.home.dismissed"
-                    ) { openNotes() }
+                    ) { tryingIt = true }
                 }
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
@@ -71,11 +74,17 @@ struct HomeView: View {
                     Wordmark(height: 22)
                     if let quota = model.quota { PlanBadge(text: quota.badge) }
                 }
+                // The logo is a mark, not text to read: it keeps its size, so it fits the bar.
+                .dynamicTypeSize(...DynamicTypeSize.large)
             }
             ToolbarItem(placement: .topBarTrailing) { SessionToggle() }
         }
         .toast($toast)
-        .task { model.history.reconcileInsertions(payloads: model.transport.payloads) }
+        .sheet(isPresented: $tryingIt) { TryItSheet() }
+        .task {
+            model.history.reconcileInsertions(payloads: model.transport.payloads)
+            await askForRatingIfDue()
+        }
         .refreshable {
             model.setup.refresh()
             model.history.reconcileInsertions(payloads: model.transport.payloads)
@@ -137,9 +146,17 @@ struct HomeView: View {
 
     // MARK: Actions
 
-    private func openNotes() {
-        guard let url = URL(string: "mobilenotes://") else { return }
-        UIApplication.shared.open(url)
+    /// iOS's rating prompt, a moment after Home appears, once `RatingPrompt` says it's due.
+    private func askForRatingIfDue() async {
+        let version = RatingPrompt.currentVersion
+        guard !model.launchOptions.useFixtures,
+              RatingPrompt.shouldAsk(history: model.history.recent(limit: 200), record: RatingPrompt.record(),
+                                     version: version) else { return }
+        try? await Task.sleep(for: .seconds(2))
+        guard !Task.isCancelled, model.router.tab == .home, model.router.path.isEmpty, !model.router.isMenuOpen
+        else { return }
+        RatingPrompt.markAsked(version: version)
+        requestReview()
     }
 
     private func copy(_ transcript: Transcript) {

@@ -11,6 +11,7 @@ import { countWords, primarySubtag } from "./text.ts";
 import { beginRequest, Phases, type RequestStart, type ServerTimings } from "./timing.ts";
 import {
   cleanKeywords,
+  cleanLanguageHints,
   isoLanguage,
   OpenAIError,
   TRANSCRIBE_LIMITS,
@@ -113,7 +114,7 @@ function settle<T>(work: Promise<T>): Promise<Settled<T>> {
 
 /**
  * Audio mode's "metadata" part: { dictationId, format: "m4a" | "wav", language: BCP-47 | null,
- * keywords?, targetLanguage?, style?, dictionary?, snippets? }, with a targetLanguage unless the
+ * languages?, keywords?, targetLanguage?, style?, dictionary?, snippets? }, with a targetLanguage unless the
  * style is "grammar". `cleanup`'s and `transcribe`'s own validators check it; `audio` is the
  * "audio" part's bytes.
  */
@@ -142,6 +143,7 @@ export function parseDictateMetadata(raw: unknown, audio: Uint8Array<ArrayBuffer
         format: fields.format,
         // What `parseTranscribeRequest` makes of the same tag: ISO-639-1, or null to detect it.
         language: isoLanguage(translation.language),
+        languageHints: cleanLanguageHints(fields.languages),
         keywords: cleanKeywords(fields.keywords),
       },
     },

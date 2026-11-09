@@ -82,6 +82,14 @@ struct UtteranceTimings: Sendable, Equatable {
 }
 
 /// A transcriber that measures its cloud work (`OpenAITranscriber`).
+/// A transcriber that encodes each dictation's audio (to upload it), kept for the transcript's
+/// playback.
+protocol RecordingProviding: AnyObject {
+    /// The last finished dictation's audio, once: cleared by this call, when the next dictation
+    /// begins, and when one is abandoned. Nil when none was encoded (on-device recognition).
+    func takeRecording() -> EncodedAudio?
+}
+
 protocol UtteranceTimingProviding: AnyObject {
     /// The last finished dictation's measurements, once: they are cleared by this call, when the
     /// next dictation begins, and when one is abandoned.

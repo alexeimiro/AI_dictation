@@ -25,7 +25,7 @@ struct SignInView: View {
                 // they're added, these buttons are text only.
                 providerButton(.google, title: "Continue with Google", style: .outline) { EmptyView() }
                 providerButton(.apple, title: "Continue with Apple", style: .ink) {
-                    Image(systemName: "apple.logo").font(.system(size: 21))
+                    Image(systemName: "apple.logo").font(.system(size: 21)).accessibilityHidden(true)
                 }
                 if expanded {
                     unavailableButton(title: "Continue with Microsoft") { EmptyView() }

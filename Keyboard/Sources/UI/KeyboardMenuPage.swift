@@ -2,7 +2,7 @@ import MurmurCore
 import SwiftUI
 
 /// The ☰ page, in place of the pad or the keys as Wispr Flow's menu is: translation with recent
-/// targets, then the keyboard's own settings. Its toolbar holds ✕, ABC and ⚙ (Murmur's Settings).
+/// targets, adding a word to the dictionary, then the keyboard's own settings. Its toolbar holds ✕, ABC and ⚙ (Murmur's Settings).
 /// Without Full Access the keyboard can neither write the settings nor open the app, so it says so
 /// and leaves them read-only.
 struct KeyboardMenuPage: View {
@@ -23,6 +23,8 @@ struct KeyboardMenuPage: View {
                 if model.translationEnabled, !eligibleRecent.isEmpty {
                     recent
                 }
+                section("Dictionary")
+                dictionaryRow
                 section("Feedback")
                 VStack(spacing: 0) {
                     toggle("Haptic feedback", isOn: model.keyboardFeedback, set: model.actions.setKeyboardFeedback)
@@ -71,6 +73,50 @@ struct KeyboardMenuPage: View {
         .disabled(!model.hasFullAccess)
         .padding(.horizontal, 14)
         .frame(minHeight: 46)
+    }
+
+    /// "Add “Mironenko” to dictionary": the selection, or the word before the cursor, so a name
+    /// the keyboard got wrong and the user fixed is spelled right from the next dictation on.
+    private var dictionaryRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: model.addedToDictionary == nil ? "character.book.closed" : "checkmark")
+                .font(.system(size: 16, weight: .medium))
+                .frame(width: 22)
+                .accessibilityHidden(true)
+            Group {
+                if let added = model.addedToDictionary {
+                    Text("Added \u{201C}\(added)\u{201D} to your dictionary")
+                } else if let word = model.dictionaryCandidate {
+                    Text("Add \u{201C}\(word)\u{201D} to dictionary")
+                } else {
+                    Text("Select a word to add it to your dictionary")
+                        .foregroundStyle(KeyboardChrome.muted)
+                }
+            }
+            .font(.system(size: 15, weight: .medium))
+            .lineLimit(1)
+            .truncationMode(.middle)
+            Spacer(minLength: 0)
+            if model.addedToDictionary == nil, let word = model.dictionaryCandidate {
+                Button { model.actions.addToDictionary(word) } label: {
+                    Text("Add")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(KeyboardChrome.primaryGlyph)
+                        .padding(.horizontal, 14)
+                        .frame(height: 32)
+                        .background(KeyboardChrome.primary, in: .capsule)
+                        .frame(minHeight: 44)
+                }
+                .buttonStyle(.keyboardPress)
+                .disabled(!model.hasFullAccess)
+                .accessibilityLabel("Add \(word) to dictionary")
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 46)
+        .background { KeyboardSurface(shape: RoundedRectangle(cornerRadius: 14, style: .continuous),
+                                      fill: KeyboardChrome.card) }
+        .accessibilityElement(children: .combine)
     }
 
     private var recent: some View {

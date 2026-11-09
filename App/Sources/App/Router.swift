@@ -50,7 +50,7 @@ final class Router {
     static func initialPath(for route: LaunchRoute?) -> [Route] {
         switch route {
         case .settings: [.settings]
-        case .languages: [.settings, .languages]
+        case .languages: [.settings, .debug, .languages]
         case .debug: [.settings, .debug]
         case .account: [.account]
         case .home, .transcript, .swipeBack, .dictionary, .snippets, .style, .scratchpad, .menu, nil: []

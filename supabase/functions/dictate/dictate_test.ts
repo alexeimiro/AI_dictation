@@ -708,7 +708,11 @@ Deno.test("metadata and text bodies are checked by cleanup's and transcribe's va
   assertEquals(parsed.value.translation.transcript, "");
   assertEquals(parsed.value.transcription.language, "ru", "ISO-639-1 for OpenAI, as transcribe sends it");
   assertEquals(parsed.value.transcription.keywords, ["Valerio"]);
+  assertEquals(parsed.value.transcription.languageHints, []);
   assertEquals(parsed.value.transcription.format, "wav");
+  const detected = parseDictateMetadata({ ...metadata, language: null, languages: ["ru-RU", "en-US"] }, AUDIO);
+  assert(detected.ok);
+  assertEquals([detected.value.transcription.language, detected.value.transcription.languageHints], [null, ["ru", "en"]]);
   assertEquals(parseDictateMetadata({ ...metadata, style: "shouty" }, AUDIO), { ok: false, error: "unknown style" });
   assertEquals(parseDictateMetadata({ ...metadata, dictationId: "nope" }, AUDIO), { ok: false, error: "dictationId must be a UUID" });
   assertEquals(parseDictateMetadata(metadata, new Uint8Array()), { ok: false, error: "audio is empty" });

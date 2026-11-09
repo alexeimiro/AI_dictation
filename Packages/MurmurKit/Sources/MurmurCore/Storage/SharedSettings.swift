@@ -99,8 +99,8 @@ public final class SharedSettings: @unchecked Sendable {
         case disableAfter, keyboardLayout, keyboardFullQwerty, keyboardFeedback, readyHaptic, interactionSounds
         case defaultStyle
         case useBuiltInMic, transcriberEngine, liveActivities, transcriptRetention, autoReturn, keepScreenAwake
-        case translateInOneRequest
-        case primaryLanguage, secondaryLanguage, verifiedEngines
+        case translateInOneRequest, lowDataMode, smartFormatting, keepRecordings, autoOpenNote
+        case primaryLanguage, secondaryLanguage, dictationLanguages, verifiedEngines
         case translationEnabled, translationSourceLanguage, translationTargetLanguage, recentTranslationLanguages
         case lastDetectedLanguage, autoDetectDefaultApplied, keyboardAppearance
         case debugKeyboardPeakFootprint, debugKeyboardDemo, debugKeyboardDemoUntil
@@ -190,6 +190,33 @@ public final class SharedSettings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Key.translateInOneRequest.rawValue) }
     }
 
+    /// "Low data mode": dictations upload half the audio bitrate and skip the warm-up requests
+    /// while the user speaks. App-only. iOS's own Low Data Mode does the same while it's on.
+    public var lowDataMode: Bool {
+        get { bool(.lowDataMode, default: false) }
+        set { defaults.set(newValue, forKey: Key.lowDataMode.rawValue) }
+    }
+
+    /// "Smart formatting": a Word for word dictation drops "um" and "uh", and spoken commands
+    /// ("new line", "comma", "at gmail dot com") become what they say. Off, it goes in as
+    /// recognized, with only the dictionary and snippets applied. App-only.
+    public var smartFormatting: Bool {
+        get { bool(.smartFormatting, default: true) }
+        set { defaults.set(newValue, forKey: Key.smartFormatting.rawValue) }
+    }
+
+    /// Keep each dictation's audio on this iPhone, for playback on its transcript. App-only.
+    public var keepRecordings: Bool {
+        get { bool(.keepRecordings, default: true) }
+        set { defaults.set(newValue, forKey: Key.keepRecordings.rawValue) }
+    }
+
+    /// "Auto open note": opening Murmur starts a new Scratchpad note. App-only.
+    public var autoOpenNote: Bool {
+        get { bool(.autoOpenNote, default: false) }
+        set { defaults.set(newValue, forKey: Key.autoOpenNote.rawValue) }
+    }
+
     /// Auto-delete transcripts older than this. App-only; applied by the history store.
     public var transcriptRetention: TranscriptRetention {
         get { enumValue(.transcriptRetention) ?? .month }
@@ -214,6 +241,21 @@ public final class SharedSettings: @unchecked Sendable {
     public var secondaryLanguage: String? {
         get { defaults.string(forKey: Key.secondaryLanguage.rawValue) }
         set { setString(newValue.map(DictationLanguage.normalize), for: .secondaryLanguage) }
+    }
+
+    /// The languages the user speaks, from Settings › Languages, as BCP-47 tags in the order
+    /// picked. Empty means Auto-detect: the cloud listens for any language. Otherwise a dictation
+    /// whose Speak language is Auto is recognized as one of these.
+    public var dictationLanguages: [String] {
+        get { defaults.stringArray(forKey: Key.dictationLanguages.rawValue) ?? [] }
+        set {
+            let tags = newValue.map(DictationLanguage.normalize).uniqued(by: { DictationLanguage(tag: $0).languageCode })
+            if tags.isEmpty {
+                defaults.removeObject(forKey: Key.dictationLanguages.rawValue)
+            } else {
+                defaults.set(tags, forKey: Key.dictationLanguages.rawValue)
+            }
+        }
     }
 
     /// Translation is deliberately independent from the writing style.
@@ -333,5 +375,10 @@ private extension Array where Element: Hashable {
     func uniqued() -> [Element] {
         var seen: Set<Element> = []
         return filter { seen.insert($0).inserted }
+    }
+
+    func uniqued<Key: Hashable>(by key: (Element) -> Key) -> [Element] {
+        var seen: Set<Key> = []
+        return filter { seen.insert(key($0)).inserted }
     }
 }

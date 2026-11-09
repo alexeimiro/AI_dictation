@@ -30,6 +30,12 @@ final class SettingsModel {
     var autoReturn: Bool { didSet { settings.autoReturn = autoReturn } }
     var keepScreenAwake: Bool { didSet { settings.keepScreenAwake = keepScreenAwake } }
     var translateInOneRequest: Bool { didSet { settings.translateInOneRequest = translateInOneRequest } }
+    var lowDataMode: Bool { didSet { settings.lowDataMode = lowDataMode } }
+    var smartFormatting: Bool { didSet { settings.smartFormatting = smartFormatting } }
+    var keepRecordings: Bool { didSet { settings.keepRecordings = keepRecordings } }
+    var autoOpenNote: Bool { didSet { settings.autoOpenNote = autoOpenNote } }
+    /// Settings › Languages: the languages the user speaks, in the order picked; empty is Auto-detect.
+    var dictationLanguages: [String] { didSet { settings.dictationLanguages = dictationLanguages } }
 
     @ObservationIgnored private let settings: SharedSettings
     @ObservationIgnored var onRetentionChange: (() -> Void)?
@@ -51,6 +57,21 @@ final class SettingsModel {
         autoReturn = settings.autoReturn
         keepScreenAwake = settings.keepScreenAwake
         translateInOneRequest = settings.translateInOneRequest
+        dictationLanguages = settings.dictationLanguages
+        lowDataMode = settings.lowDataMode
+        smartFormatting = settings.smartFormatting
+        keepRecordings = settings.keepRecordings
+        autoOpenNote = settings.autoOpenNote
+    }
+
+    /// Picks `tag`, or unpicks the language it's a variant of.
+    func toggleDictationLanguage(_ tag: String) {
+        let code = DictationLanguage(tag: tag).languageCode
+        if dictationLanguages.contains(where: { DictationLanguage(tag: $0).languageCode == code }) {
+            dictationLanguages.removeAll { DictationLanguage(tag: $0).languageCode == code }
+        } else {
+            dictationLanguages.append(tag)
+        }
     }
 
     /// The keyboard changes these while the app waits in the background: the style pill sets the

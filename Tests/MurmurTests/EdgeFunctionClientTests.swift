@@ -36,7 +36,7 @@ struct EdgeFunctionClientTests {
 
     private func transcribe(with functions: EdgeFunctionClient) async throws(CloudTranscriptionError) -> CloudTranscript {
         try await TranscriptionClient(functions: functions).transcribe(
-            audio: Data("audio".utf8), format: .m4a, language: "ru-RU", keywords: ["Окафор"])
+            audio: Data("audio".utf8), format: .m4a, language: "ru-RU", languageHints: [], keywords: ["Окафор"])
     }
 
     private func clean(with functions: EdgeFunctionClient) async throws(CleanupClient.Failure) -> CleanupClient.Response {

@@ -11,6 +11,9 @@ struct ResolvedLanguage: Sendable, Equatable {
     let engine: AppleSpeechTranscriber.Kind
     /// Personal dictionary terms; only DictationTranscriber honors them (≤100).
     var contextualStrings: [String] = []
+    /// Auto-detect in the cloud: the user's languages (BCP-47) to detect the speech among, from
+    /// Settings › Languages; none for any language.
+    var languageHints: [String] = []
 
     var language: DictationLanguage { DictationLanguage(tag: tag) }
 }

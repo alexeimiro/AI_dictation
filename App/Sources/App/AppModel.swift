@@ -15,6 +15,8 @@ final class AppModel {
     let history: HistoryStore
     /// The personal dictionary, snippets and Scratchpad notes.
     let library: LibraryStore
+    /// Scratchpad's mic.
+    let noteDictation: NoteDictation
     /// Each dictation's timings, for the Debug screen.
     let timingsLog: TimingsLog
     let settings = SettingsModel()
@@ -40,6 +42,8 @@ final class AppModel {
     /// The plan and this week's words, refreshed when the app becomes active; nil until the
     /// first answer, and without a backend.
     var quota: AccountService.Quota?
+    /// "Improve Murmur for everyone": onboarding's data choice, as Settings changed it since.
+    private(set) var dataSharing = false
     /// The "Sign in again" sheet while it's up, and where it opened. RootView presents it, so it
     /// also opens during onboarding; the swipe-back screen and the start dialog close it first.
     var signInSheet: SignInAgainView.Start?
@@ -49,6 +53,13 @@ final class AppModel {
     var launchRoute: LaunchRoute? { launchOptions.route }
     /// When the app last became active; nil while inactive or in the background.
     @ObservationIgnored private var activeSince: Date?
+    /// Until the app is next on screen after a launch or the background: Auto open note's moment.
+    @ObservationIgnored private var returningFromBackground = true
+    /// When a link (the keyboard's, a sign-in) or a shortcut last opened the app; Auto open note
+    /// leaves those where they lead.
+    @ObservationIgnored private var routedAt: Date?
+    @ObservationIgnored private var autoNoteTask: Task<Void, Never>?
+    @ObservationIgnored private var dictionaryObservation: IPCObservation?
     private let backend: Backend?
 
     init(arguments: [String] = ProcessInfo.processInfo.arguments) {
@@ -87,10 +98,12 @@ final class AppModel {
         self.timingsLog = timingsLog
         let dictate = DictateClient(functions: functions)
         let session = SessionController(transport: transport, pipeline: pipeline, assets: assets, history: practiceBuffer,
+                                        recordings: history.recordings,
                                         transcription: TranscriptionClient(functions: functions), dictate: dictate,
                                         warmup: backend.map { BackendWarmup(session: $0, dictate: dictate) },
                                         timingsLog: timingsLog)
         self.session = session
+        noteDictation = NoteDictation(session: session, library: library)
         self.languages = LanguageSettingsModel(assets: assets, session: session)
         self.setup = SetupStatus(payloads: transport.payloads)
         if launchOptions.usesOnboardingFixtures {
@@ -125,6 +138,16 @@ final class AppModel {
         }
         history.applyRetention()
         recoverInterruptedDictations()
+        session.inAppResultHandler = { [weak self] result in self?.noteDictation.deliver(result) }
+        dictionaryObservation = transport.observe(.dictionaryAdded) { [weak self] in
+            MainActor.assumeIsolated { self?.importKeyboardAdditions() }
+        }
+        importKeyboardAdditions()
+        dataSharing = UserDefaults.standard.object(forKey: Self.dataSharingKey) as? Bool
+            ?? (onboarding.answers.dataChoice?.choice == .improveModel)
+        LiveActivityActions.model = self
+        // Learns whether iOS's Low Data Mode is on before the first dictation.
+        _ = NetworkConditions.shared
     }
 
     /// The configured backend; in screenshot runs with `-account-state` (DEBUG), one faking it.
@@ -224,6 +247,14 @@ final class AppModel {
         }
     }
 
+    /// Words added from the keyboard's ☰ menu, into the dictionary and so the next dictation. One
+    /// already there is skipped.
+    func importKeyboardAdditions() {
+        for addition in transport.payloads.takeDictionaryAdditions() {
+            _ = try? library.saveEntry(term: addition.term, misspelling: nil)
+        }
+    }
+
     /// Each dictation spells the dictionary's words and expands its snippets. The recognizer's
     /// keywords come from the same list when the next session's transcriber is prepared.
     private func feedLibraryToPipeline() {
@@ -232,6 +263,23 @@ final class AppModel {
     }
 
     // MARK: Account
+
+    private static let dataSharingKey = "dataSharing"
+
+    /// Settings' "Improve Murmur for everyone", saved to the profile. Returns a message when the
+    /// server didn't take it; the switch then goes back.
+    func setDataSharing(_ on: Bool) async -> String? {
+        let previous = dataSharing
+        dataSharing = on
+        do {
+            try await accountService.setDataSharing(on)
+            UserDefaults.standard.set(on, forKey: Self.dataSharingKey)
+            return nil
+        } catch {
+            dataSharing = previous
+            return error.localizedDescription
+        }
+    }
 
     func refreshQuota() {
         guard !launchOptions.useFixtures, launchOptions.accountState == nil, onboarding.isComplete else { return }
@@ -265,6 +313,8 @@ final class AppModel {
 
     private func resetAfterAccountEnded() {
         session.stop()
+        UserDefaults.standard.removeObject(forKey: Self.dataSharingKey)
+        dataSharing = false
         deleteAllHistory()
         library.deleteAll()
         quota = nil
@@ -308,6 +358,58 @@ final class AppModel {
         timingsLog.clear()
     }
 
+    // MARK: Action Button, Control Center and Shortcuts
+
+    /// `DictateIntent` without opening Murmur: stops the dictation in progress, or with Murmur on
+    /// and its keyboard on screen, starts one the keyboard types out (after the one being
+    /// processed). False when Murmur has to open (`openNewNote(dictating:)`).
+    func toggleDictationFromShortcut() -> Bool {
+        guard onboarding.isComplete else { return false }
+        switch session.phase {
+        case .recording:
+            session.endDictation(commit: true)
+            return true
+        case .ready, .processing:
+            return session.keyboardIsOnScreen && session.beginDictationForKeyboard()
+        default:
+            return false
+        }
+    }
+
+    /// Scratchpad on a new note: `DictateIntent` when the keyboard isn't on screen, "New Murmur
+    /// Note", and Auto open note. `dictating` records into it straight away.
+    func openNewNote(dictating: Bool) {
+        guard onboarding.isComplete else { return }
+        routedAt = Date()
+        autoNoteTask?.cancel()
+        showSwipeBack = false
+        signInSheet = nil
+        router.isMenuOpen = false
+        router.tab = .scratchpad
+        let id: UUID
+        if case .note(let open)? = router.paths[.scratchpad]?.last, library.note(open)?.isEmpty == true {
+            id = open
+        } else {
+            id = library.createNote().id
+            router.paths[.scratchpad] = [.note(id)]
+        }
+        if dictating { Task { await noteDictation.start(into: id) } }
+    }
+
+    /// Auto open note: a new note when Murmur comes on screen by itself, not when a link or a
+    /// shortcut opened it (they say where to go, and arrive just after).
+    private func scheduleAutoOpenNote() {
+        guard settings.autoOpenNote, onboarding.isComplete, launchOptions.route == nil, !launchOptions.useFixtures
+        else { return }
+        autoNoteTask?.cancel()
+        autoNoteTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(700))
+            guard let self, !Task.isCancelled, !showSwipeBack, signInSheet == nil else { return }
+            if let routedAt, Date().timeIntervalSince(routedAt) < 3 { return }
+            openNewNote(dictating: false)
+        }
+    }
+
     /// Offers a transcript to the keyboard as "Insert last dictation".
     func insertViaKeyboard(_ id: UUID) -> Bool {
         history.republish(id, payloads: transport.payloads, transport: transport)
@@ -315,6 +417,8 @@ final class AppModel {
 
     func handle(_ url: URL) {
         guard let link = DeepLink(url: url) else { return }
+        routedAt = Date()
+        autoNoteTask?.cancel()
         switch link {
         case .startSession(let token):
             if !onboarding.isComplete {
@@ -381,15 +485,22 @@ final class AppModel {
         switch phase {
         case .active:
             if activeSince == nil { activeSince = Date() }
+            if returningFromBackground {
+                returningFromBackground = false
+                scheduleAutoOpenNote()
+            }
             setup.refresh()
             settings.reloadFromKeyboard()
             refreshNotificationPermission()
             session.appDidBecomeActive()
             history.applyRetention()
             history.reconcileInsertions(payloads: transport.payloads)
+            importKeyboardAdditions()
             refreshQuota()
         case .background:
             activeSince = nil
+            returningFromBackground = true
+            autoNoteTask?.cancel()
             showSwipeBack = false
             session.appDidEnterBackground()
         case .inactive:

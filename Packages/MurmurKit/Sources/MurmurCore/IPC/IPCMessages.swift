@@ -186,12 +186,25 @@ public struct PendingStart: Codable, Sendable, Equatable {
     }
 }
 
+/// A word the keyboard's ☰ menu added to the personal dictionary, queued in the App Group
+/// until the app moves it into its library (the keyboard can't reach the library's store).
+public struct DictionaryAddition: Codable, Sendable, Equatable {
+    public var term: String
+    public var createdAt: Date
+
+    public init(term: String, createdAt: Date) {
+        self.term = term
+        self.createdAt = createdAt
+    }
+}
+
 /// Darwin notification names. They carry no payload; data lives in the files above.
 public enum IPCEvent: String, Sendable, CaseIterable {
     case command = "cmd"
     case stateChanged = "state"
     case resultReady = "result"
     case keyboardStatus = "kbstatus"
+    case dictionaryAdded = "dict"
 
     public func notificationName(group: String) -> String {
         "\(group).\(rawValue)"

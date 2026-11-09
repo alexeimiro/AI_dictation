@@ -70,8 +70,9 @@ struct CloudTranscript: Sendable {
 @MainActor
 protocol CloudTranscribing: AnyObject, Sendable {
     var isConfigured: Bool { get }
-    /// `language`: BCP-47 tag of the dictation; `keywords`: personal dictionary terms.
-    func transcribe(audio: Data, format: EncodedAudio.Format, language: String?,
+    /// `language`: BCP-47 tag of the dictation, nil to detect it; `languageHints`: then, the
+    /// user's languages (BCP-47) to detect it among, none for any; `keywords`: personal dictionary terms.
+    func transcribe(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
                     keywords: [String]) async throws(CloudTranscriptionError) -> CloudTranscript
 }
 
@@ -89,6 +90,8 @@ final class TranscriptionClient: CloudTranscribing {
         let audio: String
         let format: String
         let language: String?
+        /// Left out when empty, as it was before the function took it.
+        let languages: [String]?
         let keywords: [String]
     }
 
@@ -102,12 +105,13 @@ final class TranscriptionClient: CloudTranscribing {
 
     var isConfigured: Bool { functions != nil }
 
-    func transcribe(audio: Data, format: EncodedAudio.Format, language: String?,
+    func transcribe(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
                     keywords: [String]) async throws(CloudTranscriptionError) -> CloudTranscript {
         guard let functions else { throw .notConfigured }
         let body = RequestBody(
             dictationId: UUID(), audio: audio.base64EncodedString(), format: format.rawValue,
-            language: language, keywords: Array(keywords.prefix(100)))
+            language: language, languages: language == nil && !languageHints.isEmpty ? languageHints : nil,
+            keywords: Array(keywords.prefix(100)))
         do {
             let reply = try await functions.post("transcribe", body: body, timeout: timeout)
             let response = try JSONDecoder().decode(Response.self, from: reply.data)

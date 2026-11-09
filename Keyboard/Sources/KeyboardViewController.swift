@@ -29,6 +29,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     private var padAboveKeys: NSLayoutConstraint?
     private var padToBottom: NSLayoutConstraint?
     private var client: KeyboardSessionClient?
+    /// The App Group channel, for the ☰ menu's dictionary additions.
+    private var transport: IPCTransport?
     private var plane: KeyboardPlane = .numbers
     /// The voice layout: the pad is home, and the full keys get a key back to it.
     private var usesVoicePad = false
@@ -76,6 +78,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
 
         let transport: IPCTransport = SharedContainer.appGroup()
             .map { DarwinIPCTransport(container: $0) } ?? InMemoryIPCTransport()
+        self.transport = transport
         let client = KeyboardSessionClient(transport: transport)
         client.host = self
         self.client = client
@@ -142,11 +145,38 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         updateAutoShift()
         reloadKeys()
         refreshUndo()
+        refreshDictionaryCandidate()
     }
 
     override func selectionDidChange(_ textInput: UITextInput?) {
         super.selectionDidChange(textInput)
         refreshUndo()
+        refreshDictionaryCandidate()
+    }
+
+    /// While the ☰ page is up: the word it offers for the dictionary follows the selection.
+    private func refreshDictionaryCandidate() {
+        guard model.overlay == .menu else { return }
+        let candidate = DictionaryCandidate.word(selected: textDocumentProxy.selectedText,
+                                                 before: textDocumentProxy.documentContextBeforeInput)
+        if candidate != model.dictionaryCandidate {
+            model.dictionaryCandidate = candidate
+            model.addedToDictionary = nil
+        }
+    }
+
+    /// Queues the word for the app, which adds it to the library right away when it's running
+    /// (it listens for `dictionaryAdded`) and otherwise when it next opens.
+    private func addToDictionary(_ word: String) {
+        guard let transport else { return }
+        do {
+            try transport.payloads.append(dictionaryAddition: DictionaryAddition(term: word, createdAt: Date()))
+        } catch {
+            return
+        }
+        transport.post(.dictionaryAdded)
+        feedback()
+        model.addedToDictionary = word
     }
 
     // MARK: Views
@@ -361,6 +391,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
                 model.appearance = appearance
                 updateKeyboardAppearance()
             },
+            addToDictionary: { [weak self] word in self?.addToDictionary(word) },
             deleteDown: { [weak self] in self?.keyDown(KeySpec(action: .delete)) },
             deleteUp: { [weak self] in self?.keyUp(KeySpec(action: .delete)) },
             deleteWord: { [weak self] in
@@ -374,6 +405,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
 
     /// A page takes the place of the pad or the keys, which hide at once, as Wispr's menu does.
     private func showOverlay(_ overlay: KeyboardOverlay) {
+        if overlay == .menu {
+            model.addedToDictionary = nil
+            model.dictionaryCandidate = DictionaryCandidate.word(selected: textDocumentProxy.selectedText,
+                                                                 before: textDocumentProxy.documentContextBeforeInput)
+        }
         overlayHost?.view.isHidden = false
         withAnimation(.easeOut(duration: 0.15)) { model.overlay = overlay }
         updateKeyAreas()
@@ -434,8 +470,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         model.announcesReady = hasFullAccess && settings.readyHaptic
     }
 
-    /// Loads the app's installed on-device languages. Cloud recognition can additionally use the
-    /// compact common-language list exposed by `KeyboardModel`.
+    /// Loads the app's installed on-device languages and the languages picked in its Settings.
+    /// Cloud recognition can additionally use any of `DictationLanguage.cloudLanguages`.
     private func loadLanguages() {
         let primary = settings.primaryLanguage.map(DictationLanguage.init(tag:)) ?? .englishUS
         let verified = settings.verifiedEngines
@@ -445,13 +481,14 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         }
         model.primaryLanguage = primary
         model.secondaryLanguage = secondary
+        model.spokenLanguages = settings.dictationLanguages.map(DictationLanguage.init(tag:))
     }
 
     /// Auto-detect until the user picks a Speak language; the letters and the translation target
     /// follow the iPhone's language until they are picked (`KeyboardLanguageDefaults`).
     private func loadTranslationSettings() {
         interfaceLanguage = KeyboardLanguageDefaults.interfaceLanguage(
-            preferred: Locale.preferredLanguages, available: KeyboardModel.commonLanguages)
+            preferred: Locale.preferredLanguages, available: DictationLanguage.cloudLanguages)
         let source = KeyboardLanguageDefaults.source(
             saved: settings.translationSourceLanguage, autoDetectApplied: settings.autoDetectDefaultApplied)
         if !settings.autoDetectDefaultApplied {
@@ -474,7 +511,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     private func defaultTarget(saved: DictationLanguage? = nil, source: DictationLanguage) -> DictationLanguage {
         KeyboardLanguageDefaults.target(
             saved: saved, source: source, preferred: Locale.preferredLanguages,
-            available: KeyboardModel.commonLanguages, recent: model.recentLanguages)
+            available: DictationLanguage.cloudLanguages, recent: model.recentLanguages)
     }
 
     private func selectSourceLanguage(_ language: DictationLanguage?) {
