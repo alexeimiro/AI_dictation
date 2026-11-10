@@ -3,7 +3,7 @@ import MurmurUI
 import SwiftUI
 
 /// References 06–07: "Start typing 4x faster with your voice", Google and Apple first, then
-/// "More options" for Microsoft, SSO and email. Providers this build can't use are marked.
+/// "More options" for email. Wispr Flow's Microsoft and SSO aren't offered.
 struct SignInView: View {
     let expanded: Bool
     @Environment(AppModel.self) private var model
@@ -18,8 +18,7 @@ struct SignInView: View {
             SerifTitle("Start typing 4x faster with your voice", accent: "4x faster", size: 33,
                        color: Palette.ink, tracking: -0.85, lineHeight: 37)
                 .padding(.horizontal, 60)
-                // "More options" lifts the whole stack to make room (reference 07).
-                .padding(.top, expanded ? 118.9 : 165.6)
+                .padding(.top, 165.6)
             VStack(spacing: 15) {
                 // Provider marks other than Apple's need the providers' official assets; until
                 // they're added, these buttons are text only.
@@ -28,8 +27,6 @@ struct SignInView: View {
                     Image(systemName: "apple.logo").font(.system(size: 21)).accessibilityHidden(true)
                 }
                 if expanded {
-                    unavailableButton(title: "Continue with Microsoft") { EmptyView() }
-                    unavailableButton(title: "Continue with SSO") { EmptyView() }
                     Button("Continue with Email") { model.onboarding.send(.showEmailSignIn) }
                         .buttonStyle(.pill(.subtle))
                         .transition(.move(edge: .top).combined(with: .opacity))
@@ -93,25 +90,6 @@ struct SignInView: View {
         }
         .buttonStyle(.pill(style))
         .disabled(busy != nil)
-    }
-
-    private func unavailableButton(title: String, @ViewBuilder icon: () -> some View) -> some View {
-        Button {} label: {
-            HStack(spacing: 13) {
-                icon()
-                Text(title)
-                Text("Soon")
-                    .font(.ui(12, .semibold))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(Palette.tabSelected, in: .capsule)
-            }
-        }
-        .buttonStyle(.pill(.subtle))
-        .opacity(0.55)
-        .allowsHitTesting(false)
-        .accessibilityLabel("\(title), not available yet")
-        .transition(.move(edge: .top).combined(with: .opacity))
     }
 
     private func signIn(_ method: AuthMethod) {

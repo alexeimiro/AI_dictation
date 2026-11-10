@@ -43,7 +43,7 @@ Keyboard ext ── Darwin post + command file (one-time token) ──► Murmur
    - As soon as the mic is on, the app records the requested dictation (`SessionController.start(beginning:)`), as Wispr Flow does, so the user can talk on the way back. In the cloud path the on-device fallback is prepared afterwards, off this critical path.
    - Once it's recording, `HostReturn` reopens the app the keyboard was used in: it learns its bundle id from UIKit (above) and opens it by a URL scheme from `HostAppCatalog`. Within 3 s of the link, or not at all.
    - Otherwise it shows "Murmur is on — Swipe right along the bottom edge of the screen to go back to your app", with a finger animated over the real home indicator (iOS shows no ◀︎ breadcrumb for keyboard-initiated opens).
-   - When the keyboard reappears it attaches to that recording (`attachToPendingStart`); its first listening heartbeat tells the app. A recording nobody attaches to within 10 s is discarded. Back in a different field, the keyboard cancels it.
+   - When the keyboard reappears it attaches to that recording (`attachToPendingStart`); its first listening heartbeat tells the app. A recording nobody attaches to within 10 s is discarded. iOS gives the field a new `documentIdentifier` after the trip to the app (found on the iPhone on 2026-11-10), so the keyboard can't tell it from another field: like Wispr Flow, it types the dictation into the field it comes back to.
 3. **Hot mic.**
    - **Audio session:** `.playAndRecord`, mode `.default`, options `[.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]`. Without HFP, the mic is the built-in one and AirPods music quality is kept. Also `setAllowHapticsAndSystemSoundsDuringRecording(true)`.
    - **Engine:** the `AVAudioEngine` tap runs throughout, with `UIBackgroundModes: audio`. A gate drops buffers unless a dictation is in progress.
@@ -179,7 +179,7 @@ supabase/   config.toml, migrations/, functions/{cleanup,auth-lookup,signup-stat
 2. [1–3] Welcome carousel, ending in "Get started"
 3. [4–5] Survey (multi-select)
 4. [6] "Works in *any app*", ending in "Set up Murmur"
-5. [7–8] Sign in: Google and Apple, then "More options" for Microsoft, SSO and Email
+5. [7–8] Sign in: Google and Apple, then "More options" for Email. Wispr's Microsoft and SSO were left out of 1.0 (2026-11-10).
 6. [9–10] Email. The `auth-lookup` function (rate-limited) decides the branch: password sign-in ("Logging in") or create account.
 7. [11–13] Create account: password, name, hCaptcha
 8. [14] "Check your email"
@@ -292,8 +292,7 @@ supabase/   config.toml, migrations/, functions/{cleanup,auth-lookup,signup-stat
 **Auth:**
 - **Apple:** native, with a nonce; the name is saved on first sign-in. Uses `signInWithIdToken`.
 - **Google:** `signInWithOAuth` + ASWebAuthenticationSession to `murmur://auth-callback`.
-- **Microsoft (Azure):** the same flow, but UI-only until an Azure app registration exists.
-- **SSO:** `signInWithSSO(domain:)`. SAML needs Supabase Pro, so the UI is built and the backend config is optional.
+- **Microsoft (Azure) and SSO:** not offered in 1.0; their "Soon" buttons were removed on 2026-11-10. Microsoft needs an Azure app registration, and SAML SSO (`signInWithSSO(domain:)`) needs Supabase Pro.
 - **Email:** `signUp(…, redirectTo:, captchaToken:)` with the HCaptcha iOS SDK.
 - **During development:** Phase 2 uses `signInAnonymously()`.
 
@@ -381,6 +380,7 @@ supabase/   config.toml, migrations/, functions/{cleanup,auth-lookup,signup-stat
    - **Done when:** tabs unlock on the first result delivered in the background; reinstall plus login restores dictionary, snippets, notes and style.
    - **Status (2026-11-09):** the tab bar (Home, Dictionary, Snippets, Style, Scratchpad) and the side menu are built, from a capture of Wispr Flow 1.78 on the iPhone (`Wispr Flow iOS App/`, local only). Dictionary words and snippets live in `LibraryStore` (SwiftData, `Library.store`) and now reach the pipeline, so the recognizer's keywords, the cleanup prompt and the local formatter use them. Scratchpad notes are local; a blank note is discarded. Not built: cloud sync of words, snippets and notes (the tables exist; notes leaving the iPhone changes the privacy copy) and locked tabs.
    - **Status (2026-11-09, evening):** built on top: the keyboard's ☰ "Add to dictionary" (the selection or the word before the cursor, queued in the App Group for the app); a mic in each note that records into it at the cursor, and Auto open note; "Dictate with Murmur" for the Action Button, Control Center and Shortcuts (`DictateIntent`); a Wispr-style language picker whose languages go to the cloud as hints under Auto-detect (needs `transcribe` and `dictate` redeployed); 👍/👎 on transcripts (`feedback`) and playback of each dictation's kept recording; Settings with a line per row (Low data mode, Smart formatting, Keep recordings, data sharing); Home's "Try it now" sheet; iOS's rating prompt after 10 good dictations over 3 days.
+   - **Status (2026-11-10):** the default style syncs too (`StyleSync`, `profiles.default_style`): a change on this iPhone is sent, otherwise the account's is taken, and a new install signing in during onboarding takes the account's, which onboarding's style step then shows selected.
 7. **Phase 5: Account, Settings, menu items, StoreKit 2** (local `.storekit`, monthly and annual), plus the Control Center toggle and Shortcuts.
    - **Done when:** a sandbox purchase updates the server entitlement within 5 s; a refund revokes it; account deletion removes the data and revokes the Sign in with Apple token.
    - **Status (2026-11-09):** Account (plan from `my_quota`, words and WPM from history, Report an issue and Leave feedback to `issue_reports`, Sign out, Delete account through `delete-account`) and the menu's plan line are built. Sign out and deletion forget the account before and after Auth drops the session, wipe history and the library, and restart onboarding. Not built: the referral reward (codes exist; nothing redeems them), "Unlock on computer", Help center (no URL yet).

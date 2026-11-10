@@ -65,6 +65,10 @@ struct RootView: View {
             SignInAgainView(start: start)
                 .onAppear { signInSheetOnScreen = true }
         }
+        // After a reinstall, signing in brings back the account's style.
+        .onChange(of: model.account?.isSignedIn ?? false) { _, signedIn in
+            if signedIn { model.syncStyle() }
+        }
     }
 }
 

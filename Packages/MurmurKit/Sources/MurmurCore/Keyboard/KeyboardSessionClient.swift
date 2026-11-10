@@ -332,14 +332,11 @@ public final class KeyboardSessionClient {
         }
         transport.payloads.clearPendingStart()
         if case .listening = phase { return }
-        if let expected = pending.documentIdentifier, let current = host?.currentDocumentIdentifier,
-           expected != current {
-            // Back in a different field: don't record into it.
-            if ours { send(.cancel, requestId: pending.requestId) }
-            setPhase(.idle)
-            return
-        }
-        activeDocumentIdentifier = pending.documentIdentifier ?? host?.currentDocumentIdentifier
+        // The field can't be recognized by its documentIdentifier: iOS gives it a new one after the
+        // trip to the app (seen on the iPhone, iOS 26.6). As in Wispr Flow, the dictation goes into
+        // the field the user came back to, and its result follows the request.
+        activeDocumentIdentifier = host?.currentDocumentIdentifier ?? pending.documentIdentifier
+        resumedRequestId = pending.requestId
         switch state.status {
         case .recording:
             setPhase(.listening(pending.requestId, since: clock()))

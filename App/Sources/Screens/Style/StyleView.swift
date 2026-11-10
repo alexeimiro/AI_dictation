@@ -30,6 +30,7 @@ struct StyleView: View {
                     ForEach(StylePreset.allCases) { style in
                         StyleCard(style: style, isSelected: settings.defaultStyle == style) {
                             settings.defaultStyle = style
+                            model.syncStyle()
                         }
                     }
                 }

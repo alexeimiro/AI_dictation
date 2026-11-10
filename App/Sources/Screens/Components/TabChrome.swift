@@ -62,7 +62,11 @@ struct IntroCard: View {
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(Palette.textSecondary)
                         .frame(width: 44, height: 44)
+                        // Without it only the glyph, about 11 pt, takes the tap.
+                        .contentShape(Rectangle())
                 }
+                // Inside a List row, so only the ✕ itself, not the whole card, closes it.
+                .buttonStyle(.plain)
                 .accessibilityLabel("Close")
             }
         }

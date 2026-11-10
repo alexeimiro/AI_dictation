@@ -5,11 +5,11 @@ import Supabase
 import UIKit
 
 /// The account screens' server calls: the plan and this week's words (`my_quota`), invites
-/// (`my_referrals`, `redeem_referral`), support messages (`issue_reports`) and deleting the account
-/// (`delete-account`). Without a backend the reads return nil and the writes throw, so builds
-/// without one still show the screens.
+/// (`my_referrals`, `redeem_referral`), support messages (`issue_reports`), the default style
+/// (`profiles`) and deleting the account (`delete-account`). Without a backend the reads return nil
+/// and the writes throw, so builds without one still show the screens.
 @MainActor
-final class AccountService {
+final class AccountService: StyleRemote {
     /// `my_quota()`: what the menu and the Account screen show about the plan.
     struct Quota: Decodable, Equatable, Sendable {
         /// "pro" while a trial or a subscription lasts, else "basic".
@@ -273,6 +273,31 @@ final class AccountService {
             logger.error("Data sharing update failed: \(error.localizedDescription, privacy: .public)")
             throw Failure.unavailable("Couldn't save that. Check your connection and try again.")
         }
+    }
+
+    /// The account's default style (`StyleSync`); nil without a stored session: never starts one.
+    func defaultStyle() async throws -> StylePreset? {
+        struct Row: Decodable {
+            let defaultStyle: String
+            enum CodingKeys: String, CodingKey { case defaultStyle = "default_style" }
+        }
+        guard let backend, backend.client.auth.currentSession != nil,
+              let userID = backend.client.auth.currentUser?.id else { return nil }
+        try await backend.ensureSession()
+        let rows: [Row] = try await backend.client.from("profiles").select("default_style")
+            .eq("id", value: userID).limit(1).execute().value
+        return rows.first.map { StylePreset(stored: $0.defaultStyle) }
+    }
+
+    /// Saves the default style to the account (`StyleSync`). Needs a stored session: never starts one.
+    func saveDefaultStyle(_ style: StylePreset) async throws {
+        guard let backend else { throw Failure.notConfigured }
+        guard backend.client.auth.currentSession != nil, let userID = backend.client.auth.currentUser?.id else {
+            throw Failure.unavailable("Sign in to change this.")
+        }
+        try await backend.ensureSession()
+        let update: [String: AnyJSON] = ["default_style": .string(style.rawValue)]
+        try await backend.client.from("profiles").update(update).eq("id", value: userID).execute()
     }
 
     /// Deletes the account on the server; its rows cascade. Signing out locally is the caller's.

@@ -401,23 +401,33 @@ struct KeyboardSessionClientTests {
         }
     }
 
-    @Test func comingBackToAnotherFieldCancelsTheDictation() async throws {
+    /// iOS gives the field a new documentIdentifier after the trip to the app, so the keyboard
+    /// follows the dictation in the field it comes back to, and types it there.
+    @Test func comingBackWithANewFieldIdentifierFollowsTheDictation() async throws {
         let transport = InMemoryIPCTransport()
         let app = FakeApp(transport: transport)
         let host = FakeHost()
         let client = KeyboardSessionClient(transport: transport)
         client.host = host
         client.activate()
+        let tappedIn = host.currentDocumentIdentifier
         client.micTapped()
         client.deactivate()
         let requestId = try #require(app.autoStart())
 
         host.currentDocumentIdentifier = UUID()
         client.activate()
-        #expect(client.phase == .idle)
-        let command = try #require(transport.payloads.readCommand())
-        #expect(command.kind == .cancel)
-        #expect(command.requestId == requestId)
+        guard case .listening(requestId, _) = client.phase else {
+            Issue.record("expected .listening, got \(client.phase)")
+            return
+        }
+        #expect(transport.payloads.readCommand() == nil, "nothing cancelled it")
+
+        client.stopTapped()
+        // The app's result still names the field the mic was tapped in.
+        try app.finish(requestId, text: "Said on the way back.", document: tappedIn)
+        #expect(await waitUntil { host.inserted.count == 1 })
+        #expect(host.inserted.first?.text == "Said on the way back.")
     }
 
     @Test func cancellingWhileOpeningTheAppStopsTheRecordingThere() throws {

@@ -255,8 +255,14 @@ struct DefaultStyleView: View {
                 }
             }
             .scrollIndicators(.hidden)
-            // Word for word is the default; one tap on Next keeps it.
-            .onAppear { if store.answers.style == nil { store.send(.selectStyle(.verbatim)) } }
+            // Word for word is the default; one tap on Next keeps it. After a reinstall it's the
+            // style the account had, taken when the user signed in (`StyleSync`).
+            .onAppear {
+                if store.answers.style == nil {
+                    let style = model.launchOptions.usesOnboardingFixtures ? .verbatim : SharedSettings.shared.defaultStyle
+                    store.send(.selectStyle(style))
+                }
+            }
         } actions: {
             Button("Next") {
                 if let style = store.answers.style, store.send(.next), !model.launchOptions.usesOnboardingFixtures {

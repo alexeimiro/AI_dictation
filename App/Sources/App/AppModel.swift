@@ -20,6 +20,7 @@ final class AppModel {
     /// The library on every device signed in to the account; nil without a backend, and in
     /// screenshot runs.
     let librarySync: LibrarySync?
+    let styleSync: StyleSync?
     /// Each dictation's timings, for the Debug screen.
     let timingsLog: TimingsLog
     let settings = SettingsModel()
@@ -99,8 +100,11 @@ final class AppModel {
             let account = backend.account
             librarySync = LibrarySync(library: library, remote: SupabaseLibraryRemote(backend: backend),
                                       isEnabled: { account.isSignedIn })
+            styleSync = StyleSync(remote: accountService, local: { SharedSettings.shared.defaultStyle },
+                                  apply: { SharedSettings.shared.defaultStyle = $0 }, isEnabled: { account.isSignedIn })
         } else {
             librarySync = nil
+            styleSync = nil
         }
         pro = ProStore(functions: functions, accountToken: { backend?.client.auth.currentUser?.id })
         if launchOptions.useFixtures { quota = .fixture }
@@ -255,6 +259,7 @@ final class AppModel {
         practiceBuffer.flushToHistory()
         onboarding.markHistorySeeded()
         librarySync?.syncSoon()
+        syncStyle()
         let answers = record.answers
         Task { await onboardingServices.profile.sync(answers) }
         redeemPendingInvite()
@@ -321,6 +326,16 @@ final class AppModel {
     private func forgetPendingInvite() {
         pendingInvite = nil
         UserDefaults.standard.removeObject(forKey: Self.pendingInviteKey)
+    }
+
+    /// Sends a style changed on this iPhone, or takes the account's (`StyleSync`): at a sign-in,
+    /// when Murmur comes to the front, and when the Style tab changes it.
+    func syncStyle() {
+        guard let styleSync else { return }
+        Task {
+            await styleSync.sync(onboardingComplete: onboarding.isComplete)
+            settings.reloadFromKeyboard()
+        }
     }
 
     // MARK: Account
@@ -390,6 +405,7 @@ final class AppModel {
         session.stop()
         // Before the library goes: what's deleted here stays in the account.
         librarySync?.reset()
+        styleSync?.reset()
         UserDefaults.standard.removeObject(forKey: Self.dataSharingKey)
         dataSharing = false
         forgetPendingInvite()
@@ -587,6 +603,7 @@ final class AppModel {
             refreshQuota()
             redeemPendingInvite()
             librarySync?.syncSoon(after: .milliseconds(500))
+            syncStyle()
         case .background:
             activeSince = nil
             returningFromBackground = true

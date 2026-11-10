@@ -145,13 +145,13 @@ final class OnboardingJourneyTests: XCTestCase {
         XCTAssertTrue(button("Get started").waitForExistence(timeout: 5))
     }
 
-    func testMoreOptionsMarksUnavailableProvidersAndEmailNeedsAValidAddress() {
+    func testMoreOptionsOffersEmailWhichNeedsAValidAddress() {
         launch()
         throughSurvey()
         tap("More options")
-        let microsoft = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label == %@", "Continue with Microsoft, not available yet")).firstMatch
-        XCTAssertTrue(microsoft.waitForExistence(timeout: 5), "unavailable providers are marked")
+        XCTAssertTrue(button("Continue with Email").waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Continue with Microsoft")).firstMatch.exists,
+                       "providers that don't work aren't shown")
         tap("Continue with Email")
         let field = app.textFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5))
