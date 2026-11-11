@@ -49,7 +49,7 @@ struct DictionaryView: View {
         .navigationTitle("Dictionary")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) { MenuButton() }
+            MenuToolbarItem()
         }
         .overlay(alignment: .bottomTrailing) {
             AddButton(label: "Add word") { editing = .new }

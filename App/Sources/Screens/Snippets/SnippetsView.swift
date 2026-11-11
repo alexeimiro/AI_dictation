@@ -49,7 +49,7 @@ struct SnippetsView: View {
         .navigationTitle("Snippets")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) { MenuButton() }
+            MenuToolbarItem()
         }
         .overlay(alignment: .bottomTrailing) {
             AddButton(label: "Add snippet") { editing = .new }

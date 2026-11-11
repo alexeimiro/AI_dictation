@@ -82,7 +82,7 @@ final class AppModel {
         #endif
         let history = HistoryStore.open(inMemory: launchOptions.useFixtures || launchOptions.isOnboardingScreenshot)
         self.history = history
-        if launchOptions.useFixtures { HistoryFixtures.seed(history) }
+        if launchOptions.useFixtures, !launchOptions.emptyHistory { HistoryFixtures.seed(history) }
         if launchOptions.onboardingStep == .complete { OnboardingFixtures.seedCompletedHistory(history) }
         let library = LibraryStore.open(inMemory: launchOptions.useFixtures || launchOptions.isOnboardingScreenshot)
         self.library = library
@@ -107,7 +107,7 @@ final class AppModel {
             styleSync = nil
         }
         pro = ProStore(functions: functions, accountToken: { backend?.client.auth.currentUser?.id })
-        if launchOptions.useFixtures { quota = .fixture }
+        if launchOptions.useFixtures { quota = launchOptions.quotaFixture ?? .fixture }
         let assets = SpeechAssetManager()
         self.assets = assets
         let practiceBuffer = PracticeTranscriptBuffer(
@@ -659,11 +659,19 @@ enum LaunchRoute: String {
     case home, settings, languages, debug, transcript, swipeBack
     case dictionary, snippets, style, scratchpad, menu, account, paywall, referral
 
+    /// What the screens are called now; the names above keep working.
+    private static let aliases: [String: LaunchRoute] = ["notes": .scratchpad, "invite": .referral]
+
     init?(arguments: [String]) {
         guard let index = arguments.firstIndex(of: "-route"), arguments.indices.contains(index + 1) else {
             return nil
         }
-        self.init(rawValue: arguments[index + 1])
+        let name = arguments[index + 1]
+        if let route = Self.aliases[name] {
+            self = route
+        } else {
+            self.init(rawValue: name)
+        }
     }
 }
 
@@ -690,6 +698,9 @@ enum LaunchRoute: String {
 /// The session (screenshots, DEBUG builds only): `-session-fixture
 /// off|starting|on|listening|writing|failed|reconnect` pins its phase without a microphone, so
 /// Home can be shot in every state.
+///
+/// Home's other states (screenshots, DEBUG builds only, with `-fixtures`): `-quota-fixture
+/// trial|basic|limit|pro` picks the plan, and `-history-fixture empty` leaves the history empty.
 struct LaunchOptions: Equatable {
     var route: LaunchRoute?
     var useFixtures = false
@@ -702,6 +713,8 @@ struct LaunchOptions: Equatable {
     var accountSheet: SignInAgainView.Start?
     var keyboardDemo: KeyboardDemo?
     var sessionFixture: SessionController.Phase?
+    var quotaFixture: AccountService.Quota?
+    var emptyHistory = false
 
     init(arguments: [String]) {
         route = LaunchRoute(arguments: arguments)
@@ -719,6 +732,8 @@ struct LaunchOptions: Equatable {
         }
         keyboardDemo = Self.value(after: "-keyboard-demo", in: arguments).flatMap(KeyboardDemo.init)
         sessionFixture = Self.value(after: "-session-fixture", in: arguments).flatMap(SessionController.Phase.init(fixture:))
+        quotaFixture = Self.value(after: "-quota-fixture", in: arguments).flatMap(AccountService.Quota.fixture(named:))
+        emptyHistory = Self.value(after: "-history-fixture", in: arguments) == "empty"
         #endif
     }
 

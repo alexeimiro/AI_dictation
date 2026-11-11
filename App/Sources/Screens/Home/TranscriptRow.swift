@@ -2,29 +2,53 @@ import MurmurCore
 import MurmurUI
 import SwiftUI
 
+/// One dictation in Home's history: when it was said, what was written, how long it took to say,
+/// and a chip when something is left to do with it.
 struct TranscriptRow: View {
     let transcript: Transcript
     let insertState: InsertState
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(verbatim: transcript.displayText.isEmpty ? (transcript.errorReason ?? "—") : transcript.displayText)
-                .font(.transcript())
-                .foregroundStyle(transcript.displayText.isEmpty ? Palette.textSecondary : Palette.text)
-                .lineLimit(3)
-            HStack(spacing: 8) {
-                Text(transcript.createdAt, style: .time)
-                Text("\(Self.duration(transcript.metrics.audioSeconds)) · \(transcript.metrics.words) words")
-                Spacer()
-                if let badge {
-                    StatusBadge(badge.text, tone: badge.tone)
+        // At the largest text sizes the time moves under the text, which gets the row's width.
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            if !stacked {
+                // Every row's text starts at the same place: the column is as wide as the widest time.
+                Text(Self.widestTime, style: .time)
+                    .font(.murmur(.footnote))
+                    .monospacedDigit()
+                    .hidden()
+                    .overlay(alignment: .leading) { time.fixedSize() }
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(verbatim: transcript.displayText.isEmpty ? (transcript.errorReason ?? "—") : transcript.displayText)
+                    .font(.transcript())
+                    .lineSpacing(2)
+                    .foregroundStyle(transcript.displayText.isEmpty ? Theme.second : Theme.ink)
+                    .lineLimit(3)
+                HStack(spacing: 8) {
+                    if stacked { time }
+                    Text(Self.meta(seconds: transcript.metrics.audioSeconds, words: transcript.metrics.words))
+                        .font(.murmur(.footnote))
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.third)
+                    if let badge {
+                        StatusBadge(badge.text, tone: badge.tone)
+                    }
                 }
             }
-            .font(.ui(12))
-            .foregroundStyle(Palette.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 12)
         .accessibilityElement(children: .combine)
+    }
+
+    private var time: some View {
+        Text(transcript.createdAt, style: .time)
+            .font(.murmur(.footnote))
+            .monospacedDigit()
+            .foregroundStyle(Theme.third)
     }
 
     private var badge: (text: String, tone: StatusBadge.Tone)? {
@@ -40,6 +64,21 @@ struct TranscriptRow: View {
             case .inserted, .none: nil
             }
         }
+    }
+
+    /// 22:58, or 10:58 PM where the clock has twelve hours: as wide as a time gets.
+    private static let widestTime = Calendar.current.date(
+        bySettingHour: 22, minute: 58, second: 0, of: Date(timeIntervalSinceReferenceDate: 0)) ?? Date()
+
+    /// "9 s · 13 words": how long the dictation took to say, and how much it came to.
+    static func meta(seconds: Double, words: Int) -> String {
+        "\(spoken(seconds)) · \(words == 1 ? "1 word" : "\(words) words")"
+    }
+
+    /// "9 s", "1 min 12 s".
+    static func spoken(_ seconds: Double) -> String {
+        let total = Int(seconds.rounded())
+        return total < 60 ? "\(total) s" : "\(total / 60) min \(total % 60) s"
     }
 
     static func duration(_ seconds: Double) -> String {

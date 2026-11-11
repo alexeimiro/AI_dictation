@@ -30,4 +30,22 @@ extension AccountService.Quota {
         AccountService.Quota(plan: "pro", onTrial: true, trialEndsAt: Date().addingTimeInterval(7 * 86_400 - 60),
                              wordsThisWeek: 1_240, weeklyLimit: nil, remaining: nil)
     }
+
+    /// The plans `-quota-fixture <name>` shows: `trial`, `basic` (some of the week's words used),
+    /// `limit` (all of them used) and `pro` (a subscription).
+    static func fixture(named name: String) -> AccountService.Quota? {
+        switch name {
+        case "trial": fixture
+        case "basic":
+            AccountService.Quota(plan: "basic", onTrial: false, trialEndsAt: nil, wordsThisWeek: 640,
+                                 weeklyLimit: 1000, remaining: 360)
+        case "limit":
+            AccountService.Quota(plan: "basic", onTrial: false, trialEndsAt: nil, wordsThisWeek: 1000,
+                                 weeklyLimit: 1000, remaining: 0)
+        case "pro":
+            AccountService.Quota(plan: "pro", onTrial: false, trialEndsAt: nil, wordsThisWeek: 5_200,
+                                 weeklyLimit: nil, remaining: nil)
+        default: nil
+        }
+    }
 }

@@ -9,6 +9,40 @@ extension View {
     }
 }
 
+extension Shape where Self == Capsule {
+    /// Murmur's capsule: its ends are half circles. SwiftUI's own `.capsule` flattens them.
+    public static var roundCapsule: Capsule { Capsule(style: .circular) }
+}
+
+/// A thin line in the line colour: between rows, between the menu's groups.
+public struct Hairline: View {
+    public init() {}
+
+    public var body: some View {
+        Rectangle()
+            .fill(Theme.line)
+            .frame(height: 1)
+            .accessibilityHidden(true)
+    }
+}
+
+/// A card's buttons: side by side when they fit, stacked when they don't (a narrow screen, large
+/// type).
+public struct ActionRow<Content: View>: View {
+    let content: Content
+
+    public init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    public var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) { content }
+            VStack(alignment: .leading, spacing: 10) { content }
+        }
+    }
+}
+
 /// A small outlined label: the plan chip, a transcript count.
 public struct Chip: View {
     let text: String
@@ -24,7 +58,7 @@ public struct Chip: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
             .overlay {
-                Capsule().strokeBorder(Theme.ink, lineWidth: 1.5)
+                Capsule(style: .circular).strokeBorder(Theme.ink, lineWidth: 1.5)
             }
             .fixedSize()
     }
@@ -69,32 +103,58 @@ public struct Meter: View {
     }
 }
 
-/// The red dot that says the microphone is open, with one slow ring around it. The ring rests
-/// under Reduce Motion.
+/// The red dot that says the microphone is open, with rings leaving it: one slow ring while
+/// Murmur waits, two quicker ones while it listens. The rings rest under Reduce Motion.
 public struct LiveDot: View {
     let size: CGFloat
+    let rings: Int
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulsing = false
 
-    public init(size: CGFloat = 12) {
+    public init(size: CGFloat = 12, rings: Int = 1) {
         self.size = size
+        self.rings = max(rings, 1)
     }
 
     public var body: some View {
+        // One ring takes 1.8 s; two take 1.4 s each, half a cycle apart.
+        let cycle = rings == 1 ? 1.8 : 1.4
         Circle()
             .fill(Theme.live)
             .frame(width: size, height: size)
             .background {
                 if !reduceMotion {
-                    Circle()
-                        .strokeBorder(Theme.live, lineWidth: 1.5)
-                        .scaleEffect(pulsing ? 2.8 : 1)
-                        .opacity(pulsing ? 0 : 0.7)
-                        .animation(.easeOut(duration: 1.8).repeatForever(autoreverses: false), value: pulsing)
+                    ForEach(0..<rings, id: \.self) { index in
+                        Circle()
+                            .strokeBorder(Theme.live, lineWidth: 1.5)
+                            .scaleEffect(pulsing ? 2.8 : 1)
+                            .opacity(pulsing ? 0 : 0.7)
+                            .animation(
+                                .easeOut(duration: cycle).repeatForever(autoreverses: false)
+                                    .delay(cycle * Double(index) / Double(rings)),
+                                value: pulsing)
+                    }
                 }
             }
             .onAppear { pulsing = true }
             .accessibilityHidden(true)
+    }
+}
+
+/// The menu button's glyph: two lines, the lower one shorter. Stroke it.
+public struct MenuGlyph: Shape {
+    public init() {}
+
+    public func path(in rect: CGRect) -> Path {
+        // On a 24-unit grid: the lines sit at y 9 and 15, from x 4 to 20 and from 4 to 14.
+        let unit = min(rect.width, rect.height) / 24
+        let left = rect.midX - 8 * unit
+        var path = Path()
+        path.move(to: CGPoint(x: left, y: rect.midY - 3 * unit))
+        path.addLine(to: CGPoint(x: left + 16 * unit, y: rect.midY - 3 * unit))
+        path.move(to: CGPoint(x: left, y: rect.midY + 3 * unit))
+        path.addLine(to: CGPoint(x: left + 10 * unit, y: rect.midY + 3 * unit))
+        return path
     }
 }
 
@@ -134,7 +194,7 @@ public struct NoticeCard<Actions: View>: View {
                     .font(.murmur(.subhead))
                     .foregroundStyle(Theme.second)
             }
-            HStack(spacing: 10) {
+            ActionRow {
                 actions
             }
             .padding(.top, 8)

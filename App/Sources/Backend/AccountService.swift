@@ -75,6 +75,52 @@ final class AccountService: StyleRemote {
             guard let weeklyLimit, weeklyLimit > 0 else { return nil }
             return min(1, Double(wordsThisWeek) / Double(weeklyLimit))
         }
+
+        /// The chip beside the wordmark: "Trial · 6 days", "Pro" or "Basic".
+        func chip(now: Date = Date()) -> String {
+            guard let left = trialDaysLeft(now: now) else { return isPro ? "Pro" : "Basic" }
+            return switch left {
+            case ...0: "Trial"
+            case 1: "Trial · 1 day"
+            default: "Trial · \(left) days"
+            }
+        }
+
+        /// What the menu's meter counts.
+        struct Usage: Equatable {
+            /// "Trial" or "This week".
+            let title: String
+            /// "8 of 14 days used", "250 of 1,000 words used".
+            let detail: String
+            /// The meter: `filled` of `total` segments.
+            let filled: Int
+            let total: Int
+        }
+
+        /// The trial's days, or this week's words on Basic; nil on a paid plan, which has nothing
+        /// to count. A two-week trial gets a segment a day; anything longer is drawn in proportion.
+        func usage(now: Date = Date()) -> Usage? {
+            if let left = trialDaysLeft(now: now) {
+                let used = min(trialLength, max(0, trialLength - left))
+                let total = min(trialLength, Self.trialDays)
+                return Usage(title: "Trial", detail: "\(used) of \(trialLength) days used",
+                             filled: Self.segments(Double(used) / Double(trialLength), of: total), total: total)
+            }
+            guard let weeklyLimit, weeklyLimit > 0 else { return nil }
+            return Usage(title: "This week",
+                         detail: "\(wordsThisWeek.formatted()) of \(weeklyLimit.formatted()) words used",
+                         filled: Self.segments(min(1, Double(wordsThisWeek) / Double(weeklyLimit)), of: 10),
+                         total: 10)
+        }
+
+        /// `fraction` of `total` segments: never empty once something is used, never full before
+        /// everything is.
+        private static func segments(_ fraction: Double, of total: Int) -> Int {
+            let filled = Int((fraction * Double(total)).rounded())
+            if fraction > 0, filled == 0 { return 1 }
+            if fraction < 1, filled == total { return total - 1 }
+            return filled
+        }
     }
 
     /// `my_referrals()`: Refer a friend's code and counts.

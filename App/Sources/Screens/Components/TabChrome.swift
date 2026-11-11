@@ -1,7 +1,7 @@
 import MurmurUI
 import SwiftUI
 
-/// The hamburger at the top left of every tab: opens the side menu.
+/// The button at the top left of every root screen: opens the menu.
 struct MenuButton: View {
     @Environment(AppModel.self) private var model
 
@@ -9,9 +9,41 @@ struct MenuButton: View {
         Button {
             withAnimation(.snappy(duration: 0.3)) { model.router.isMenuOpen = true }
         } label: {
-            Image(systemName: "line.3.horizontal")
+            MenuGlyph()
+                .stroke(Theme.ink, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                .frame(width: 24, height: 24)
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
         }
         .accessibilityLabel("Menu")
+        .accessibilityIdentifier(AccessibilityID.menuButton)
+    }
+}
+
+/// A root screen's menu button in its top bar, drawn bare: no glass behind it.
+struct MenuToolbarItem: ToolbarContent {
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) { MenuButton() }
+            .sharedBackgroundVisibility(.hidden)
+    }
+}
+
+/// A bare icon button for a top bar: a 24 pt glyph in a 44 pt target. Pushed screens keep the
+/// system's back button: replacing it switches off the swipe from the left edge.
+struct BarIconButton: View {
+    let systemImage: String
+    let label: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 20, weight: .regular))
+                .foregroundStyle(Theme.ink)
+                .frame(width: 44, height: 44)
+                .contentShape(.rect)
+        }
+        .accessibilityLabel(label)
     }
 }
 

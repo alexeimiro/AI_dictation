@@ -21,9 +21,9 @@ public struct StatusBadge: View {
             .foregroundStyle(tone == .danger ? Theme.onInk : Theme.ink)
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
-            .background(tone == .danger ? Theme.ink : .clear, in: .capsule)
+            .background(tone == .danger ? Theme.ink : .clear, in: .roundCapsule)
             .overlay {
-                Capsule().strokeBorder(Theme.ink, lineWidth: 1.5)
+                Capsule(style: .circular).strokeBorder(Theme.ink, lineWidth: 1.5)
             }
             .lineLimit(1)
     }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// A short confirmation at the bottom of the screen ("Transcript copied to clipboard").
+/// A short confirmation at the bottom of the screen ("Copied"): white on an ink capsule.
 public struct ToastModifier: ViewModifier {
     @Binding var message: String?
     let duration: Duration
@@ -9,12 +9,12 @@ public struct ToastModifier: ViewModifier {
         content.overlay(alignment: .bottom) {
             if let message {
                 Text(verbatim: message)
-                    .font(.ui(15, .medium, relativeTo: .subheadline))
-                    .foregroundStyle(.white)
+                    .font(.murmur(.subhead, weight: .semibold))
+                    .foregroundStyle(Theme.onInk)
                     .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 18)
                     .padding(.vertical, 10)
-                    .background(Palette.bubble, in: .capsule)
+                    .background(Theme.ink, in: .rect(cornerRadius: 22))
                     .padding(.horizontal, 24)
                     .padding(.bottom, 24)
                     .transition(.move(edge: .bottom).combined(with: .opacity))

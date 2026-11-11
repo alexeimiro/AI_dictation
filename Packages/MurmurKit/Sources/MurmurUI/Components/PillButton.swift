@@ -28,13 +28,13 @@ public struct MurmurButtonStyle: ButtonStyle {
             .minimumScaleFactor(0.8)
             .padding(.horizontal, size == .large ? 20 : 18)
             .frame(maxWidth: size == .large ? .infinity : nil, minHeight: size == .large ? 56 : 44)
-            .background(background, in: .capsule)
+            .background(background, in: .roundCapsule)
             .overlay {
                 if kind == .secondary, isEnabled {
-                    Capsule().strokeBorder(Theme.ink, lineWidth: 1.5)
+                    Capsule(style: .circular).strokeBorder(Theme.ink, lineWidth: 1.5)
                 }
             }
-            .contentShape(.capsule)
+            .contentShape(.roundCapsule)
             .opacity(configuration.isPressed ? 0.75 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
@@ -88,13 +88,13 @@ public struct PillButtonStyle: ButtonStyle {
             .lineLimit(1)
             .minimumScaleFactor(0.8)
             .frame(maxWidth: .infinity, minHeight: height)
-            .background(background, in: .capsule)
+            .background(background, in: .roundCapsule)
             .overlay {
                 if let border {
-                    Capsule().strokeBorder(border, lineWidth: Metrics.borderWidth)
+                    Capsule(style: .circular).strokeBorder(border, lineWidth: Metrics.borderWidth)
                 }
             }
-            .contentShape(.capsule)
+            .contentShape(.roundCapsule)
             .opacity(configuration.isPressed ? 0.75 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }

@@ -4,87 +4,69 @@ import StoreKit
 import SwiftData
 import SwiftUI
 
-/// Home: the signed-out card while the account's session is lost, the session's status when it
-/// needs attention (the switch is in the toolbar), the keyboard setup checklist until it's done,
-/// a nudge to try Murmur in another app, and the history by day.
+/// Home: first what needs attention (a lost sign-in, a session that couldn't start, the weekly
+/// limit, the keyboard's setup), then the history by day. The session's control is the bar at the
+/// bottom, where the thumb is.
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Query(sort: \TranscriptRecord.createdAt, order: .reverse) private var records: [TranscriptRecord]
     @State private var toast: String?
     @State private var tryingIt = false
+    @AppStorage("intro.home.dismissed") private var nudgeDismissed = false
     @Environment(\.requestReview) private var requestReview
 
     var body: some View {
         List {
-            if let account = model.account, account.isSignedOut {
-                Section {
-                    SignedOutCard(phrase: account.phrase) { model.signInSheet = .options }
-                }
-            }
-            if SessionCard.isShown(for: model.session.phase) {
-                Section {
-                    SessionCard()
-                }
-            }
-            if let quota = model.quota, quota.remaining == 0, !model.pro.isSubscribed {
-                Section {
-                    LimitCard(weeklyLimit: quota.weeklyLimit) { model.showsPaywall = true }
-                }
-            }
-            if !model.setup.isComplete, records.isEmpty {
-                Section {
-                    SetupChecklistCard()
-                }
-            } else {
-                Section {
-                    IntroCard(
-                        title: "Try Murmur in any app", accent: "any app",
-                        message: Text("Draft emails, send messages and jot down notes with your voice."),
-                        action: "Try it now",
-                        dismissedKey: "intro.home.dismissed"
-                    ) { tryingIt = true }
-                }
-                .listRowInsets(EdgeInsets())
-                .listRowBackground(Color.clear)
-            }
-
+            notices
             if records.isEmpty {
-                Section {
-                    emptyState
-                }
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+                EmptyState("Nothing dictated yet",
+                           message: "What you dictate shows up here. Open a text field, switch to Murmur and tap the mic.")
+                    .padding(.vertical, 56)
+                    .plainRow()
             } else {
                 ForEach(DayBucketing.group(records.map(\.snapshot))) { group in
-                    Section {
-                        ForEach(group.transcripts) { transcript in
-                            row(transcript)
-                        }
-                    } header: {
-                        Text(Self.title(for: group.day))
-                            .font(.ui(13, .semibold, relativeTo: .footnote))
-                            .foregroundStyle(Palette.textSecondary)
+                    Text(Self.title(for: group.day))
+                        .font(.murmur(.footnote, weight: .semibold))
+                        .foregroundStyle(Theme.third)
+                        .accessibilityAddTraits(.isHeader)
+                        .padding(.top, 18)
+                        .padding(.bottom, 8)
+                        .plainRow()
+                    ForEach(group.transcripts) { transcript in
+                        row(transcript)
                     }
                 }
             }
         }
-        .listStyle(.insetGrouped)
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .background(Palette.canvas)
+        .background(Theme.canvas)
+        .toast($toast)
+        .safeAreaBar(edge: .bottom) {
+            SessionBar()
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) { MenuButton() }
+            MenuToolbarItem()
             ToolbarItem(placement: .principal) {
-                HStack(spacing: 8) {
+                HStack(spacing: 10) {
                     Wordmark(height: 22)
-                    if let quota = model.quota { PlanBadge(text: quota.badge) }
+                        .accessibilityIdentifier(AccessibilityID.screen("home"))
+                    if let quota = model.quota { Chip(quota.chip()) }
                 }
                 // The logo is a mark, not text to read: it keeps its size, so it fits the bar.
                 .dynamicTypeSize(...DynamicTypeSize.large)
             }
-            ToolbarItem(placement: .topBarTrailing) { SessionToggle() }
+            ToolbarItem(placement: .topBarTrailing) {
+                BarIconButton(systemImage: "pencil.line", label: "New note") {
+                    model.openNewNote(dictating: false)
+                }
+                .accessibilityIdentifier(AccessibilityID.newNote)
+            }
+            .sharedBackgroundVisibility(.hidden)
         }
-        .toast($toast)
         .sheet(isPresented: $tryingIt) { TryItSheet() }
         .task {
             model.history.reconcileInsertions(payloads: model.transport.payloads)
@@ -96,26 +78,56 @@ struct HomeView: View {
         }
     }
 
+    /// The cards above the history, each only while it applies.
+    @ViewBuilder
+    private var notices: some View {
+        Group {
+            if let account = model.account, account.isSignedOut {
+                SignedOutCard(phrase: account.phrase) { model.signInSheet = .options }
+            }
+            if SessionNotice.isShown(for: model.session.phase) {
+                SessionNotice()
+            }
+            if let quota = model.quota, quota.remaining == 0, !model.pro.isSubscribed {
+                LimitCard(weeklyLimit: quota.weeklyLimit) { model.showsPaywall = true }
+            }
+            if !model.setup.isComplete, records.isEmpty {
+                SetupChecklistCard()
+            } else if !nudgeDismissed {
+                NoticeCard("Try Murmur where you write", message: "A to-do list, a message or an email. Pick one.",
+                           onDismiss: { withAnimation { nudgeDismissed = true } }) {
+                    Button("Try it") { tryingIt = true }
+                        .buttonStyle(.murmur(.secondary, size: .compact))
+                }
+            }
+        }
+        .padding(.vertical, 5)
+        .plainRow()
+    }
+
     private func row(_ transcript: Transcript) -> some View {
         let state = transcript.insertState(now: Date(), claimed: model.transport.payloads.isClaimed(transcript.id))
         return TranscriptRow(transcript: transcript, insertState: state)
+            .overlay(alignment: .top) { Hairline() }
             .contentShape(.rect)
             .onTapGesture { copy(transcript) }
+            .plainRow()
             .swipeActions(edge: .leading, allowsFullSwipe: false) {
                 Button { copy(transcript) } label: { Label("Copy", systemImage: "doc.on.doc") }
-                    .tint(Palette.ink)
+                    .tint(Theme.second)
                 if transcript.canRegenerate {
                     Button { regenerate(transcript) } label: {
                         Label(transcript.status == .cleaned ? "Regenerate" : "Retry", systemImage: "arrow.clockwise")
                     }
-                    .tint(Palette.accent)
+                    .tint(Theme.third)
                 }
             }
             .swipeActions(edge: .trailing) {
+                // Ink, not red: red means the microphone is open.
                 Button(role: .destructive) { model.history.delete(transcript.id) } label: {
                     Label("Delete", systemImage: "trash")
                 }
-                .tint(Palette.danger)
+                .tint(Theme.ink)
             }
             .contextMenu {
                 Button { model.router.open(.transcript(transcript.id)) } label: { Label("Details", systemImage: "info.circle") }
@@ -128,25 +140,8 @@ struct HomeView: View {
                         Label(transcript.status == .cleaned ? "Regenerate" : "Retry", systemImage: "arrow.clockwise")
                     }
                 }
-                Button(role: .destructive) { model.history.delete(transcript.id) } label: { Label("Delete", systemImage: "trash") }
+                Button { model.history.delete(transcript.id) } label: { Label("Delete", systemImage: "trash") }
             }
-    }
-
-    private var emptyState: some View {
-        VStack(spacing: 8) {
-            Image(systemName: "waveform")
-                .font(.system(size: 28))
-                .foregroundStyle(Palette.lockGray)
-            Text("No dictations yet")
-                .font(.ui(17, .medium))
-                .foregroundStyle(Palette.text)
-            Text("Open Notes, switch to the Murmur keyboard and tap the mic.")
-                .font(.ui(14))
-                .foregroundStyle(Palette.textSecondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
     }
 
     // MARK: Actions
@@ -167,7 +162,7 @@ struct HomeView: View {
     private func copy(_ transcript: Transcript) {
         guard !transcript.displayText.isEmpty else { return }
         UIPasteboard.general.string = transcript.displayText
-        toast = "Transcript copied to clipboard"
+        toast = "Copied"
     }
 
     private func regenerate(_ transcript: Transcript) {
@@ -183,7 +178,7 @@ struct HomeView: View {
     private func insertViaKeyboard(_ transcript: Transcript) {
         toast = model.insertViaKeyboard(transcript.id)
             ? "Switch to the Murmur keyboard and tap “Insert last dictation”"
-            : "Couldn't hand this to the keyboard"
+            : "Couldn’t hand this to the keyboard"
     }
 
     static func title(for day: Date, now: Date = Date()) -> String {
@@ -195,128 +190,173 @@ struct HomeView: View {
     }
 }
 
+extension View {
+    /// A row of Home's list without the list's own chrome: the screen's margins, no separator,
+    /// the canvas behind it.
+    fileprivate func plainRow() -> some View {
+        listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Theme.canvas)
+    }
+}
+
+/// Home's session control: a button that turns Murmur on, then the session's state with a button
+/// that turns it off. Red shows only while the microphone is open.
+struct SessionBar: View {
+    @Environment(AppModel.self) private var model
+    /// When the dictation being heard started, for the timer.
+    @State private var listeningSince: Date?
+
+    var body: some View {
+        let phase = model.session.phase
+        let isOn = model.session.isLive
+        content(for: phase)
+            .onChange(of: recordingID, initial: true) { _, id in
+                listeningSince = id == nil ? nil : Date()
+            }
+            .disabled(phase == .starting)
+            // One switch for VoiceOver, as it was in the top bar.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Murmur is on")
+            .accessibilityValue(isOn ? "On" : "Off")
+            .accessibilityAddTraits([.isButton, .isToggle])
+            .accessibilityHint(Self.title(for: phase))
+            .accessibilityInputLabels(isOn ? ["Turn off Murmur", "Stop"] : ["Start Murmur", "Start"])
+            .accessibilityAction { toggle() }
+            .accessibilityIdentifier(AccessibilityID.sessionControl)
+            .sensoryFeedback(.selection, trigger: isOn)
+    }
+
+    @ViewBuilder
+    private func content(for phase: SessionController.Phase) -> some View {
+        switch phase {
+        case .off, .failed, .needsReconnect:
+            Button(action: toggle) {
+                HStack(spacing: 10) {
+                    BrandMark(ring: Theme.onInk)
+                        .frame(width: 22, height: 22)
+                    Text("Start Murmur")
+                }
+            }
+            .buttonStyle(.murmur(.primary))
+        case .starting:
+            status(Self.title(for: phase), detail: Text(model.session.startDetail ?? "Turning on the microphone"),
+                   stops: false) {
+                ProgressView()
+            }
+        case .ready:
+            status(Self.title(for: phase), detail: Text("The mic is open for the keyboard")) {
+                LiveDot(size: 12)
+            }
+        case .recording:
+            status(Self.title(for: phase), detail: Text(listeningSince ?? Date(), style: .timer).monospacedDigit()) {
+                LiveDot(size: 20, rings: 2)
+            }
+        case .processing:
+            status(Self.title(for: phase), detail: Text("Turning what you said into text")) {
+                ProgressView()
+            }
+        }
+    }
+
+    /// The bar while the session is starting or on: a marker, two lines and the stop button.
+    private func status<Marker: View>(_ title: String, detail: Text, stops: Bool = true,
+                                      @ViewBuilder marker: () -> Marker) -> some View {
+        HStack(spacing: 14) {
+            marker()
+                .tint(Theme.ink)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(.murmur(.callout, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
+                detail
+                    .font(.murmur(.caption))
+                    .foregroundStyle(Theme.second)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            if stops {
+                Button(action: toggle) {
+                    RoundedRectangle(cornerRadius: 2.5)
+                        .fill(Theme.onInk)
+                        .frame(width: 12, height: 12)
+                        .frame(width: 44, height: 44)
+                        .background(Theme.ink, in: .circle)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, 6)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .background(Theme.fill, in: .roundCapsule)
+    }
+
+    private var recordingID: UUID? {
+        if case .recording(let id) = model.session.phase { id } else { nil }
+    }
+
+    private func toggle() {
+        if model.session.isLive { model.session.stop() } else { Task { await model.session.start() } }
+    }
+
+    static func title(for phase: SessionController.Phase) -> String {
+        switch phase {
+        case .off: "Murmur is off"
+        case .starting: "Turning on…"
+        case .ready: "Murmur is on"
+        case .recording: "Listening"
+        case .processing: "Writing…"
+        case .needsReconnect: "Murmur lost the microphone"
+        case .failed: "Couldn’t start"
+        }
+    }
+}
+
+/// The session couldn't start, or lost the microphone to something else: what happened and the
+/// way out.
+struct SessionNotice: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        switch model.session.phase {
+        case .failed(let message):
+            NoticeCard(SessionBar.title(for: model.session.phase), message: message, isAlert: true) {
+                Button("Try again") { Task { await model.session.start() } }
+                    .buttonStyle(.murmur(.secondary, size: .compact))
+            }
+        case .needsReconnect:
+            NoticeCard(SessionBar.title(for: model.session.phase), message: "Reconnect to keep dictating.",
+                       isAlert: true) {
+                Button("Reconnect") { model.session.appDidBecomeActive() }
+                    .buttonStyle(.murmur(.secondary, size: .compact))
+            }
+        case .off, .starting, .ready, .recording, .processing:
+            EmptyView()
+        }
+    }
+
+    /// Everything else shows in the bar at the bottom.
+    static func isShown(for phase: SessionController.Phase) -> Bool {
+        switch phase {
+        case .failed, .needsReconnect: true
+        case .off, .starting, .ready, .recording, .processing: false
+        }
+    }
+}
+
 /// Basic's weekly words are used up: they come back next week, or Pro has no limit.
 private struct LimitCard: View {
     let weeklyLimit: Int?
     let upgrade: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("You've used this week's \(weeklyLimit?.formatted() ?? "free") words")
-                .font(.ui(17, .semibold))
-                .foregroundStyle(Palette.text)
-            Text("Dictation picks up again next week. \(Brand.name) Pro has no weekly limit.")
-                .font(.ui(15))
-                .foregroundStyle(Palette.textSecondary)
-            Button("Get unlimited words", action: upgrade)
-                .buttonStyle(.pill(.ink, height: 46))
-                .padding(.top, 4)
-        }
-        .padding(.vertical, 8)
-    }
-}
-
-/// The session switch in Home's toolbar: green while Murmur is on. Drawn by hand, since a
-/// toolbar shows a `Toggle` as a text button.
-struct SessionToggle: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        let isOn = model.session.isLive
-        Button {
-            if isOn { model.session.stop() } else { Task { await model.session.start() } }
-        } label: {
-            Capsule()
-                .fill(isOn ? Palette.toggleGreen : Palette.progressOff)
-                .frame(width: 40, height: 24)
-                .overlay(alignment: isOn ? .trailing : .leading) {
-                    Circle()
-                        .fill(.white)
-                        .padding(3)
-                        .shadow(color: .black.opacity(0.15), radius: 1, y: 1)
-                }
-                .animation(.snappy(duration: 0.2), value: isOn)
-        }
-        .disabled(model.session.phase == .starting)
-        .accessibilityLabel("Murmur is on")
-        .accessibilityValue(isOn ? "On" : "Off")
-        .accessibilityAddTraits(.isToggle)
-        .accessibilityHint(SessionCard.statusText(for: model.session.phase))
-        .sensoryFeedback(.selection, trigger: isOn)
-    }
-}
-
-/// The session's status while it needs attention: starting, failed or waiting to reconnect.
-struct SessionCard: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Circle().fill(statusColor).frame(width: 10, height: 10)
-                Text(statusText)
-                    .font(.ui(17, .medium))
-                    .foregroundStyle(Palette.text)
-                Spacer()
-                if model.session.phase == .starting {
-                    ProgressView()
-                }
-            }
-            if let detail = model.session.startDetail {
-                Text(detail)
-                    .font(.ui(13))
-                    .foregroundStyle(Palette.textSecondary)
-            }
-            if case .failed(let message) = model.session.phase {
-                Text(message)
-                    .font(.ui(14))
-                    .foregroundStyle(Palette.danger)
-                Button("Try again") { Task { await model.session.start() } }
-                    .font(.ui(15, .medium))
-                    .foregroundStyle(Palette.ink)
-            }
-            if model.session.phase == .needsReconnect {
-                Button("Reconnect") { model.session.appDidBecomeActive() }
-                    .font(.ui(15, .medium))
-                    .foregroundStyle(Palette.ink)
-            }
-        }
-        .padding(.vertical, 4)
-        // In a List row, default-style buttons fire on a tap anywhere in the row, all of them at once.
-        .buttonStyle(.borderless)
-    }
-
-    /// Off, on and listening show in the toolbar's switch alone.
-    static func isShown(for phase: SessionController.Phase) -> Bool {
-        switch phase {
-        case .starting, .failed, .needsReconnect: true
-        case .off, .ready, .recording, .processing: false
-        }
-    }
-
-    private var statusText: String {
-        Self.statusText(for: model.session.phase)
-    }
-
-    static func statusText(for phase: SessionController.Phase) -> String {
-        switch phase {
-        case .off: "Murmur is off"
-        case .starting: "Turning on…"
-        case .ready: "Murmur is on"
-        case .recording: "Listening"
-        case .processing: "Cleaning up"
-        case .needsReconnect: "Needs reconnect"
-        case .failed: "Couldn't start"
-        }
-    }
-
-    private var statusColor: Color {
-        switch model.session.phase {
-        case .ready: Palette.toggleGreen
-        case .recording: .red
-        case .processing, .starting: Palette.accent
-        case .failed, .needsReconnect: Palette.danger
-        case .off: Palette.lockGray
+        NoticeCard("You’ve used this week’s \(weeklyLimit?.formatted() ?? "free") words",
+                   message: "Dictation picks up again next week. \(Brand.name) Pro has no weekly limit.") {
+            Button("See \(Brand.name) Pro", action: upgrade)
+                .buttonStyle(.murmur(.primary, size: .compact))
         }
     }
 }
@@ -329,20 +369,10 @@ struct SignedOutCard: View {
     let signIn: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("You're signed out")
-                .font(.ui(15, .semibold))
-                .foregroundStyle(Palette.text)
-            Text(detail)
-                .font(.ui(14))
-                .foregroundStyle(Palette.textSecondary)
+        NoticeCard("You’re signed out", message: detail) {
             Button("Sign in", action: signIn)
-                .font(.ui(15, .medium))
-                .foregroundStyle(Palette.ink)
+                .buttonStyle(.murmur(.secondary, size: .compact))
         }
-        .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .buttonStyle(.borderless)
         // One element for VoiceOver; activating it signs in.
         .accessibilityElement(children: .combine)
         .accessibilityAction(.default, signIn)
@@ -359,34 +389,49 @@ struct SetupChecklistCard: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Set up the keyboard")
-                .font(.ui(15, .semibold))
-                .foregroundStyle(Palette.text)
-            checkRow("Keyboard added", ok: model.setup.keyboardAdded)
-            checkRow("Allow Full Access", ok: model.setup.fullAccessConfirmed)
-            checkRow("Microphone", ok: model.setup.microphone == .granted)
-            HStack {
-                if model.setup.microphone == .undetermined {
+        let asksForMicrophone = model.setup.microphone == .undetermined
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Finish setting up")
+                .font(.murmur(.headline))
+                .foregroundStyle(Theme.ink)
+            VStack(alignment: .leading, spacing: 12) {
+                step("Add the Murmur keyboard", done: model.setup.keyboardAdded)
+                step("Allow Full Access", done: model.setup.fullAccessConfirmed)
+                step("Allow the microphone", done: model.setup.microphone == .granted)
+            }
+            ActionRow {
+                if asksForMicrophone {
                     Button("Allow microphone") { Task { await model.setup.requestMicrophone() } }
+                        .buttonStyle(.murmur(.primary, size: .compact))
                 }
                 Button("Open Settings") { model.setup.openSettings() }
+                    .buttonStyle(.murmur(asksForMicrophone ? .secondary : .primary, size: .compact))
             }
-            .font(.ui(15, .medium))
-            .foregroundStyle(Palette.ink)
         }
-        .padding(.vertical, 4)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .buttonStyle(.borderless)
+        .softCard(padding: 18)
     }
 
-    private func checkRow(_ title: String, ok: Bool) -> some View {
-        HStack {
-            Image(systemName: ok ? "checkmark.circle.fill" : "circle.dashed")
-                .foregroundStyle(ok ? Palette.toggleGreen : Palette.lockGray)
+    private func step(_ title: String, done: Bool) -> some View {
+        HStack(spacing: 12) {
+            Group {
+                if done {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Theme.onInk)
+                        .frame(width: 22, height: 22)
+                        .background(Theme.ink, in: .circle)
+                } else {
+                    Circle()
+                        .strokeBorder(Theme.third, lineWidth: 1.5)
+                        .frame(width: 22, height: 22)
+                }
+            }
+            .accessibilityHidden(true)
             Text(title)
-                .font(.ui(15))
-                .foregroundStyle(Palette.text)
+                .font(.murmur(.callout))
+                .foregroundStyle(Theme.ink)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityValue(done ? "Done" : "Not done")
     }
 }

@@ -30,9 +30,14 @@ struct DeepLinkTests {
         #expect(LaunchRoute(arguments: ["Murmur", "-route", "swipeBack"]) == .swipeBack)
         #expect(LaunchRoute(arguments: ["Murmur", "-route", "languages"]) == .languages)
         #expect(LaunchRoute(arguments: ["Murmur"]) == nil)
-        for name in ["home", "settings", "languages", "debug", "transcript", "swipeBack"] {
-            #expect(LaunchRoute(rawValue: name) != nil)
+        for name in ["home", "settings", "languages", "debug", "transcript", "swipeBack", "dictionary", "snippets",
+                     "style", "scratchpad", "menu", "account", "paywall", "referral"] {
+            #expect(LaunchRoute(arguments: ["Murmur", "-route", name])?.rawValue == name)
         }
+        // What two screens are called now; their old names above still open them.
+        #expect(LaunchRoute(arguments: ["Murmur", "-route", "notes"]) == .scratchpad)
+        #expect(LaunchRoute(arguments: ["Murmur", "-route", "invite"]) == .referral)
+        #expect(LaunchRoute(arguments: ["Murmur", "-route", "nope"]) == nil)
     }
 
     @Test func parsesLaunchOptions() {
@@ -87,6 +92,21 @@ struct DeepLinkTests {
         #expect(LaunchOptions(arguments: ["Murmur"]).sessionFixture == nil)
     }
 
+    /// Screenshot runs pick the plan and can leave the history empty (DEBUG builds only).
+    @Test func parsesQuotaAndHistoryFixtures() {
+        func quota(_ name: String) -> AccountService.Quota? {
+            LaunchOptions(arguments: ["Murmur", "-fixtures", "-quota-fixture", name]).quotaFixture
+        }
+        #expect(quota("trial")?.onTrial == true)
+        #expect(quota("basic")?.remaining == 360)
+        #expect(quota("limit")?.remaining == 0)
+        #expect(quota("pro")?.chip() == "Pro")
+        #expect(quota("nope") == nil)
+        #expect(LaunchOptions(arguments: ["Murmur", "-fixtures"]).quotaFixture == nil)
+        #expect(LaunchOptions(arguments: ["Murmur", "-fixtures", "-history-fixture", "empty"]).emptyHistory)
+        #expect(!LaunchOptions(arguments: ["Murmur", "-fixtures"]).emptyHistory)
+    }
+
     @Test @MainActor func initialPathOpensNestedScreens() {
         #expect(Router.initialPath(for: .languages) == [.settings, .debug, .languages])
         #expect(Router.initialPath(for: .debug) == [.settings, .debug])
@@ -112,6 +132,29 @@ struct DeepLinkTests {
         #expect(router.path == [.settings])
         #expect(router.paths[.scratchpad] == [.note(note)])
         router.popToRoot()
+        #expect(router.path == [])
+    }
+
+    /// The menu lists the five places. Choosing one closes the menu and shows the place with
+    /// whatever was open in it; choosing the place already on screen returns it to its root.
+    @Test @MainActor func theMenuChoosesAPlace() {
+        #expect(MainTab.menuOrder == [.home, .scratchpad, .dictionary, .snippets, .style])
+        #expect(Set(MainTab.menuOrder) == Set(MainTab.allCases))
+        #expect(MainTab.scratchpad.title == "Notes")
+        let router = Router()
+        let note = UUID()
+        router.tab = .scratchpad
+        router.open(.note(note))
+        router.tab = .home
+        router.isMenuOpen = true
+        router.select(.scratchpad)
+        #expect(!router.isMenuOpen)
+        #expect(router.tab == .scratchpad)
+        #expect(router.path == [.note(note)])
+        router.isMenuOpen = true
+        router.select(.scratchpad)
+        #expect(!router.isMenuOpen)
+        #expect(router.tab == .scratchpad)
         #expect(router.path == [])
     }
 }

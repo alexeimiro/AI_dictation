@@ -40,7 +40,7 @@ struct ScratchpadView: View {
         .navigationTitle("Scratchpad")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) { MenuButton() }
+            MenuToolbarItem()
         }
     }
 

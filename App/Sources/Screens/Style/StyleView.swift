@@ -43,7 +43,7 @@ struct StyleView: View {
         .navigationTitle("Style")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) { MenuButton() }
+            MenuToolbarItem()
         }
         .sensoryFeedback(.selection, trigger: settings.defaultStyle)
     }

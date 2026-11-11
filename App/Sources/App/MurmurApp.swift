@@ -72,31 +72,32 @@ struct RootView: View {
     }
 }
 
-/// The tab bar (Home, Dictionary, Snippets, Style, Scratchpad), each tab with its own stack, and
-/// the side menu over them.
+/// The five places the menu leads to (Home, Notes, Dictionary, Snippets, Style), each with its own
+/// stack, and the menu over them. A `TabView` whose bar never shows keeps each place's stack and
+/// scroll position while another is on screen.
 struct MainTabs: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         @Bindable var router = model.router
         TabView(selection: $router.tab) {
-            Tab("Home", systemImage: "house", value: MainTab.home) {
+            Tab(value: MainTab.home) {
                 TabStack(tab: .home) { HomeView() }
             }
-            Tab("Dictionary", systemImage: "character.book.closed", value: MainTab.dictionary) {
-                TabStack(tab: .dictionary) { DictionaryView() }
-            }
-            Tab("Snippets", systemImage: "scissors", value: MainTab.snippets) {
-                TabStack(tab: .snippets) { SnippetsView() }
-            }
-            Tab("Style", systemImage: "textformat.size", value: MainTab.style) {
-                TabStack(tab: .style) { StyleView() }
-            }
-            Tab("Scratchpad", systemImage: "note.text", value: MainTab.scratchpad) {
+            Tab(value: MainTab.scratchpad) {
                 TabStack(tab: .scratchpad) { ScratchpadView() }
             }
+            Tab(value: MainTab.dictionary) {
+                TabStack(tab: .dictionary) { DictionaryView() }
+            }
+            Tab(value: MainTab.snippets) {
+                TabStack(tab: .snippets) { SnippetsView() }
+            }
+            Tab(value: MainTab.style) {
+                TabStack(tab: .style) { StyleView() }
+            }
         }
-        .tint(Palette.tabSelectedLabel)
+        .tint(Theme.ink)
         .overlay { MenuDrawer() }
         .fullScreenCover(isPresented: Binding(get: { model.showsPaywall }, set: { model.showsPaywall = $0 })) {
             PaywallView()
@@ -104,7 +105,8 @@ struct MainTabs: View {
     }
 }
 
-/// One tab's navigation stack, bound to its path in the router.
+/// One place's navigation stack, bound to its path in the router. The tab bar stays hidden on its
+/// root and on everything pushed onto it: the menu is the only way between places.
 private struct TabStack<Root: View>: View {
     @Environment(AppModel.self) private var model
     let tab: MainTab
@@ -114,18 +116,25 @@ private struct TabStack<Root: View>: View {
         let router = model.router
         NavigationStack(path: Binding(get: { router.paths[tab] ?? [] }, set: { router.paths[tab] = $0 })) {
             root()
+                .toolbarVisibility(.hidden, for: .tabBar)
                 .navigationDestination(for: Route.self) { route in
-                    switch route {
-                    case .settings: SettingsView()
-                    case .languages: LanguagesView()
-                    case .debug: DebugView()
-                    case .transcript(let id): TranscriptDetailView(id: id)
-                    case .account: AccountView()
-                    case .referral: ReferralView()
-                    case .note(let id): NoteEditorView(id: id)
-                    }
+                    destination(route)
+                        .toolbarVisibility(.hidden, for: .tabBar)
                 }
         }
-        .tint(Palette.ink)
+        .tint(Theme.ink)
+    }
+
+    @ViewBuilder
+    private func destination(_ route: Route) -> some View {
+        switch route {
+        case .settings: SettingsView()
+        case .languages: LanguagesView()
+        case .debug: DebugView()
+        case .transcript(let id): TranscriptDetailView(id: id)
+        case .account: AccountView()
+        case .referral: ReferralView()
+        case .note(let id): NoteEditorView(id: id)
+        }
     }
 }

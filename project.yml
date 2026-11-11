@@ -222,6 +222,8 @@ targets:
     platform: iOS
     sources:
       - path: Tests/MurmurUITests
+      # The identifiers the tests find elements by, shared with the app.
+      - path: App/Sources/App/AccessibilityID.swift
     dependencies:
       - target: Murmur
     settings:
