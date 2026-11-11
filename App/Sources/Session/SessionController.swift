@@ -191,6 +191,15 @@ final class SessionController {
         languages = [language.tag: language]
         phase = .ready
     }
+
+    /// Set by `pinForScreenshots`: the app becoming active must not restart a pinned session.
+    @ObservationIgnored private var isPinnedForScreenshots = false
+
+    /// Holds a phase for screenshots (`-session-fixture`); nothing is started.
+    func pinForScreenshots(_ phase: Phase) {
+        self.phase = phase
+        isPinnedForScreenshots = true
+    }
     #endif
 
     /// The keyboard opened the app for `request`: turn the microphone on and record that
@@ -435,6 +444,9 @@ final class SessionController {
     /// Called when the app becomes active: no "Disable after" countdown while it's on screen, and
     /// recover from interruptions that left us stranded.
     func appDidBecomeActive() {
+        #if DEBUG
+        guard !isPinnedForScreenshots else { return }
+        #endif
         backgroundSince = nil
         idleTask?.cancel()
         if phase == .needsReconnect {
@@ -1085,3 +1097,21 @@ final class SessionController {
         }
     }
 }
+
+#if DEBUG
+extension SessionController.Phase {
+    /// The names `-session-fixture` takes.
+    init?(fixture: String) {
+        switch fixture {
+        case "off": self = .off
+        case "starting": self = .starting
+        case "on": self = .ready
+        case "listening": self = .recording(UUID())
+        case "writing": self = .processing(UUID())
+        case "failed": self = .failed(SessionController.SessionError.microphoneDenied.localizedDescription)
+        case "reconnect": self = .needsReconnect
+        default: return nil
+        }
+    }
+}
+#endif

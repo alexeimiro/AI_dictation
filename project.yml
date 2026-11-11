@@ -37,6 +37,8 @@ targets:
       - package: MurmurKit
         product: MurmurCore
       - package: MurmurKit
+        product: MurmurBrand
+      - package: MurmurKit
         product: MurmurUI
       - package: Supabase
         product: Supabase
@@ -66,8 +68,8 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
-        # Light only until the palette (MurmurUI Theme.swift) gets dark variants. The keyboard
-        # follows the host app's appearance and is not affected.
+        # Light only, by choice. The colours (MurmurBrand) have dark values, which the keyboard
+        # uses: it follows the host app's appearance and is not affected by this.
         UIUserInterfaceStyle: Light
         UIBackgroundModes:
           - audio
@@ -131,6 +133,8 @@ targets:
     dependencies:
       - package: MurmurKit
         product: MurmurCore
+      - package: MurmurKit
+        product: MurmurBrand
     settings:
       base:
         PRODUCT_NAME: MurmurKeyboard
@@ -170,6 +174,8 @@ targets:
       - path: Widgets
       - path: Shared
     dependencies:
+      - package: MurmurKit
+        product: MurmurBrand
       - sdk: WidgetKit.framework
       - sdk: SwiftUI.framework
     settings:
@@ -240,6 +246,7 @@ schemes:
       targets:
         - MurmurTests
         - package: MurmurKit/MurmurCoreTests
+        - package: MurmurKit/MurmurBrandTests
     archive:
       config: Release
   # The onboarding journey on fake services (minutes, so it is kept out of the Murmur scheme).

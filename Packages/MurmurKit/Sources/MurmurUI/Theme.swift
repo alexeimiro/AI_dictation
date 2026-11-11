@@ -1,7 +1,10 @@
 import SwiftUI
+// The colours, the mark and the echo rings: everything that imports MurmurUI gets them too.
+@_exported import MurmurBrand
 
 extension Color {
-    /// `Color(hex: 0x312D38)`
+    /// `Color(hex: 0x312D38)`. Only onboarding's artwork still uses it; everything else takes a
+    /// `Theme` token.
     public init(hex: UInt32, opacity: Double = 1) {
         self.init(
             .sRGB,
@@ -12,42 +15,40 @@ extension Color {
     }
 }
 
-/// Color tokens sampled from the reference screenshots.
+/// The old colour names, each now a `Theme` token (MurmurBrand), so every screen already wears
+/// the new colours. A screen switches to `Theme` when it is redesigned; this goes when none is left.
 public enum Palette {
-    public static let ink = Color(hex: 0x312D38)
-    public static let text = Color(hex: 0x28272C)
-    public static let textSecondary = Color(hex: 0x5A595C)
-    public static let splash = Color(hex: 0x2E2A34)
-    public static let cream = Color(hex: 0xFFFFEB)
-    public static let selectedFill = Color(hex: 0xFFFFEB)
-    public static let cardBorder = Color(hex: 0xD3CED6)
-    public static let disabled = Color(hex: 0xADABAF)
-    /// "Skip", secondary copy on the permission sheets.
-    public static let muted = Color(hex: 0x7F7B81)
-    /// Legal copy under the sign-in buttons.
-    public static let fineprint = Color(hex: 0x656067)
-    /// The "default style" accent on the style screen.
-    public static let purple = Color(hex: 0xA88ED5)
-    /// Behind the microphone sheet.
-    public static let sheetBackdrop = Color(hex: 0xCCCCCC)
-    public static let progressOff = Color(hex: 0xC1BDC4)
-    public static let accent = Color(hex: 0xFFA83E)
-    public static let lavender = Color(hex: 0xF0D7FF)
-    public static let offerPill = Color(hex: 0xDDD4F0)
-    public static let proBadge = Color(hex: 0xA08AFF)
-    public static let toggleGreen = Color(hex: 0x4FBF77)
-    public static let toggleGreenSoft = Color(hex: 0xC4EAD2)
-    public static let teal = Color(hex: 0x004F47)
-    public static let bubble = Color(hex: 0x1C1A1D)
-    public static let canvas = Color(hex: 0xF3F3F5)
-    public static let tabSelected = Color(hex: 0xECE9EC)
-    public static let tabSelectedLabel = Color(hex: 0x6A4B97)
-    public static let lockGray = Color(hex: 0xA8A5A9)
-    public static let paper = Color.white
-    public static let danger = Color(hex: 0xE5484D)
+    public static let ink = Theme.ink
+    public static let text = Theme.ink
+    public static let textSecondary = Theme.second
+    public static let splash = Theme.ink
+    public static let cream = Theme.fill
+    public static let selectedFill = Theme.fill
+    public static let cardBorder = Theme.line
+    public static let disabled = Theme.disabled
+    public static let muted = Theme.third
+    public static let fineprint = Theme.third
+    public static let purple = Theme.ink
+    public static let sheetBackdrop = Theme.track
+    public static let progressOff = Theme.track
+    public static let accent = Theme.ink
+    public static let lavender = Theme.fill
+    public static let offerPill = Theme.fill
+    public static let proBadge = Theme.ink
+    public static let toggleGreen = Theme.ink
+    public static let toggleGreenSoft = Theme.fill
+    public static let teal = Theme.ink
+    public static let bubble = Theme.ink
+    public static let canvas = Theme.canvas
+    public static let tabSelected = Theme.fill
+    public static let tabSelectedLabel = Theme.ink
+    public static let lockGray = Theme.graphic
+    public static let paper = Theme.canvas
+    /// Delete and errors are ink: red means an open microphone and nothing else.
+    public static let danger = Theme.ink
 }
 
-/// Layout constants measured from the 402 × 874 pt references (iPhone 16 Pro).
+/// The old layout constants, kept for the screens that haven't been redesigned yet.
 public enum Metrics {
     public static let screenMargin: CGFloat = 30
     public static let authMargin: CGFloat = 20
@@ -58,5 +59,5 @@ public enum Metrics {
     public static let cardHeight: CGFloat = 66
     public static let cardRadius: CGFloat = 12
     public static let cardSpacing: CGFloat = 12
-    public static let borderWidth: CGFloat = 2
+    public static let borderWidth: CGFloat = 1.5
 }

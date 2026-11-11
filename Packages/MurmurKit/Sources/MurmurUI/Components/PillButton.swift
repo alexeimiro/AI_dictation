@@ -1,17 +1,74 @@
 import SwiftUI
 
-/// The rounded full-width buttons used throughout onboarding and auth.
+/// Murmur's buttons: capsules. `.murmur(.primary)` is ink with a white label, `.secondary` an ink
+/// outline; `.compact` hugs its label at 44 pt instead of filling the width at 56 pt.
+public struct MurmurButtonStyle: ButtonStyle {
+    public enum Kind: Sendable {
+        case primary, secondary
+    }
+
+    public enum Size: Sendable {
+        case large, compact
+    }
+
+    let kind: Kind
+    let size: Size
+    @Environment(\.isEnabled) private var isEnabled
+
+    public init(_ kind: Kind, size: Size = .large) {
+        self.kind = kind
+        self.size = size
+    }
+
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.murmur(size == .large ? .headline : .subhead, weight: .semibold))
+            .foregroundStyle(foreground)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .padding(.horizontal, size == .large ? 20 : 18)
+            .frame(maxWidth: size == .large ? .infinity : nil, minHeight: size == .large ? 56 : 44)
+            .background(background, in: .capsule)
+            .overlay {
+                if kind == .secondary, isEnabled {
+                    Capsule().strokeBorder(Theme.ink, lineWidth: 1.5)
+                }
+            }
+            .contentShape(.capsule)
+            .opacity(configuration.isPressed ? 0.75 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+
+    private var background: Color {
+        guard isEnabled else { return Theme.fill }
+        return kind == .primary ? Theme.ink : Theme.canvas
+    }
+
+    private var foreground: Color {
+        guard isEnabled else { return Theme.third }
+        return kind == .primary ? Theme.onInk : Theme.ink
+    }
+}
+
+extension ButtonStyle where Self == MurmurButtonStyle {
+    public static func murmur(_ kind: MurmurButtonStyle.Kind, size: MurmurButtonStyle.Size = .large) -> MurmurButtonStyle {
+        MurmurButtonStyle(kind, size: size)
+    }
+}
+
+/// The old button names, drawn as the new capsules until onboarding and the remaining screens are
+/// redesigned.
 public struct PillButtonStyle: ButtonStyle {
     public enum Variant: Sendable {
-        /// Dark fill, white label ("Next", "Continue with Apple").
+        /// The primary button: ink with a white label.
         case ink
-        /// Cream fill with ink border ("Get started" on the welcome carousel).
+        /// The primary button on the welcome pages' dark artwork: white with an ink label.
         case cream
-        /// Lavender fill with ink border ("Set up", "Start Murmuring").
+        /// Also the primary button.
         case lavender
-        /// White fill with ink border ("Continue with Google").
+        /// An ink outline ("Continue with Google").
         case outline
-        /// White fill with a light border (secondary sign-in methods).
+        /// A grey outline (secondary sign-in methods).
         case subtle
     }
 
@@ -26,50 +83,45 @@ public struct PillButtonStyle: ButtonStyle {
 
     public func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.ui(19, .medium, relativeTo: .headline))
+            .font(.murmur(.headline))
             .foregroundStyle(foreground)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
             .frame(maxWidth: .infinity, minHeight: height)
-            .background(background, in: .rect(cornerRadius: Metrics.buttonRadius))
+            .background(background, in: .capsule)
             .overlay {
-                // Centered on the edge, like the references: the border adds a point outside.
                 if let border {
-                    RoundedRectangle(cornerRadius: Metrics.buttonRadius)
-                        .stroke(border, lineWidth: Metrics.borderWidth)
+                    Capsule().strokeBorder(border, lineWidth: Metrics.borderWidth)
                 }
             }
-            .contentShape(.rect(cornerRadius: Metrics.buttonRadius))
-            .opacity(configuration.isPressed ? 0.8 : 1)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .contentShape(.capsule)
+            .opacity(configuration.isPressed ? 0.75 : 1)
             .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 
     private var border: Color? {
         guard isEnabled else { return nil }
         return switch variant {
-        case .ink: nil
-        case .cream, .lavender, .outline: Palette.ink
-        case .subtle: Palette.muted
+        case .ink, .cream, .lavender: nil
+        case .outline: Theme.ink
+        case .subtle: Theme.graphic
         }
     }
 
     private var background: Color {
-        guard isEnabled else { return Palette.disabled }
+        guard isEnabled else { return Theme.fill }
         return switch variant {
-        case .ink: Palette.ink
-        case .cream: Palette.cream
-        case .lavender: Palette.lavender
-        case .outline, .subtle: Palette.paper
+        case .ink, .lavender: Theme.ink
+        case .cream, .outline, .subtle: Theme.canvas
         }
     }
 
     private var foreground: Color {
-        guard isEnabled else { return .white }
+        guard isEnabled else { return Theme.third }
         return switch variant {
-        case .ink: .white
-        case .subtle: Palette.textSecondary
-        default: Palette.ink
+        case .ink, .lavender: Theme.onInk
+        case .cream, .outline: Theme.ink
+        case .subtle: Theme.second
         }
     }
 }
@@ -80,7 +132,7 @@ extension ButtonStyle where Self == PillButtonStyle {
     }
 }
 
-/// A plain text button under the primary one ("Maybe later", "Another time", "More options").
+/// A plain text button under the primary one ("Not now", "More options").
 public struct QuietButtonStyle: ButtonStyle {
     let size: CGFloat
     let weight: UIWeight
@@ -93,7 +145,7 @@ public struct QuietButtonStyle: ButtonStyle {
     public func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.ui(size, weight))
-            .foregroundStyle(Palette.ink)
+            .foregroundStyle(Theme.ink)
             .padding(.vertical, 8)
             .contentShape(.rect)
             .opacity(configuration.isPressed ? 0.5 : 1)

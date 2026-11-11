@@ -66,6 +66,27 @@ struct DeepLinkTests {
         #expect(LaunchOptions(arguments: ["Murmur"]).accountSheet == nil)
     }
 
+    /// Screenshot runs pin the session's phase, so Home shows each state without a microphone
+    /// (DEBUG builds only).
+    @Test func parsesSessionFixtures() {
+        func fixture(_ name: String) -> SessionController.Phase? {
+            LaunchOptions(arguments: ["Murmur", "-route", "home", "-session-fixture", name]).sessionFixture
+        }
+        #expect(fixture("off") == .off)
+        #expect(fixture("starting") == .starting)
+        #expect(fixture("on") == .ready)
+        #expect(fixture("reconnect") == .needsReconnect)
+        if case .recording = fixture("listening") {} else { Issue.record("listening should pin a recording") }
+        if case .processing = fixture("writing") {} else { Issue.record("writing should pin processing") }
+        if case .failed(let message) = fixture("failed") {
+            #expect(!message.isEmpty)
+        } else {
+            Issue.record("failed should pin a failure")
+        }
+        #expect(fixture("nope") == nil)
+        #expect(LaunchOptions(arguments: ["Murmur"]).sessionFixture == nil)
+    }
+
     @Test @MainActor func initialPathOpensNestedScreens() {
         #expect(Router.initialPath(for: .languages) == [.settings, .debug, .languages])
         #expect(Router.initialPath(for: .debug) == [.settings, .debug])

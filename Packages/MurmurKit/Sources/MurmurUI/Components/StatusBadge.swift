@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// Small capsule label for a transcript's state ("Not cleaned", "Pending").
+/// Small capsule label for a transcript's state ("Not cleaned", "Pending"): an ink outline, or
+/// solid ink for a failure. Never red, which is kept for an open microphone.
 public struct StatusBadge: View {
     public enum Tone: Sendable {
         case neutral, accent, danger, success
@@ -16,29 +17,14 @@ public struct StatusBadge: View {
 
     public var body: some View {
         Text(verbatim: text)
-            .font(.ui(11, .semibold, relativeTo: .caption2))
-            .foregroundStyle(foreground)
+            .font(.murmur(.caption, weight: .semibold))
+            .foregroundStyle(tone == .danger ? Theme.onInk : Theme.ink)
             .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(background, in: .capsule)
+            .padding(.vertical, 2)
+            .background(tone == .danger ? Theme.ink : .clear, in: .capsule)
+            .overlay {
+                Capsule().strokeBorder(Theme.ink, lineWidth: 1.5)
+            }
             .lineLimit(1)
-    }
-
-    private var foreground: Color {
-        switch tone {
-        case .neutral: Palette.textSecondary
-        case .accent: Palette.ink
-        case .danger: .white
-        case .success: Palette.teal
-        }
-    }
-
-    private var background: Color {
-        switch tone {
-        case .neutral: Palette.tabSelected
-        case .accent: Palette.accent.opacity(0.35)
-        case .danger: Palette.danger
-        case .success: Palette.toggleGreenSoft
-        }
     }
 }

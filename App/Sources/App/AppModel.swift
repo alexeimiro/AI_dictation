@@ -139,6 +139,9 @@ final class AppModel {
             launchOptions: launchOptions,
             legacyInstall: !history.isEmpty || transport.payloads.readKeyboardStatus() != nil)
         LiveActivityActions.session = session
+        #if DEBUG
+        if let phase = launchOptions.sessionFixture { session.pinForScreenshots(phase) }
+        #endif
         settings.onRetentionChange = { [weak self] in self?.history.applyRetention() }
         onboarding.onComplete = { [weak self] record in self?.onboardingDidComplete(record) }
         if !launchOptions.usesOnboardingFixtures {
@@ -683,6 +686,10 @@ enum LaunchRoute: String {
 /// The keyboard (screenshots, DEBUG builds only): `-keyboard-demo <state>[@<layout>]` makes the
 /// keyboard show that state instead of the live one (`KeyboardDemo`); a launch without it ends
 /// the demo.
+///
+/// The session (screenshots, DEBUG builds only): `-session-fixture
+/// off|starting|on|listening|writing|failed|reconnect` pins its phase without a microphone, so
+/// Home can be shot in every state.
 struct LaunchOptions: Equatable {
     var route: LaunchRoute?
     var useFixtures = false
@@ -694,6 +701,7 @@ struct LaunchOptions: Equatable {
     var accountState: AccountModel.State?
     var accountSheet: SignInAgainView.Start?
     var keyboardDemo: KeyboardDemo?
+    var sessionFixture: SessionController.Phase?
 
     init(arguments: [String]) {
         route = LaunchRoute(arguments: arguments)
@@ -710,6 +718,7 @@ struct LaunchOptions: Equatable {
                 ?? .options
         }
         keyboardDemo = Self.value(after: "-keyboard-demo", in: arguments).flatMap(KeyboardDemo.init)
+        sessionFixture = Self.value(after: "-session-fixture", in: arguments).flatMap(SessionController.Phase.init(fixture:))
         #endif
     }
 
