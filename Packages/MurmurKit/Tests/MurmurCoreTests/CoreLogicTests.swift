@@ -452,6 +452,23 @@ struct SharedSettingsTests {
         #expect(SharedSettings(defaults: defaults).keyboardAppearance == .automatic)
     }
 
+    /// The keyboard shows a notice as a title and a line.
+    @Test func keyboardNoticeSplitsIntoATitleAndALine() {
+        let heard = KeyboardNotice.parts(of: "We didn't catch anything. Try again a little closer.")
+        #expect(heard.title == "We didn't catch anything")
+        #expect(heard.detail == "Try again a little closer.")
+        let limit = KeyboardNotice.parts(of: Brand.limitReachedMessage)
+        #expect(limit.title == "Dictation limit reached")
+        #expect(limit.detail == "Get unlimited access in Murmur.")
+        let question = KeyboardNotice.parts(of: "Still there? Tap the mic to go on.")
+        #expect(question.title == "Still there?")
+        #expect(question.detail == "Tap the mic to go on.")
+        // One sentence stays whole, with or without its full stop.
+        #expect(KeyboardNotice.parts(of: "No internet connection.").title == "No internet connection.")
+        #expect(KeyboardNotice.parts(of: "No internet connection.").detail == nil)
+        #expect(KeyboardNotice.parts(of: "  Murmur 1.0 is ready  ").title == "Murmur 1.0 is ready")
+    }
+
     @Test func keyboardDemoRoundTripsAndLapses() throws {
         let suite = "test.murmur.settings.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -461,6 +478,7 @@ struct SharedSettingsTests {
         #expect(KeyboardDemo("style")?.layout == nil)
         #expect(KeyboardDemo("menu@voice") == KeyboardDemo(state: .menu, layout: .voice))
         #expect(KeyboardDemo("off")?.state == .off)
+        #expect(KeyboardDemo("limit@numbers") == KeyboardDemo(state: .limit, layout: .numbers))
         #expect(KeyboardDemo("settings") == nil)
         #expect(KeyboardDemo("listening@dvorak") == nil)
         #expect(KeyboardDemo("dancing") == nil)

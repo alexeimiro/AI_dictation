@@ -41,7 +41,8 @@ public enum EchoRings {
 }
 
 /// Draws the echo rings around a talk button `diameter` wide. It redraws when `levels` changes and
-/// has no clock of its own.
+/// has no clock of its own. Under Reduce Motion the rings keep their place; under Increase
+/// Contrast they are heavier and more solid.
 public struct EchoRingsView: View {
     let levels: [Double]
     let diameter: CGFloat
@@ -58,13 +59,14 @@ public struct EchoRingsView: View {
     public var body: some View {
         let rings = EchoRings.rings(levels: levels, reduceMotion: reduceMotion)
         let lineWidth: CGFloat = contrast == .increased ? 3 : 2
-        Canvas { context, size in
-            let center = CGPoint(x: size.width / 2, y: size.height / 2)
-            for ring in rings {
-                let side = diameter * ring.scale
-                let rect = CGRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side)
-                let opacity = contrast == .increased ? min(1, ring.opacity * 1.5) : ring.opacity
-                context.stroke(Path(ellipseIn: rect), with: .color(color.opacity(opacity)), lineWidth: lineWidth)
+        // Shapes, not a Canvas: where the appearance is overridden, as in the keyboard, a Canvas
+        // draws a colour that follows the appearance in its light value.
+        ZStack {
+            ForEach(rings.indices, id: \.self) { index in
+                Circle()
+                    .stroke(color, lineWidth: lineWidth)
+                    .frame(width: diameter * rings[index].scale, height: diameter * rings[index].scale)
+                    .opacity(contrast == .increased ? min(1, rings[index].opacity * 1.5) : rings[index].opacity)
             }
         }
         .frame(width: diameter * EchoRings.maxScale + lineWidth, height: diameter * EchoRings.maxScale + lineWidth)

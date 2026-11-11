@@ -53,13 +53,28 @@ public struct BrandMark: View {
     }
 
     public var body: some View {
-        Canvas { context, size in
-            let rect = CGRect(origin: .zero, size: size)
-            let geometry = MarkGeometry.ring(in: rect)
-            context.stroke(Path(ellipseIn: geometry.rect), with: .color(ring), lineWidth: geometry.lineWidth)
-            context.fill(Path(ellipseIn: MarkGeometry.dot(in: rect)), with: .color(dot))
+        // Shapes, not a Canvas: where the appearance is overridden, as in the keyboard, a Canvas
+        // draws a colour that follows the appearance in its light value.
+        ZStack {
+            MarkRingShape().fill(ring)
+            MarkDotShape().fill(dot)
         }
         .accessibilityHidden(true)
+    }
+}
+
+/// The mark's ring alone, as a filled outline.
+struct MarkRingShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let ring = MarkGeometry.ring(in: rect)
+        return Path(ellipseIn: ring.rect).strokedPath(StrokeStyle(lineWidth: ring.lineWidth))
+    }
+}
+
+/// The mark's dot alone.
+struct MarkDotShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        Path(ellipseIn: MarkGeometry.dot(in: rect))
     }
 }
 
@@ -86,5 +101,22 @@ public struct Wordmark: View {
         .fixedSize()
         .accessibilityElement()
         .accessibilityLabel("Murmur")
+    }
+}
+
+/// The menu button's glyph: two lines, the lower one shorter. Stroke it.
+public struct MenuGlyph: Shape {
+    public init() {}
+
+    public func path(in rect: CGRect) -> Path {
+        // On a 24-unit grid: the lines sit at y 9 and 15, from x 4 to 20 and from 4 to 14.
+        let unit = min(rect.width, rect.height) / 24
+        let left = rect.midX - 8 * unit
+        var path = Path()
+        path.move(to: CGPoint(x: left, y: rect.midY - 3 * unit))
+        path.addLine(to: CGPoint(x: left + 16 * unit, y: rect.midY - 3 * unit))
+        path.move(to: CGPoint(x: left, y: rect.midY + 3 * unit))
+        path.addLine(to: CGPoint(x: left + 10 * unit, y: rect.midY + 3 * unit))
+        return path
     }
 }

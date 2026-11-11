@@ -2,7 +2,7 @@ import MurmurCore
 import Observation
 import SwiftUI
 
-/// A page that takes the place of the pad or the keys under the toolbar, as Wispr Flow's menu does.
+/// A page that takes the place of the pad or the keys under the toolbar.
 enum KeyboardOverlay {
     /// The writing styles, from the style pill.
     case style
@@ -64,7 +64,7 @@ final class KeyboardModel {
         var dismissPending: () -> Void = {}
         var dismissNotice: () -> Void = {}
         var openApp: () -> Void = {}
-        /// The limit message's way to "Get unlimited words" in Murmur.
+        /// The limit card's way to Murmur Pro's plans in the app.
         var openPro: () -> Void = {}
         var setStyle: (StylePreset) -> Void = { _ in }
         var setLanguage: (DictationLanguage?) -> Void = { _ in }
@@ -135,16 +135,16 @@ final class KeyboardModel {
             .uniqued(by: \DictationLanguage.languageCode)
     }
 
-    /// The first line under the dots while a dictation runs, Wispr's "Listening".
+    /// The first line under the talk button while a dictation runs.
     var captionTitle: String {
-        if isProcessing { return translationEnabled ? "Translating…" : "Transcribing…" }
+        if isProcessing { return translationEnabled ? "Translating…" : "Writing…" }
         return "Listening"
     }
 
-    /// The second line: where Wispr names the microphone, what this dictation will do. The options
-    /// are locked while it runs, so they are the ones it started with.
+    /// The second line: what this dictation will do. The options are locked while it runs, so
+    /// they are the ones it started with.
     var captionDetail: String {
-        if isProcessing, announcesReady { return "We'll tap when it's ready" }
+        if isProcessing, announcesReady { return "You’ll feel a tap when it’s ready" }
         guard translationEnabled else { return style.title }
         if effectiveLanguage.isAutomatic { return "Into \(targetLanguage.localizedName)" }
         return "\(effectiveLanguage.localizedName) → \(targetLanguage.localizedName)"

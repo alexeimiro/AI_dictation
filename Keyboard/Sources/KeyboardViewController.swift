@@ -54,8 +54,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     private lazy var haptics = UIImpactFeedbackGenerator(style: .light, view: view)
     private lazy var readyHaptics = UINotificationFeedbackGenerator(view: view)
 
-    /// Wispr Flow's 278 pt for every layout and state: a 66 pt toolbar (46 pt controls 12 pt from
-    /// the top) over four 53 pt rows of keys. Landscape keeps the shorter toolbar.
+    /// 278 pt for every layout and state: a 66 pt toolbar (46 pt controls 12 pt from the top)
+    /// over four 53 pt rows of keys. Landscape keeps the shorter toolbar.
     private static let keyboardHeight: CGFloat = 278
     private static let compactKeyboardHeight: CGFloat = 272
     private static let toolbarHeight: CGFloat = 66
@@ -111,9 +111,6 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         updateAutoShift()
         reloadKeys()
         client?.activate()
-        #if DEBUG
-        applyDemo()
-        #endif
         startMemoryReadout()
     }
 
@@ -121,6 +118,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         updateKeyboardAppearance()
+        #if DEBUG
+        // Here, not in `viewWillAppear`: a page opened before the views are on screen can be
+        // missed by the toolbar, which then keeps showing the menu button.
+        applyDemo()
+        #endif
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -183,9 +185,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
 
     private func buildViews() {
         guard let view else { return }
-        // Like Wispr Flow's, the keyboard draws no backdrop of its own: the system's rounded panel
-        // shows through (`updateKeyboardAppearance`), and the barely-there fill keeps taps between
-        // the keys.
+        // The keyboard draws no backdrop of its own: the system's rounded panel shows through
+        // (`updateKeyboardAppearance`), and the barely-there fill keeps taps between the keys.
         view.backgroundColor = Self.touchFill
         let toolbar = embed(KeyboardToolbar(model: model), in: view)
         let panel = embed(ListeningPanel(model: model), in: view)
@@ -304,8 +305,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     }
 
     /// The keys, the voice pad or the listening panel, whichever fits the plane and the phase, or
-    /// none under an open page. As in Wispr Flow, a dictation hides the keys: the key layouts show
-    /// the listening panel, and the pad grows over its row of keys to show its own.
+    /// none under an open page. A dictation hides the keys: the key layouts show the listening
+    /// panel, and the pad grows over its row of keys to show its own.
     private func updateKeyAreas() {
         let capturing = model.isCapturing
         let onPad = plane == .voice
@@ -408,7 +409,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             moveCursor: { [weak self] offset in self?.moveCursor(offset) })
     }
 
-    /// A page takes the place of the pad or the keys, which hide at once, as Wispr's menu does.
+    /// A page takes the place of the pad or the keys, which hide at once.
     private func showOverlay(_ overlay: KeyboardOverlay) {
         if overlay == .menu {
             model.addedToDictionary = nil
@@ -606,7 +607,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             updateAutoShift()
             reloadKeys()
         case .abc:
-            // Wispr Flow's ABC: the next keyboard types letters, unless these are wanted.
+            // ABC hands over to the next keyboard for letters, unless Murmur's own are wanted.
             if showsFullQwerty {
                 plane = .letters
                 updateAutoShift()
@@ -822,6 +823,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             model.undoableWords = 12
         case .notice:
             model.phase = .notice("We didn't catch anything. Try again a little closer.")
+        case .limit:
+            model.phase = .notice(Brand.limitReachedMessage)
         case .pending:
             model.phase = .idle
             model.pendingResult = DictationResult(

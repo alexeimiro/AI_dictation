@@ -195,10 +195,23 @@ final class SessionController {
     /// Set by `pinForScreenshots`: the app becoming active must not restart a pinned session.
     @ObservationIgnored private var isPinnedForScreenshots = false
 
-    /// Holds a phase for screenshots (`-session-fixture`); nothing is started.
+    /// Holds a phase for screenshots (`-session-fixture`). Nothing is started except the Live
+    /// Activity, for the phases that have one, so the Lock Screen and the Dynamic Island can be
+    /// shot too.
     func pinForScreenshots(_ phase: Phase) {
         self.phase = phase
         isPinnedForScreenshots = true
+        let shown: SessionActivityAttributes.ContentState.Phase? = switch phase {
+        case .ready: .ready
+        case .recording: .recording
+        case .processing: .processing
+        case .off, .starting, .needsReconnect, .failed: nil
+        }
+        guard let shown, settings.liveActivities else { return }
+        Task {
+            await liveActivity.start()
+            liveActivity.update(shown, since: shown == .recording ? Date().addingTimeInterval(-12) : nil)
+        }
     }
     #endif
 

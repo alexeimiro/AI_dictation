@@ -8,6 +8,8 @@ public struct KeyboardDemo: Equatable, Sendable {
         /// `idle` has a live session; `off` has none, so the key layouts show Start.
         case idle, off, translate, starting, opening, reconnect, listening, processing, inserted
         case notice, pending, fullAccess, style, menu
+        /// Basic's weekly words are used up.
+        case limit
     }
 
     public var state: State

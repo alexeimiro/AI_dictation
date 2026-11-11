@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Delete, the voice keyboard's toolbar key: a grey circle like Wispr's keys. One character on
-/// touch, repeating while held (`KeyRepeater`); a swipe left takes the whole word.
+/// Delete, the voice keyboard's toolbar key: a bare glyph that fades while it is held. One
+/// character on touch, repeating while held (`KeyRepeater`); a swipe left takes the whole word.
 struct DeleteKey: View {
     let model: KeyboardModel
     var size: CGFloat = 46
@@ -10,11 +10,11 @@ struct DeleteKey: View {
 
     var body: some View {
         Image(systemName: "delete.left")
-            .font(.system(size: 19))
-            .foregroundStyle(.primary)
+            .font(.system(size: 20))
+            .foregroundStyle(KeyboardChrome.primary)
+            .opacity(pressed ? 0.5 : 1)
             .frame(width: size, height: size)
-            .background { KeyboardSurface(shape: Circle(), pressed: pressed) }
-            .contentShape(.circle)
+            .contentShape(.rect)
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in

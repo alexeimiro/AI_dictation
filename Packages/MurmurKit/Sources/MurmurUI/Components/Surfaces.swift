@@ -167,23 +167,6 @@ public struct LiveDot: View {
     }
 }
 
-/// The menu button's glyph: two lines, the lower one shorter. Stroke it.
-public struct MenuGlyph: Shape {
-    public init() {}
-
-    public func path(in rect: CGRect) -> Path {
-        // On a 24-unit grid: the lines sit at y 9 and 15, from x 4 to 20 and from 4 to 14.
-        let unit = min(rect.width, rect.height) / 24
-        let left = rect.midX - 8 * unit
-        var path = Path()
-        path.move(to: CGPoint(x: left, y: rect.midY - 3 * unit))
-        path.addLine(to: CGPoint(x: left + 16 * unit, y: rect.midY - 3 * unit))
-        path.move(to: CGPoint(x: left, y: rect.midY + 3 * unit))
-        path.addLine(to: CGPoint(x: left + 10 * unit, y: rect.midY + 3 * unit))
-        return path
-    }
-}
-
 /// A notice on a soft card: a title, a line under it and its actions. `isAlert` adds the warning
 /// mark, in ink like the rest.
 public struct NoticeCard<Actions: View>: View {

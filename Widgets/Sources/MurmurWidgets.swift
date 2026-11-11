@@ -1,5 +1,6 @@
 import ActivityKit
 import AppIntents
+import MurmurBrand
 import SwiftUI
 import WidgetKit
 
@@ -36,29 +37,48 @@ struct SessionLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: SessionActivityAttributes.self) { context in
             LockScreenSessionView(state: context.state)
-                .activityBackgroundTint(Color(red: 0.18, green: 0.165, blue: 0.204))
+                .activityBackgroundTint(ActivityColor.surface)
                 .activitySystemActionForegroundColor(.white)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    MarkView()
-                        .frame(width: 26, height: 22)
+                    ActivityMark()
+                        .frame(width: 28, height: 28)
                         .padding(.leading, 6)
                 }
                 DynamicIslandExpandedRegion(.center) {
-                    StatusText(state: context.state)
+                    StatusText(state: context.state, stacked: true)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    SessionButtons(state: context.state, compact: true)
+                    SessionButtons(state: context.state)
                 }
             } compactLeading: {
-                MarkView().frame(width: 18, height: 15)
+                ActivityMark().frame(width: 18, height: 18)
             } compactTrailing: {
-                StatusDot(phase: context.state.phase)
+                CompactStatus(state: context.state)
             } minimal: {
-                MarkView().frame(width: 16, height: 13)
+                ActivityMark().frame(width: 16, height: 16)
             }
         }
+    }
+}
+
+/// The Live Activity's surface is dark in light and dark mode alike, so its colours are fixed
+/// values of the brand tokens, not ones that follow the appearance.
+private enum ActivityColor {
+    static let surface = Color(rgb: BrandToken.activity.light)
+    static let label = Color.white
+    static let status = Color(rgb: BrandRGB(0xC9C9C9))
+    /// The microphone is open for as long as the activity shows.
+    static let live = Color(rgb: BrandToken.live.dark)
+    static let onLive = Color(rgb: BrandToken.onLive.dark)
+}
+
+/// Murmur's mark with a red dot: the microphone is open for as long as the activity shows.
+private struct ActivityMark: View {
+    var body: some View {
+        BrandMark(ring: ActivityColor.label, dot: ActivityColor.live)
+            .accessibilityHidden(true)
     }
 }
 
@@ -67,98 +87,111 @@ private struct LockScreenSessionView: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            MarkView()
-                .frame(width: 30, height: 26)
+            ActivityMark()
+                .frame(width: 30, height: 30)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Murmur")
                     .font(.headline)
-                    .foregroundStyle(.white)
-                StatusText(state: state)
+                    .foregroundStyle(ActivityColor.label)
+                StatusText(state: state, stacked: false)
             }
-            Spacer()
-            SessionButtons(state: state, compact: false)
+            Spacer(minLength: 8)
+            SessionButtons(state: state)
         }
-        .padding(16)
+        .padding(.leading, 18)
+        .padding(.trailing, 14)
+        .padding(.vertical, 16)
     }
 }
 
+/// What the session is doing, always in words: "Ready", "Listening" with the time in red, or
+/// "Writing…". The timer is the only thing that moves.
 private struct StatusText: View {
     let state: SessionActivityAttributes.ContentState
+    /// The expanded island puts the time under the word, the Lock Screen beside it.
+    let stacked: Bool
 
     var body: some View {
         switch state.phase {
         case .ready:
-            Text("on").foregroundStyle(.white.opacity(0.75))
+            Text("Ready").font(font).foregroundStyle(ActivityColor.status)
         case .recording:
-            if let start = state.recordingStartedAt {
-                HStack(spacing: 4) {
-                    Text("recording")
-                    Text(start, style: .timer).monospacedDigit()
+            let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                                 : AnyLayout(HStackLayout(spacing: 8))
+            layout {
+                Text("Listening")
+                    .font(font)
+                    .foregroundStyle(stacked ? ActivityColor.label : ActivityColor.status)
+                if let start = state.recordingStartedAt {
+                    Text(start, style: .timer)
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(ActivityColor.live)
                 }
-                .foregroundStyle(.red)
-            } else {
-                Text("recording").foregroundStyle(.red)
             }
         case .processing:
-            Text("processing…").foregroundStyle(.white.opacity(0.75))
+            Text("Writing…").font(font).foregroundStyle(ActivityColor.status)
         }
+    }
+
+    private var font: Font {
+        stacked ? .callout.weight(.semibold) : .subheadline
     }
 }
 
+/// The compact island's right side: the state in a word, or the time while it listens.
+private struct CompactStatus: View {
+    let state: SessionActivityAttributes.ContentState
+
+    var body: some View {
+        Group {
+            switch state.phase {
+            case .ready:
+                Text("Ready").foregroundStyle(ActivityColor.label)
+            case .recording:
+                if let start = state.recordingStartedAt {
+                    Text(start, style: .timer)
+                        .monospacedDigit()
+                        .foregroundStyle(ActivityColor.live)
+                        // A timer otherwise takes the island's whole width.
+                        .frame(maxWidth: 44)
+                        .accessibilityLabel("Listening")
+                } else {
+                    Text("Listening").foregroundStyle(ActivityColor.live)
+                }
+            case .processing:
+                Text("Writing…").foregroundStyle(ActivityColor.label)
+            }
+        }
+        .font(.footnote.weight(.semibold))
+    }
+}
+
+/// Stop while a dictation is heard (red: the microphone is listening to it), and Turn off.
 private struct SessionButtons: View {
     let state: SessionActivityAttributes.ContentState
-    let compact: Bool
 
     var body: some View {
         HStack(spacing: 8) {
             if state.phase == .recording {
                 Button(intent: StopDictationIntent()) {
-                    Label("Stop", systemImage: "stop.fill")
-                        .labelStyle(.iconOnly)
-                        .frame(width: 34, height: 34)
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(ActivityColor.onLive)
+                        .frame(width: 13, height: 13)
+                        .frame(width: 44, height: 44)
+                        .background(ActivityColor.live, in: .circle)
                 }
-                .tint(.red)
+                .accessibilityLabel("Stop")
             }
             Button(intent: EndSessionIntent()) {
-                Label("Turn off", systemImage: "power")
-                    .labelStyle(.iconOnly)
-                    .frame(width: 34, height: 34)
+                Image(systemName: "power")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(ActivityColor.label)
+                    .frame(width: 44, height: 44)
+                    .overlay { Circle().strokeBorder(ActivityColor.label, lineWidth: 1.5) }
             }
-            .tint(.white.opacity(0.25))
+            .accessibilityLabel("Turn off")
         }
-        .buttonStyle(.borderedProminent)
-        .buttonBorderShape(.circle)
-    }
-}
-
-private struct StatusDot: View {
-    let phase: SessionActivityAttributes.ContentState.Phase
-
-    var body: some View {
-        Circle()
-            .fill(phase == .recording ? Color.red : Color.green)
-            .frame(width: 8, height: 8)
-    }
-}
-
-/// Same geometry as `LogoMarkShape` in MurmurUI (kept local so the extension stays small).
-private struct MarkView: View {
-    var body: some View {
-        Canvas { context, size in
-            let heights: [CGFloat] = [0.48, 1.0, 0.7]
-            let unit = size.width / 8.2
-            let barWidth = unit * 1.3
-            let gap = unit * 0.9
-            for (index, height) in heights.enumerated() {
-                let rect = CGRect(x: CGFloat(index) * (barWidth + gap),
-                                  y: size.height * (1 - height) / 2,
-                                  width: barWidth, height: size.height * height)
-                context.fill(Path(roundedRect: rect, cornerRadius: barWidth / 2), with: .color(.white))
-            }
-            let dot = barWidth * 1.15
-            context.fill(Path(ellipseIn: CGRect(x: 3 * (barWidth + gap) + unit * 0.1,
-                                                y: size.height / 2 - dot / 2, width: dot, height: dot)),
-                         with: .color(.white))
-        }
+        .buttonStyle(.plain)
     }
 }

@@ -21,8 +21,8 @@ enum KeyAction: Equatable {
     case returnKey
     case shift
     case plane(KeyboardPlane)
-    /// ABC: the next keyboard for typing letters, as in Wispr Flow, or the keyboard's own letters
-    /// when "Show full QWERTY keyboard" is on.
+    /// ABC: the next keyboard for typing letters, or the keyboard's own letters when "Show full
+    /// QWERTY keyboard" is on.
     case abc
     case globe
 }
@@ -39,8 +39,8 @@ struct KeySpec {
     var systemImage: String?
     var weight: CGFloat = 1
     var style: KeyStyle = .character
-    /// Extra space beside the key's face inside its touch area, like the gaps that set #+= and
-    /// Delete apart from the punctuation in Wispr's keypad.
+    /// Extra space beside the key's face inside its touch area: the gaps that set #+= and Delete
+    /// apart from the punctuation.
     var leadingGap: CGFloat = 0
     var trailingGap: CGFloat = 0
 
@@ -49,10 +49,10 @@ struct KeySpec {
     }
 }
 
-/// Key rows for each plane, sized like Wispr Flow's keypad. The voice pad is the default; the
-/// numbers-first plane is Wispr's.
+/// Key rows for each plane. The voice pad is the default; without Full Access the keyboard opens
+/// on the numbers.
 enum KeyboardLayouts {
-    /// The space bar's label, as Wispr's reads "Wispr Flow".
+    /// The space bar's label.
     static let spaceTitle = "Murmur"
 
     /// `showsVoicePad` adds a key back to the pad, for the voice layout's full keys.
@@ -110,7 +110,7 @@ enum KeyboardLayouts {
     private static let deleteKey = KeySpec(action: .delete, systemImage: "delete.left", weight: 1.5,
                                            style: .function, leadingGap: 9)
 
-    /// Wispr's third keypad row: the plane key and Delete set apart from five wide punctuation keys.
+    /// The keypad's third row: the plane key and Delete set apart from five wide punctuation keys.
     private static func punctuationRow(planeKey: KeySpec) -> [KeySpec] {
         var planeKey = planeKey
         planeKey.weight = 1.5
@@ -120,7 +120,7 @@ enum KeyboardLayouts {
             + [deleteKey]
     }
 
-    /// Wispr's bottom row: ABC and return a quarter of the width each, space between. The voice
+    /// The bottom row: ABC and return a quarter of the width each, space between. The voice
     /// layout's key back to the pad and the globe (phones without the system's) take from them.
     private static func bottomRow(plane: KeyboardPlane, showsGlobe: Bool, showsVoicePad: Bool,
                                   returnTitle: String, languageCode: String) -> [KeySpec] {
@@ -145,8 +145,7 @@ enum KeyboardLayouts {
         return row
     }
 
-    /// The voice keyboard's typing row, Wispr's bottom row: ABC, space and return. Delete sits in
-    /// the toolbar.
+    /// The voice keyboard's typing row: ABC, space and return. Delete sits in the toolbar.
     private static func voiceRow(showsGlobe: Bool, returnTitle: String, languageCode: String) -> [KeySpec] {
         let side: CGFloat = showsGlobe ? 2.2 : 2.5
         var row = [KeySpec(action: .abc, label: lettersLabel(languageCode), weight: side, style: .function)]

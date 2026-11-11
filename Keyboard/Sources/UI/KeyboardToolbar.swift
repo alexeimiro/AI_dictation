@@ -1,10 +1,11 @@
+import MurmurBrand
 import MurmurCore
 import SwiftUI
 
-/// The row above the keys, laid out like Wispr Flow's: ☰ on the left and the main controls on the
-/// right, 46 pt tall and 12 pt in from the edges, with no divider. The voice keyboard keeps Delete
-/// there; the key layouts have the mic, or Start while no session runs. While a dictation runs a
-/// grey ✕ takes ☰'s place and the style pill dims; while a page is open a white ✕ closes it.
+/// The row above the keys: the menu on the left and the main controls on the right, 46 pt tall
+/// and 12 pt from the top, with no divider. The voice keyboard keeps Delete there; the key layouts
+/// have the mic, or Start while no session runs. While a dictation runs ✕ takes the menu's place
+/// and the style pill fades; while a page is open ✕ closes it.
 struct KeyboardToolbar: View {
     let model: KeyboardModel
 
@@ -17,35 +18,30 @@ struct KeyboardToolbar: View {
                 centre(metrics)
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 4)
             memoryReadout
             trailing(metrics)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 8)
         .padding(.top, metrics.top)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .foregroundStyle(.primary)
+        .foregroundStyle(KeyboardChrome.primary)
     }
 
     @ViewBuilder
     private func leading(_ metrics: BarMetrics) -> some View {
         if let overlay = model.overlay {
-            CircleButton(size: metrics.control, label: overlay == .menu ? "Close menu" : "Close styles",
-                         action: model.actions.hideOverlay) {
-                Image(systemName: "xmark")
-                    .font(.system(size: metrics.control * 0.36, weight: .medium))
+            BarGlyphButton(size: metrics.control, label: overlay == .menu ? "Close menu" : "Close styles",
+                           action: model.actions.hideOverlay) {
+                Image(systemName: "xmark").font(.system(size: 18, weight: .medium))
             }
         } else if model.isCapturing {
             CancelChip(model: model, size: metrics.control)
         } else {
-            Button { model.actions.showOverlay(.menu) } label: {
-                Image(systemName: "line.3.horizontal")
-                    .font(.system(size: 20))
-                    .frame(width: metrics.control, height: metrics.control)
-                    .contentShape(.rect)
+            BarGlyphButton(size: metrics.control, label: "Menu", action: { model.actions.showOverlay(.menu) }) {
+                MenuGlyph()
+                    .stroke(KeyboardChrome.primary, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                    .frame(width: 24, height: 24)
             }
-            .buttonStyle(.keyboardPress)
-            .accessibilityLabel("Menu")
         }
     }
 
@@ -59,11 +55,11 @@ struct KeyboardToolbar: View {
                 TranslateChip(model: model, height: metrics.control)
             }
         } else if let pending = model.pendingResult {
-            HStack(spacing: 4) {
+            HStack(spacing: 0) {
                 Button(action: model.actions.insertPending) {
                     ViewThatFits(in: .horizontal) {
-                        insertLabel("Insert last dictation", height: metrics.control)
-                        insertLabel("Insert", height: metrics.control)
+                        insertLabel("Insert last dictation", metrics: metrics)
+                        insertLabel("Insert", metrics: metrics)
                     }
                 }
                 .buttonStyle(.keyboardPress)
@@ -74,10 +70,11 @@ struct KeyboardToolbar: View {
         } else {
             switch model.phase {
             case .needsFullAccess:
-                banner(title: "Almost there!",
+                banner(title: "One switch left",
                        detail: "Turn on Allow Full Access in Settings › Murmur › Keyboards",
                        dismiss: model.actions.dismissNotice)
             case .notice(let message):
+                // Whole, on two lines: beside the pill and the mic a title would be cut short.
                 banner(title: nil, detail: message, dismiss: model.actions.dismissNotice)
             case .needsReconnect:
                 caption("Tap Start to reconnect")
@@ -97,14 +94,14 @@ struct KeyboardToolbar: View {
     private func trailing(_ metrics: BarMetrics) -> some View {
         switch model.overlay {
         case .menu:
-            HStack(spacing: 4) {
-                CircleButton(size: metrics.control, label: "Letters", action: model.actions.showLetters) {
-                    Text("ABC")
-                        .font(.system(size: 15, weight: .medium))
+            HStack(spacing: 0) {
+                OutlinedDisc(size: metrics.disc, target: metrics.control, label: "Letters",
+                             action: model.actions.showLetters) {
+                    Text("ABC").font(.system(size: 12, weight: .bold))
                 }
-                CircleButton(size: metrics.control, label: "Murmur settings", action: model.actions.openApp) {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: metrics.control * 0.42))
+                OutlinedDisc(size: metrics.disc, target: metrics.control, label: "Murmur settings",
+                             action: model.actions.openApp) {
+                    Image(systemName: "slider.horizontal.3").font(.system(size: 16, weight: .medium))
                 }
                 .disabled(!model.hasFullAccess)
                 .opacity(model.hasFullAccess ? 1 : 0.4)
@@ -113,19 +110,21 @@ struct KeyboardToolbar: View {
             StylePill(model: model, height: metrics.control)
         case nil:
             if model.showsVoicePad {
-                HStack(spacing: 4) {
+                HStack(spacing: 0) {
                     StylePill(model: model, height: metrics.control)
                     if !model.isCapturing {
                         DeleteKey(model: model, size: metrics.control)
                     }
                 }
             } else if model.isSessionLive || model.isCapturing || model.isTransitioning {
-                HStack(spacing: 4) {
+                HStack(spacing: 0) {
                     StylePill(model: model, height: metrics.control)
-                    MicButton(model: model, size: metrics.control)
+                    MicButton(model: model, size: metrics.disc)
+                        .frame(width: metrics.control, height: metrics.control)
                 }
             } else {
-                StartPill(model: model, height: metrics.control)
+                StartPill(model: model, height: metrics.disc)
+                    .frame(height: metrics.control)
             }
         }
     }
@@ -139,15 +138,19 @@ struct KeyboardToolbar: View {
         }
     }
 
-    private func insertLabel(_ title: String, height: CGFloat) -> some View {
+    /// The waiting dictation on the key layouts: a key-coloured capsule in the bar.
+    private func insertLabel(_ title: String, metrics: BarMetrics) -> some View {
         Label(title, systemImage: "arrow.uturn.down")
             .font(.system(size: 15, weight: .semibold))
             .lineLimit(1)
             .fixedSize()
-            .padding(.horizontal, 14)
-            .frame(height: height)
-            .background { KeyboardSurface(shape: Capsule()) }
-            .contentShape(.capsule)
+            .padding(.leading, 12)
+            .padding(.trailing, 16)
+            .frame(height: metrics.disc)
+            .background { KeyboardSurface(shape: Capsule(style: .circular)) }
+            .frame(height: metrics.control)
+            .padding(.horizontal, 2)
+            .contentShape(.rect)
     }
 
     private func caption(_ text: String) -> some View {
@@ -155,10 +158,11 @@ struct KeyboardToolbar: View {
             .font(.system(size: 14, weight: .medium))
             .foregroundStyle(KeyboardChrome.muted)
             .lineLimit(1)
+            .padding(.leading, 4)
     }
 
     private func banner(title: String?, detail: String, dismiss: @escaping () -> Void) -> some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 1) {
                 if let title {
                     Text(title).font(.system(size: 13, weight: .semibold))
@@ -169,6 +173,8 @@ struct KeyboardToolbar: View {
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
             }
+            .padding(.leading, 4)
+            .accessibilityElement(children: .combine)
             dismissButton(dismiss)
         }
     }
@@ -176,9 +182,7 @@ struct KeyboardToolbar: View {
     private func dismissButton(_ dismiss: @escaping () -> Void) -> some View {
         Button(action: dismiss) {
             Image(systemName: "xmark")
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 30, height: 30)
-                .background { KeyboardSurface(shape: Circle()) }
+                .font(.system(size: 13, weight: .semibold))
                 .frame(width: 44, height: 44)
                 .contentShape(.rect)
         }
@@ -187,53 +191,69 @@ struct KeyboardToolbar: View {
     }
 }
 
-/// A white (light: ink) circle in the toolbar, like Wispr's mic, ✕, ABC and ⚙.
-private struct CircleButton<Content: View>: View {
+/// A bare glyph in the bar: the menu, ✕.
+struct BarGlyphButton<Content: View>: View {
     let size: CGFloat
     let label: String
     let action: () -> Void
-    let content: Content
-
-    init(size: CGFloat, label: String, action: @escaping () -> Void, @ViewBuilder content: () -> Content) {
-        self.size = size
-        self.label = label
-        self.action = action
-        self.content = content()
-    }
+    @ViewBuilder let content: Content
 
     var body: some View {
         Button(action: action) {
             content
-                .foregroundStyle(KeyboardChrome.primaryGlyph)
+                .foregroundStyle(KeyboardChrome.primary)
                 .frame(width: size, height: size)
-                .background(KeyboardChrome.primary, in: .circle)
-                .contentShape(.circle)
+                .contentShape(.rect)
         }
         .buttonStyle(.keyboardPress)
         .accessibilityLabel(label)
     }
 }
 
-/// Wispr's "Start" capsule for the key layouts while no session runs: it opens Murmur, which starts
-/// one and listens straight away.
+/// An outlined disc in the menu page's bar: ABC and Murmur's Settings.
+private struct OutlinedDisc<Content: View>: View {
+    let size: CGFloat
+    /// The touch target around the disc.
+    let target: CGFloat
+    let label: String
+    let action: () -> Void
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        Button(action: action) {
+            content
+                .foregroundStyle(KeyboardChrome.primary)
+                .frame(width: size, height: size)
+                .overlay { Circle().strokeBorder(KeyboardChrome.primary, lineWidth: 1.5) }
+                .frame(width: target, height: target)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.keyboardPress)
+        .accessibilityLabel(label)
+    }
+}
+
+/// "Start" on the key layouts while no session runs: it opens Murmur, which starts one and listens
+/// straight away.
 private struct StartPill: View {
     let model: KeyboardModel
     var height: CGFloat
 
     var body: some View {
         Button(action: model.actions.mic) {
-            HStack(spacing: 13) {
+            HStack(spacing: 8) {
+                BrandMark(ring: KeyboardChrome.primaryGlyph)
+                    .frame(width: 18, height: 18)
                 Text("Start")
-                    .font(.system(size: 17, weight: .medium))
-                LogoMarkShape()
-                    .fill(KeyboardChrome.primaryGlyph)
-                    .frame(width: 20, height: 19)
+                    .font(.system(size: 15, weight: .semibold))
             }
             .foregroundStyle(KeyboardChrome.primaryGlyph)
-            .padding(.horizontal, 17)
+            .padding(.leading, 12)
+            .padding(.trailing, 16)
             .frame(height: height)
-            .background(KeyboardChrome.primary, in: .capsule)
-            .contentShape(.capsule)
+            .background(KeyboardChrome.primary, in: Capsule(style: .circular))
+            .padding(.horizontal, 2)
+            .contentShape(.rect)
         }
         .buttonStyle(.keyboardPress)
         .accessibilityLabel("Start Murmur")
@@ -242,39 +262,23 @@ private struct StartPill: View {
     }
 }
 
-/// Murmur's mark, three bars and a dot, as `LogoMarkShape` in MurmurUI draws it. The keyboard
-/// links only MurmurCore, so it keeps its own copy for the Start capsule.
-private struct LogoMarkShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let barHeights: [CGFloat] = [0.48, 1.0, 0.7]
-        let unit = rect.width / 8.2
-        let barWidth = unit * 1.3
-        let gap = unit * 0.9
-        var path = Path()
-        for (index, height) in barHeights.enumerated() {
-            let barRect = CGRect(x: rect.minX + CGFloat(index) * (barWidth + gap),
-                                 y: rect.midY - rect.height * height / 2,
-                                 width: barWidth, height: rect.height * height)
-            path.addRoundedRect(in: barRect, cornerSize: CGSize(width: barWidth / 2, height: barWidth / 2))
-        }
-        let dotSize = barWidth * 1.15
-        let dotX = rect.minX + 3 * (barWidth + gap) + unit * 0.1
-        path.addEllipse(in: CGRect(x: dotX, y: rect.midY - dotSize / 2, width: dotSize, height: dotSize))
-        return path
-    }
-}
-
-/// Replaces the key layouts' keys while a dictation runs, Wispr's listening panel: the dots and two
-/// lines. The toolbar holds ✕ and ✓.
+/// Replaces the key layouts' keys while a dictation runs: the red dot with its rings while it
+/// listens, and two lines. The toolbar holds ✕ and ✓.
 struct ListeningPanel: View {
     let model: KeyboardModel
 
     var body: some View {
-        VStack(spacing: 18) {
-            DotsWaveform(model: model, height: 28)
+        VStack(spacing: 30) {
+            if model.listeningSince != nil {
+                Circle()
+                    .fill(KeyboardChrome.live)
+                    .frame(width: 24, height: 24)
+                    .background { LevelRings(model: model, diameter: 24) }
+                    .accessibilityHidden(true)
+            }
             ListeningCaption(model: model)
         }
-        .foregroundStyle(.primary)
+        .foregroundStyle(KeyboardChrome.primary)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

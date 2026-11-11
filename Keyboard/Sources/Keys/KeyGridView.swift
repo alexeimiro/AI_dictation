@@ -12,7 +12,7 @@ final class KeyButton: UIControl {
         super.init(frame: .zero)
         isExclusiveTouch = true
         background.isUserInteractionEnabled = false
-        background.layer.cornerRadius = 8.5
+        background.layer.cornerRadius = 7
         background.layer.cornerCurve = .continuous
         addSubview(background)
 
@@ -32,7 +32,7 @@ final class KeyButton: UIControl {
         if let label = spec.label {
             titleLabel.text = label
             let isCharacter = spec.style == .character && label.count == 1
-            titleLabel.font = .systemFont(ofSize: isCharacter ? 24 : 17, weight: .regular)
+            titleLabel.font = .systemFont(ofSize: isCharacter ? 22 : 16, weight: .regular)
         }
         if let systemImage = spec.systemImage {
             iconView.image = UIImage(systemName: systemImage,
@@ -62,7 +62,7 @@ final class KeyButton: UIControl {
         }
     }
 
-    /// Wispr's key face: 43 pt tall in a 53 pt row, 3 pt in from the sides plus the spec's gaps.
+    /// The key's face: 43 pt tall in a 53 pt row, 3 pt in from the sides plus the spec's gaps.
     override func layoutSubviews() {
         super.layoutSubviews()
         var face = bounds.insetBy(dx: 3, dy: 5)
@@ -73,12 +73,17 @@ final class KeyButton: UIControl {
         iconView.frame = face
     }
 
-    /// Wispr's keys: every key the same flat grey (white in light), no shadow. Increase Contrast
-    /// adds a hairline.
+    /// Flat keys with no shadow: characters and space on the key colour, the keys that type no
+    /// character (Shift, Delete, ABC, return) on their own darker one. A pressed key takes the
+    /// other's. The space bar's name is quieter than a key's label. Increase Contrast adds a
+    /// hairline.
     private func updateColors() {
-        background.backgroundColor = isHighlighted ? KeyboardChrome.pressedKeyUIColor : KeyboardChrome.keyUIColor
-        titleLabel.textColor = .label
-        iconView.tintColor = .label
+        let isFunction = spec.style != .character
+        let rest = isFunction ? KeyboardChrome.functionKeyUIColor : KeyboardChrome.keyUIColor
+        let pressed = isFunction ? KeyboardChrome.keyUIColor : KeyboardChrome.pressedKeyUIColor
+        background.backgroundColor = isHighlighted ? pressed : rest
+        titleLabel.textColor = spec.action == .space ? KeyboardChrome.mutedUIColor : KeyboardChrome.primaryUIColor
+        iconView.tintColor = KeyboardChrome.primaryUIColor
         background.layer.borderWidth = traitCollection.accessibilityContrast == .high ? 1 : 0
         background.layer.borderColor = KeyboardChrome.borderUIColor.resolvedColor(with: traitCollection).cgColor
     }
@@ -110,7 +115,7 @@ final class KeyGridView: UIView {
     weak var globeTarget: UIInputViewController?
 
     private var rows: [[KeyButton]] = []
-    /// Wispr's row pitch; rows share a shorter grid evenly.
+    /// The row pitch; rows share a shorter grid evenly.
     private let rowHeight: CGFloat = 54
     private var spaceTrackOrigin: CGPoint = .zero
     private var consumedSpaceTranslation: CGFloat = 0

@@ -1,21 +1,38 @@
+import MurmurBrand
 import MurmurCore
 import SwiftUI
 
-/// The talk button, after Wispr Flow's: a flat white (light: ink) disc with a mic, a ✓ that
-/// finishes the dictation while it listens, and a spinner while starting or transcribing. The voice
-/// pad shows it large; the key layouts' toolbar small. It never reads the mic level, so the 20 Hz
-/// level updates redraw only `DotsWaveform`.
+/// The talk button: an ink disc with a mic, red with ✓ while it listens (✓ finishes the
+/// dictation), and a spinner while starting or writing. The voice pad shows it large, with a ring
+/// around it at rest and the echo rings while it listens; the key layouts' toolbar shows it small.
+/// It never reads the mic level, so the 20 Hz level updates redraw only `LevelRings`.
 struct MicButton: View {
     let model: KeyboardModel
     var size: CGFloat
+    /// The voice pad's disc carries the rings; the toolbar's small one doesn't.
+    var showsRings = false
+    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         let listening = model.listeningSince != nil
         Button(action: listening ? model.actions.stop : model.actions.mic) {
             Circle()
-                .fill(KeyboardChrome.primary)
+                // Red only while the microphone is open for this dictation.
+                .fill(listening ? KeyboardChrome.live : KeyboardChrome.primary)
                 .frame(width: size, height: size)
                 .overlay { glyph }
+                .background {
+                    if showsRings {
+                        if listening {
+                            LevelRings(model: model, diameter: size)
+                        } else if !model.isTransitioning {
+                            Circle()
+                                .strokeBorder(KeyboardChrome.primary.opacity(contrast == .increased ? 0.6 : 0.28),
+                                              lineWidth: 1.5)
+                                .frame(width: size + 18, height: size + 18)
+                        }
+                    }
+                }
                 .contentShape(.circle)
         }
         .buttonStyle(.keyboardPress)
@@ -33,64 +50,52 @@ struct MicButton: View {
                 .controlSize(size > 50 ? .large : .regular)
         case .listening:
             Image(systemName: "checkmark")
-                .font(.system(size: size * 0.36, weight: .medium))
-                .foregroundStyle(KeyboardChrome.primaryGlyph)
+                .font(.system(size: size * 0.36, weight: .semibold))
+                .foregroundStyle(KeyboardChrome.liveGlyph)
                 .transition(.scale.combined(with: .opacity))
         default:
-            Image(systemName: "mic.fill")
-                .font(.system(size: size * 0.38))
+            Image(systemName: "mic")
+                .font(.system(size: size * 0.38, weight: .medium))
                 .foregroundStyle(KeyboardChrome.primaryGlyph)
                 .transition(.scale.combined(with: .opacity))
         }
     }
 }
 
-/// Wispr's listening dots: ten 5 pt dots that stretch with the voice. The level history is
-/// mirrored, so the newest level is in the middle and older ones move outwards; at rest, and while
-/// transcribing, they are round.
-struct DotsWaveform: View {
+/// The echo rings around the talk button, swelling with the voice. The only view that reads the
+/// mic level, and on screen only while a dictation listens. `EchoRingsView` keeps them still under
+/// Reduce Motion and makes them heavier under Increase Contrast.
+struct LevelRings: View {
     let model: KeyboardModel
-    var height: CGFloat
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private static let dots = 10
+    var diameter: CGFloat
 
     var body: some View {
-        let levels = model.levels
-        HStack(alignment: .center, spacing: 8) {
-            ForEach(0..<Self.dots, id: \.self) { index in
-                Capsule()
-                    .fill(.primary)
-                    .frame(width: 5, height: dotHeight(index, levels: levels))
-            }
-        }
-        .frame(height: height)
-        .animation(reduceMotion ? nil : .linear(duration: 0.08), value: levels)
-        .accessibilityHidden(true)
-    }
-
-    private func dotHeight(_ index: Int, levels: [Double]) -> CGFloat {
-        let middle = Self.dots / 2
-        let distance = index < middle ? middle - 1 - index : index - middle
-        let level = levels.isEmpty ? 0 : levels[max(0, levels.count - 1 - distance * 2)]
-        let floor: CGFloat = 5
-        // Levels rest at 0.06; quiet speech should still move the dots.
-        return floor + (height - floor) * CGFloat(min(1, max(0, (level - 0.06) * 1.6)))
+        EchoRingsView(levels: model.levels, diameter: diameter, color: KeyboardChrome.live)
     }
 }
 
-/// Wispr's two lines under the dots: "Listening" (or what the dictation waits for), then what it
-/// will do.
+/// The two lines while a dictation runs: "Listening" with the time (or what the dictation waits
+/// for), then what it will do.
 struct ListeningCaption: View {
     let model: KeyboardModel
 
     var body: some View {
         VStack(spacing: 2) {
-            Text(model.captionTitle)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(model.captionTitle)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(KeyboardChrome.primary)
+                if let since = model.listeningSince {
+                    Text(since, style: .timer)
+                        .font(.system(size: 15))
+                        .monospacedDigit()
+                        .foregroundStyle(KeyboardChrome.muted)
+                }
+            }
             Text(model.captionDetail)
+                .font(.system(size: 13))
+                .foregroundStyle(KeyboardChrome.muted)
         }
-        .font(.system(size: 17))
-        .foregroundStyle(.primary)
         .lineLimit(1)
         .minimumScaleFactor(0.8)
         .multilineTextAlignment(.center)
@@ -124,7 +129,7 @@ struct PadHint: View {
             Text("Tap to reconnect")
         default:
             if let words = model.undoableWords {
-                HStack(spacing: 10) {
+                HStack(spacing: 6) {
                     Text("Inserted \(words) \(words == 1 ? "word" : "words")")
                     UndoButton(model: model)
                 }
@@ -141,35 +146,24 @@ struct UndoButton: View {
 
     var body: some View {
         Button(action: model.actions.undo) {
-            Text("Undo")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 14)
-                .frame(height: 30)
-                .background { KeyboardSurface(shape: Capsule()) }
+            OutlineChip(height: 30) { Text("Undo") }
                 .frame(minHeight: 44)
+                .padding(.horizontal, 2)
                 .contentShape(.rect)
         }
         .buttonStyle(.keyboardPress)
     }
 }
 
-/// ✕ in ☰'s place while a dictation runs, Wispr's grey circle: throws the dictation away.
+/// ✕ in the menu's place while a dictation runs: throws the dictation away.
 struct CancelChip: View {
     let model: KeyboardModel
     var size: CGFloat = 46
 
     var body: some View {
-        Button(action: model.actions.cancel) {
-            Image(systemName: "xmark")
-                .font(.system(size: size * 0.36, weight: .medium))
-                .foregroundStyle(.white)
-                .frame(width: size, height: size)
-                .background(KeyboardChrome.secondary, in: .circle)
-                .contentShape(.circle)
+        BarGlyphButton(size: size, label: "Cancel transcription", action: model.actions.cancel) {
+            Image(systemName: "xmark").font(.system(size: 18, weight: .medium))
         }
-        .buttonStyle(.keyboardPress)
-        .accessibilityLabel("Cancel transcription")
         .transition(.opacity)
     }
 }

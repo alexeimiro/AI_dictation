@@ -1,8 +1,9 @@
+import MurmurBrand
 import MurmurCore
 import SwiftUI
 
-/// The style pill, Wispr Flow's: a white (light: ink) capsule with only the style's name. It dims
-/// while a dictation runs, whose style is already fixed, and opens the style page.
+/// The style pill: an outlined capsule with the style's name and ⌄. It fades while a dictation
+/// runs, whose style is already fixed, and opens the style page, where it turns solid.
 struct StylePill: View {
     let model: KeyboardModel
     var height: CGFloat = 46
@@ -13,33 +14,34 @@ struct StylePill: View {
         Button {
             open ? model.actions.hideOverlay() : model.actions.showOverlay(.style)
         } label: {
-            Text(model.style.shortTitle)
-                .font(.system(size: 17, weight: .medium))
-                .lineLimit(1)
-                .fixedSize()
-                .foregroundStyle(locked ? KeyboardChrome.disabledGlyph : KeyboardChrome.primaryGlyph)
-                .padding(.horizontal, 20)
-                .frame(height: height)
-                .background(locked ? KeyboardChrome.disabled : KeyboardChrome.primary, in: .capsule)
-                .contentShape(.capsule)
+            OutlineChip(filled: open) {
+                HStack(spacing: 3) {
+                    Text(model.style.shortTitle)
+                    Image(systemName: open ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 10, weight: .bold))
+                }
+            }
+            .frame(height: height)
+            .padding(.horizontal, 2)
+            .contentShape(.rect)
         }
         .buttonStyle(.keyboardPress)
         .disabled(locked)
+        .opacity(locked ? 0.4 : 1)
         .accessibilityLabel("Style: \(model.style.title)")
         .accessibilityHint("Shows the writing styles")
     }
 }
 
-/// The style page, in place of the pad or the keys: one row per style with its subtitle and a
-/// check on the current one. Picking a style sets the Default style and closes the page.
+/// The style page, in place of the pad or the keys: one row per style with its subtitle and the
+/// mark on the current one. Picking a style sets the Default style and closes the page.
 struct StylePage: View {
     let model: KeyboardModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("WRITING STYLE")
+            Text("Writing style")
                 .font(.system(size: 12, weight: .semibold))
-                .tracking(0.7)
                 .foregroundStyle(KeyboardChrome.muted)
                 .padding(.horizontal, 4)
                 .accessibilityAddTraits(.isHeader)
@@ -61,22 +63,19 @@ struct StylePage: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(style.title)
-                        .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(.primary)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(KeyboardChrome.primary)
                     Text(style.subtitle)
                         .font(.system(size: 13))
                         .foregroundStyle(KeyboardChrome.muted)
                 }
                 Spacer(minLength: 0)
-                if selected {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(KeyboardChrome.primaryGlyph)
-                        .frame(width: 26, height: 26)
-                        .background(KeyboardChrome.primary, in: .circle)
-                }
+                // The mark when it is chosen, an empty ring when it isn't.
+                BrandMark(ring: selected ? KeyboardChrome.primary : KeyboardChrome.muted,
+                          dot: selected ? KeyboardChrome.primary : .clear)
+                    .frame(width: 24, height: 24)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 14)
             .frame(minHeight: 64)
             .background { KeyboardSurface(shape: RoundedRectangle(cornerRadius: 14, style: .continuous),
                                           fill: KeyboardChrome.card) }

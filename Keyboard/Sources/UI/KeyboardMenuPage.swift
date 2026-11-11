@@ -1,8 +1,9 @@
 import MurmurCore
 import SwiftUI
 
-/// The ☰ page, in place of the pad or the keys as Wispr Flow's menu is: translation with recent
-/// targets, adding a word to the dictionary, then the keyboard's own settings. Its toolbar holds ✕, ABC and ⚙ (Murmur's Settings).
+/// The menu page, in place of the pad or the keys: translation with recent targets, adding a
+/// word to the dictionary, then the keyboard's own settings. Its toolbar holds ✕, ABC and the way
+/// to Murmur's Settings.
 /// Without Full Access the keyboard can neither write the settings nor open the app, so it says so
 /// and leaves them read-only.
 struct KeyboardMenuPage: View {
@@ -47,9 +48,8 @@ struct KeyboardMenuPage: View {
     }
 
     private func section(_ title: String) -> some View {
-        Text(title.uppercased())
+        Text(title)
             .font(.system(size: 12, weight: .semibold))
-            .tracking(0.7)
             .foregroundStyle(KeyboardChrome.muted)
             .padding(.horizontal, 4)
             .padding(.top, 12)
@@ -65,13 +65,17 @@ struct KeyboardMenuPage: View {
     }
 
     private func toggle(_ title: String, isOn: Bool, set: @escaping (Bool) -> Void) -> some View {
-        Toggle(isOn: Binding(get: { isOn }, set: set)) {
+        HStack {
             Text(title)
-                .font(.system(size: 15, weight: .medium))
+                .font(.system(size: 15))
+                .foregroundStyle(KeyboardChrome.primary)
+                .accessibilityHidden(true)
+            Spacer(minLength: 8)
+            KeyboardSwitch(label: title, isOn: Binding(get: { isOn }, set: set))
         }
-        .tint(KeyboardChrome.switchTint)
         .disabled(!model.hasFullAccess)
-        .padding(.horizontal, 14)
+        .padding(.leading, 14)
+        .padding(.trailing, 10)
         .frame(minHeight: 46)
     }
 
@@ -81,6 +85,7 @@ struct KeyboardMenuPage: View {
         HStack(spacing: 10) {
             Image(systemName: model.addedToDictionary == nil ? "character.book.closed" : "checkmark")
                 .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(KeyboardChrome.primary)
                 .frame(width: 22)
                 .accessibilityHidden(true)
             Group {
@@ -93,7 +98,8 @@ struct KeyboardMenuPage: View {
                         .foregroundStyle(KeyboardChrome.muted)
                 }
             }
-            .font(.system(size: 15, weight: .medium))
+            .font(.system(size: 14))
+            .foregroundStyle(KeyboardChrome.primary)
             .lineLimit(1)
             .truncationMode(.middle)
             Spacer(minLength: 0)
@@ -102,9 +108,9 @@ struct KeyboardMenuPage: View {
                     Text("Add")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(KeyboardChrome.primaryGlyph)
-                        .padding(.horizontal, 14)
-                        .frame(height: 32)
-                        .background(KeyboardChrome.primary, in: .capsule)
+                        .padding(.horizontal, 16)
+                        .frame(height: 34)
+                        .background(KeyboardChrome.primary, in: Capsule(style: .circular))
                         .frame(minHeight: 44)
                 }
                 .buttonStyle(.keyboardPress)
@@ -127,15 +133,11 @@ struct KeyboardMenuPage: View {
             ForEach(eligibleRecent.prefix(4)) { language in
                 let selected = language.languageCode == model.targetLanguage.languageCode
                 Button { model.actions.setTargetLanguage(language) } label: {
-                    Text(language.shortCode)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(selected ? KeyboardChrome.primaryGlyph : Color.primary)
-                        .padding(.horizontal, 11)
-                        .frame(height: 28)
-                        .background {
-                            KeyboardSurface(shape: Capsule(), fill: selected ? KeyboardChrome.primary : KeyboardChrome.key)
-                        }
-                        .frame(minHeight: 44)
+                    OutlineChip(height: 28, filled: selected) {
+                        Text(language.shortCode).font(.system(size: 12, weight: .bold))
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(.rect)
                 }
                 .buttonStyle(.keyboardPress)
                 .disabled(model.locksSessionOptions)
@@ -151,22 +153,21 @@ struct KeyboardMenuPage: View {
         model.recentLanguages.filter { $0.languageCode != model.effectiveLanguage.languageCode }
     }
 
-    /// Light / Dark / Auto as a segmented control.
+    /// Light / Dark / Auto as one capsule of three, the chosen one in ink.
     private var appearancePicker: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 3) {
             ForEach([KeyboardAppearancePreference.light, .dark, .automatic]) { option in
                 let selected = model.appearance == option
                 Button {
                     model.actions.setAppearance(option)
                 } label: {
                     Text(option.title)
-                        .font(.system(size: 14, weight: selected ? .semibold : .medium))
-                        .foregroundStyle(selected ? KeyboardChrome.primaryGlyph : Color.primary)
-                        .frame(maxWidth: .infinity, minHeight: 40)
+                        .font(.system(size: 14, weight: selected ? .semibold : .regular))
+                        .foregroundStyle(selected ? KeyboardChrome.primaryGlyph : KeyboardChrome.primary)
+                        .frame(maxWidth: .infinity, minHeight: 38)
                         .background {
                             if selected {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(KeyboardChrome.primary)
+                                Capsule(style: .circular).fill(KeyboardChrome.primary)
                             }
                         }
                         .contentShape(.rect)
@@ -175,9 +176,8 @@ struct KeyboardMenuPage: View {
                 .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             }
         }
-        .padding(4)
-        .background { KeyboardSurface(shape: RoundedRectangle(cornerRadius: 14, style: .continuous),
-                                      fill: KeyboardChrome.card) }
+        .padding(3)
+        .background { KeyboardSurface(shape: Capsule(style: .circular), fill: KeyboardChrome.card) }
         .disabled(!model.hasFullAccess)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Appearance")

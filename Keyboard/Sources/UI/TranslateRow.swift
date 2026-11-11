@@ -12,12 +12,18 @@ struct TranslateRow: View {
         let on = model.translationEnabled
         let canSwap = on && !model.effectiveLanguage.isAutomatic
         HStack(spacing: 8) {
+            // Solid while translation is on, outlined while it is off.
             Image(systemName: "translate")
                 .font(.system(size: 16, weight: .medium))
-                .foregroundStyle(on ? KeyboardChrome.primaryGlyph : Color.primary)
+                .foregroundStyle(on ? KeyboardChrome.primaryGlyph : KeyboardChrome.primary)
                 .frame(width: 36, height: 36)
-                .background(on ? KeyboardChrome.primary : KeyboardChrome.key,
-                            in: .rect(cornerRadius: 10, style: .continuous))
+                .background(on ? KeyboardChrome.primary : .clear, in: .rect(cornerRadius: 10, style: .continuous))
+                .overlay {
+                    if !on {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .strokeBorder(KeyboardChrome.primary, lineWidth: 1.5)
+                    }
+                }
                 .accessibilityHidden(true)
 
             HStack(spacing: 6) {
@@ -28,10 +34,9 @@ struct TranslateRow: View {
 
                 Button(action: model.actions.swapLanguages) {
                     Image(systemName: "arrow.left.arrow.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 32, height: 32)
-                        .background { KeyboardSurface(shape: Circle()) }
-                        .frame(width: 36, height: 44)
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(KeyboardChrome.primary)
+                        .frame(width: 40, height: 44)
                         .contentShape(.rect)
                 }
                 .buttonStyle(.keyboardPress)
@@ -48,17 +53,13 @@ struct TranslateRow: View {
 
             Spacer(minLength: 0)
 
-            Toggle("Translate", isOn: Binding(
+            KeyboardSwitch(label: "Translate", isOn: Binding(
                 get: { model.translationEnabled },
                 set: { model.actions.setTranslationEnabled($0) }))
-                .labelsHidden()
-                .tint(KeyboardChrome.switchTint)
-                .accessibilityLabel("Translate")
-                .padding(.trailing, 2)
         }
-        .foregroundStyle(.primary)
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
+        .foregroundStyle(KeyboardChrome.primary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
         .background { KeyboardSurface(shape: RoundedRectangle(cornerRadius: 14, style: .continuous),
                                       fill: KeyboardChrome.card) }
         .disabled(model.locksSessionOptions)
@@ -93,13 +94,11 @@ struct LanguageMenu: View {
                     .foregroundStyle(KeyboardChrome.muted)
                 Text(selection.shortCode)
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(KeyboardChrome.primary)
                     .lineLimit(1)
             }
-            .padding(.horizontal, 10)
-            .frame(minWidth: 62, minHeight: 40, alignment: .leading)
-            .background { KeyboardSurface(shape: RoundedRectangle(cornerRadius: 10, style: .continuous)) }
-            .frame(minHeight: 44)
+            .padding(.horizontal, 4)
+            .frame(minWidth: 48, minHeight: 44, alignment: .leading)
             .contentShape(.rect)
         }
         .buttonStyle(.keyboardPress)
@@ -107,8 +106,8 @@ struct LanguageMenu: View {
     }
 }
 
-/// The toolbar's sign that translation is on, "AUTO → RU" ("→ RU" where that doesn't fit). Wispr's
-/// keyboard has no translation, so this is the one grey capsule in its bar; it opens the ☰ page.
+/// The toolbar's sign that translation is on, "Auto → RU" ("→ RU" where that doesn't fit): an
+/// outlined chip that opens the menu page.
 struct TranslateChip: View {
     let model: KeyboardModel
     var height: CGFloat = 46
@@ -116,7 +115,7 @@ struct TranslateChip: View {
     var body: some View {
         Button { model.actions.showOverlay(.menu) } label: {
             ViewThatFits(in: .horizontal) {
-                chip("\(model.effectiveLanguage.shortCode) → \(model.targetLanguage.shortCode)")
+                chip("\(model.effectiveLanguage.isAutomatic ? "Auto" : model.effectiveLanguage.shortCode) → \(model.targetLanguage.shortCode)")
                 chip("→ \(model.targetLanguage.shortCode)")
             }
         }
@@ -128,14 +127,9 @@ struct TranslateChip: View {
     }
 
     private func chip(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-            .fixedSize()
-            .padding(.horizontal, 14)
+        OutlineChip { Text(text) }
             .frame(height: height)
-            .background { KeyboardSurface(shape: Capsule()) }
-            .contentShape(.capsule)
+            .padding(.horizontal, 2)
+            .contentShape(.rect)
     }
 }

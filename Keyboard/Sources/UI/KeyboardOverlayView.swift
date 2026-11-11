@@ -1,8 +1,7 @@
 import SwiftUI
 
-/// The page under the toolbar while one is open, the ☰ menu or the styles. It takes the place of
-/// the pad or the keys, which the controller hides, as Wispr Flow's menu does; the toolbar's ✕
-/// closes it.
+/// The page under the toolbar while one is open, the menu or the styles. It takes the place of
+/// the pad or the keys, which the controller hides; the toolbar's ✕ closes it.
 struct KeyboardOverlayView: View {
     let model: KeyboardModel
 
