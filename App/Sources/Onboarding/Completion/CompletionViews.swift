@@ -1,36 +1,46 @@
-import MurmurCore
 import MurmurUI
 import SwiftUI
 
-/// Reference 40.
+/// "You're set.": the talk button at rest, as it waits on the keyboard.
 struct ReadyView: View {
     @Environment(AppModel.self) private var model
+    /// The statement's size, which grows with the text size like the titles do.
+    @ScaledMetric(relativeTo: .largeTitle) private var statementSize: CGFloat = 48
 
     var body: some View {
-        OnboardingPage(showsHeader: false, actionInset: 28.5) {
-            VStack(spacing: 0) {
-                ReadyIllustration()
-                    .frame(width: 345, height: 345)
-                    .padding(.top, 49)
-                SerifTitle("You’re ready!", size: 64, color: Palette.ink, tracking: 0)
-                    .padding(.top, 21)
-                Text("\(Brand.name) works in every app,\ngo start \(Brand.name)ing")
-                    .font(.ui(20))
-                    .foregroundStyle(Palette.ink)
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 9.6)
-                Spacer(minLength: 0)
+        OnboardingPage(top: .wordmark) {
+            Spacer(minLength: 24)
+            VStack(spacing: 26) {
+                TalkButtonPicture(mode: .resting)
+                    .padding(.vertical, 12)
+                Text(verbatim: OnboardingCopy.Ready.caption)
+                    .font(.murmur(.subhead))
+                    .foregroundStyle(Theme.second)
             }
+            .frame(maxWidth: .infinity)
+            Spacer(minLength: 24)
+            Text(verbatim: OnboardingCopy.Ready.title)
+                .font(.system(size: statementSize, weight: .bold))
+                .tracking(-1.4)
+                .foregroundStyle(Theme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            Text(verbatim: OnboardingCopy.Ready.line)
+                .font(.murmur(.body))
+                .lineSpacing(2)
+                .foregroundStyle(Theme.second)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 10)
         } actions: {
-            Button("Start \(Brand.name)ing") { model.onboarding.send(.next) }
-                .buttonStyle(.pill(.lavender))
+            Button(OnboardingCopy.Ready.button) { model.onboarding.send(.next) }
+                .buttonStyle(.murmur(.primary))
         }
         .task { await TrialOfferView.prefetch(model) }
     }
 }
 
-/// Reference 41: what the server granted. Onboarding completes only when this is acknowledged
-/// with a server answer (or on a build without a backend, the free plan).
+/// What the server granted. Onboarding completes only when this is acknowledged with a server
+/// answer (or on a build without a backend, the free plan).
 struct TrialOfferView: View {
     @Environment(AppModel.self) private var model
     @State private var failed = false
@@ -43,72 +53,45 @@ struct TrialOfferView: View {
         // this page has no way back, so it offers the sign-in sheet (which also lets them go on
         // as a guest).
         let signedOut = model.account?.isSignedOut == true
-        OnboardingPage(showsHeader: false, actionInset: 16) {
-            VStack(spacing: 0) {
-                if let offer {
-                    Text(Self.badge(for: offer))
-                        .font(.ui(13, .medium))
-                        .foregroundStyle(Palette.ink)
-                        .padding(.horizontal, 8)
-                        .frame(height: 22.7)
-                        .background(Palette.offerPill, in: .rect(cornerRadius: 5))
-                        .padding(.top, 51.3)
-                    SerifTitle(Self.title(for: offer), size: 33, color: Palette.ink, tracking: -0.2, lineHeight: 42)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 18)
-                    Text(Self.subtitle(for: offer))
-                        .font(.ui(17))
-                        .foregroundStyle(Palette.ink)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
-                        .padding(.top, 17)
-                    TrialIllustration()
-                        .scaleEffect(1.08)
-                        .frame(height: 312)
-                        .padding(.top, 14)
-                    Spacer(minLength: 0)
-                    if let footnote = Self.footnote(for: offer) {
-                        Text(footnote)
-                            .font(.ui(15))
-                            .foregroundStyle(Palette.ink)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 22)
-                            .padding(.bottom, 49.4)
-                    }
-                } else if failed {
-                    Spacer()
-                    VStack(spacing: 12) {
-                        Text(signedOut ? "You’re signed out" : "Couldn’t load your plan")
-                            .font(.serif(32))
-                            .foregroundStyle(Palette.ink)
-                        Text(signedOut ? Self.signedOutDetail(model.account?.phrase) : "Check your connection and try again.")
-                            .font(.ui(17))
-                            .foregroundStyle(Palette.textSecondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(.horizontal, 24)
-                    Spacer()
-                } else {
-                    Spacer()
-                    ProgressView()
-                    Spacer()
+        OnboardingPage(top: .wordmark) {
+            if let offer {
+                Spacer(minLength: 24)
+                Self.picture(for: offer)
+                Spacer(minLength: 24)
+                Chip(Self.badge(for: offer), solid: offer == .subscriber)
+                    .padding(.bottom, 12)
+                OnboardingTitle(Self.title(for: offer), line: Self.subtitle(for: offer), size: .statement)
+                if let footnote = Self.footnote(for: offer) {
+                    Text(verbatim: footnote)
+                        .font(.murmur(.footnote))
+                        .foregroundStyle(Theme.third)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 8)
                 }
+            } else if failed {
+                Spacer(minLength: 24)
+                OnboardingTitle(signedOut ? OnboardingCopy.Offer.signedOutTitle : OnboardingCopy.Offer.failedTitle,
+                                line: signedOut ? Self.signedOutDetail(model.account?.phrase) : OnboardingCopy.Offer.failedLine)
+            } else {
+                Spacer(minLength: 24)
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(Theme.ink)
+                    .frame(maxWidth: .infinity)
+                Spacer(minLength: 24)
             }
         } actions: {
             if offer == nil && failed && signedOut {
-                Button("Sign in again") { model.signInSheet = .options }
-                    .buttonStyle(.pill(.ink))
+                Button(OnboardingCopy.Offer.signInAgain) { model.signInSheet = .options }
+                    .buttonStyle(.murmur(.primary))
             } else if offer == nil && failed {
-                Button("Try again") { Task { await load() } }
-                    .buttonStyle(.pill(.ink))
+                Button(OnboardingCopy.Offer.retry) { Task { await load() } }
+                    .buttonStyle(.murmur(.primary))
                     .disabled(loading)
             } else {
-                Button { store.send(.next) } label: {
-                    // Smaller than the other primary buttons, as in the reference.
-                    Text("Get started").font(.ui(16, .medium))
-                }
-                .buttonStyle(.pill(.ink))
-                .disabled(offer == nil)
+                Button(OnboardingCopy.Offer.button) { store.send(.next) }
+                    .buttonStyle(.murmur(.primary))
+                    .disabled(offer == nil)
             }
         }
         .task {
@@ -124,8 +107,7 @@ struct TrialOfferView: View {
 
     /// Under "You're signed out".
     static func signedOutDetail(_ phrase: String?) -> String {
-        guard let phrase else { return "Sign in again to load your plan." }
-        return "Sign in again \(phrase) to load your plan."
+        OnboardingCopy.Offer.signedOutLine(phrase)
     }
 
     private func load() async {
@@ -140,61 +122,63 @@ struct TrialOfferView: View {
         }
     }
 
-    /// Fetches the offer while "You're ready!" is on screen, so the next page appears filled in.
+    /// Fetches the offer while "You're set." is on screen, so the next page appears filled in.
     static func prefetch(_ model: AppModel) async {
         guard model.onboarding.answers.offer == nil,
               let offer = try? await model.onboardingServices.offers.currentOffer() else { return }
         model.onboarding.send(.offerResolved(offer))
     }
 
+    /// The plan as a number: the trial's days over one segment a day, or what the plan gives.
+    @ViewBuilder
+    private static func picture(for offer: OfferVariant) -> some View {
+        switch offer {
+        case .trial(let days):
+            let caption = OnboardingCopy.Offer.trialCaption(days: days)
+            // One segment a day, up to a month of them.
+            let segments = min(max(days, 1), 31)
+            BigNumber(number: "\(days)", caption: caption, meter: (segments, segments))
+        case .subscriber:
+            BigNumber(number: OnboardingCopy.Offer.subscriberBadge, caption: OnboardingCopy.Offer.subscriberCaption)
+        case .free:
+            BigNumber(number: OnboardingCopy.Offer.freeNumber, caption: OnboardingCopy.Offer.freeCaption)
+        }
+    }
+
     static func badge(for offer: OfferVariant) -> String {
         switch offer {
-        case .trial: "Exclusive Offer"
-        case .subscriber: "\(Brand.name) Pro"
-        case .free: "\(Brand.name) Free"
+        case .trial: OnboardingCopy.Offer.trialBadge
+        case .subscriber: OnboardingCopy.Offer.subscriberBadge
+        case .free: OnboardingCopy.Offer.freeBadge
         }
     }
 
     static func title(for offer: OfferVariant) -> String {
         switch offer {
-        case .trial(let days): "You’ve unlocked unlimited access for \(duration(days)) 🎉"
-        case .subscriber: "You’re all set with unlimited access 🎉"
-        case .free: "You’re all set to start dictating 🎉"
+        case .trial(let days): OnboardingCopy.Offer.trialTitle(days: days)
+        case .subscriber: OnboardingCopy.Offer.subscriberTitle
+        case .free: OnboardingCopy.Offer.freeTitle
         }
     }
 
-    static func subtitle(for offer: OfferVariant) -> AttributedString {
+    static func subtitle(for offer: OfferVariant) -> String {
         switch offer {
-        case .trial(let days):
-            var text = AttributedString("Enjoy \(duration(days)) of \(Brand.name) Pro access on us!\n")
-            var bold = AttributedString("No credit card required.")
-            bold.font = .ui(17, .semibold)
-            text += bold
-            return text
-        case .subscriber:
-            return AttributedString("Your \(Brand.name) Pro subscription is active on this account.")
-        case .free:
-            return AttributedString("\(Brand.name) Free includes \(freeWords) words of dictation every week.")
+        case .trial(let days): OnboardingCopy.Offer.trialLine(days: days)
+        case .subscriber: OnboardingCopy.Offer.subscriberLine
+        case .free: OnboardingCopy.Offer.freeLine
         }
     }
 
     static func footnote(for offer: OfferVariant) -> String? {
         switch offer {
-        case .trial: "After your \(Brand.name) Pro trial, you’ll move to \(Brand.name) Free with a \(freeWords)-word limit per week."
+        case .trial: OnboardingCopy.Offer.trialFootnote
         case .subscriber: nil
-        case .free: "Your words reset every Sunday."
+        case .free: OnboardingCopy.Offer.freeFootnote
         }
     }
 
-    /// `quota_status` in the backend: 1,000 words a week on the free plan.
-    private static let freeWords = 1000.formatted()
-
     /// 14 → "2 weeks", 7 → "1 week", 10 → "10 days".
     static func duration(_ days: Int) -> String {
-        if days % 7 == 0 {
-            let weeks = days / 7
-            return weeks == 1 ? "1 week" : "\(weeks) weeks"
-        }
-        return days == 1 ? "1 day" : "\(days) days"
+        OnboardingCopy.Offer.duration(days)
     }
 }

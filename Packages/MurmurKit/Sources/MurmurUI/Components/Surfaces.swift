@@ -129,13 +129,63 @@ public struct Meter: View {
     }
 }
 
+/// Rings that leave a disc one after another, growing as they fade. Put it behind the disc: a ring
+/// starts at the disc's own size. Under Reduce Motion, or when `isStill` (a screenshot), the rings
+/// stand where a moment of the animation would have them.
+public struct PulseRings: View {
+    let color: Color
+    let count: Int
+    /// How many times the disc's size a ring has reached when it has faded out.
+    let reach: CGFloat
+    /// Seconds a ring takes; the rings leave evenly within it.
+    let cycle: Double
+    let lineWidth: CGFloat
+    let isStill: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulsing = false
+
+    public init(color: Color = Theme.live, count: Int = 3, reach: CGFloat = 2.2, cycle: Double = 2.1,
+                lineWidth: CGFloat = 2, isStill: Bool = false) {
+        self.color = color
+        self.count = max(count, 1)
+        self.reach = reach
+        self.cycle = cycle
+        self.lineWidth = lineWidth
+        self.isStill = isStill
+    }
+
+    public var body: some View {
+        ZStack {
+            ForEach(0..<count, id: \.self) { index in
+                let ring = Circle().strokeBorder(color, lineWidth: lineWidth)
+                if isStill || reduceMotion {
+                    let progress = CGFloat(index + 1) / CGFloat(count + 1)
+                    ring
+                        .scaleEffect(1 + (reach - 1) * progress)
+                        .opacity(0.7 * (1 - progress))
+                } else {
+                    ring
+                        .scaleEffect(pulsing ? reach : 1)
+                        .opacity(pulsing ? 0 : 0.7)
+                        .animation(
+                            .easeOut(duration: cycle).repeatForever(autoreverses: false)
+                                .delay(cycle * Double(index) / Double(count)),
+                            value: pulsing)
+                }
+            }
+        }
+        .onAppear { pulsing = true }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 /// The red dot that says the microphone is open, with rings leaving it: one slow ring while
-/// Murmur waits, two quicker ones while it listens. The rings rest under Reduce Motion.
+/// Murmur waits, two quicker ones while it listens. No rings under Reduce Motion.
 public struct LiveDot: View {
     let size: CGFloat
     let rings: Int
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulsing = false
 
     public init(size: CGFloat = 12, rings: Int = 1) {
         self.size = size
@@ -143,26 +193,15 @@ public struct LiveDot: View {
     }
 
     public var body: some View {
-        // One ring takes 1.8 s; two take 1.4 s each, half a cycle apart.
-        let cycle = rings == 1 ? 1.8 : 1.4
         Circle()
             .fill(Theme.live)
             .frame(width: size, height: size)
             .background {
                 if !reduceMotion {
-                    ForEach(0..<rings, id: \.self) { index in
-                        Circle()
-                            .strokeBorder(Theme.live, lineWidth: 1.5)
-                            .scaleEffect(pulsing ? 2.8 : 1)
-                            .opacity(pulsing ? 0 : 0.7)
-                            .animation(
-                                .easeOut(duration: cycle).repeatForever(autoreverses: false)
-                                    .delay(cycle * Double(index) / Double(rings)),
-                                value: pulsing)
-                    }
+                    // One ring takes 1.8 s; two take 1.4 s each, half a cycle apart.
+                    PulseRings(count: rings, reach: 2.8, cycle: rings == 1 ? 1.8 : 1.4, lineWidth: 1.5)
                 }
             }
-            .onAppear { pulsing = true }
             .accessibilityHidden(true)
     }
 }

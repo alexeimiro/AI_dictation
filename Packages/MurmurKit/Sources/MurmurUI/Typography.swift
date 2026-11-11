@@ -35,63 +35,6 @@ extension Font {
     }
 }
 
-/// The bundled fonts' names. Only onboarding's practice text box still loads one; they go with it.
-public enum FontName {
-    public static let serifRegular = "EBGaramond-Regular"
-    public static let serifMedium = "EBGaramond-Medium"
-    public static let serifItalic = "EBGaramond-Italic"
-    public static let uiRegular = "Figtree-Regular"
-    public static let uiMedium = "Figtree-Medium"
-    public static let uiSemiBold = "Figtree-SemiBold"
-}
-
-public enum SerifWeight: Sendable {
-    case regular, medium, italic
-}
-
-public enum UIWeight: Sendable {
-    case regular, medium, semibold
-}
-
-extension Font {
-    /// The old display face, now the system font in bold at the text style nearest to `size`, so
-    /// it still follows Dynamic Type. New code uses `Font.murmur(_:)`.
-    public static func serif(_ size: CGFloat, _ weight: SerifWeight = .regular,
-                             relativeTo style: Font.TextStyle = .largeTitle) -> Font {
-        .system(.nearest(to: size), weight: .bold)
-    }
-
-    /// The old UI face, now the system font at the text style nearest to `size`. New code uses
-    /// `Font.murmur(_:)`.
-    public static func ui(_ size: CGFloat, _ weight: UIWeight = .regular,
-                          relativeTo style: Font.TextStyle = .body) -> Font {
-        let weight: Font.Weight = switch weight {
-        case .regular: .regular
-        case .medium: .medium
-        case .semibold: .semibold
-        }
-        return .system(.nearest(to: size), weight: weight)
-    }
-}
-
-extension Font.TextStyle {
-    /// The text style whose size at the default Dynamic Type setting is closest to `size`.
-    static func nearest(to size: CGFloat) -> Font.TextStyle {
-        switch size {
-        case ..<11.5: .caption2
-        case ..<12.5: .caption
-        case ..<14: .footnote
-        case ..<15.5: .subheadline
-        case ..<16.5: .callout
-        case ..<18.5: .body
-        case ..<21: .title3
-        case ..<25: .title2
-        case ..<31: .title
-        default: .largeTitle
-        }
-    }
-}
-
 extension Font {
     /// User content (transcripts, language names): the system font, which covers every script the
     /// recognizer can produce.

@@ -2,46 +2,33 @@ import MurmurCore
 import MurmurUI
 import SwiftUI
 
-/// Reference 32: an explicit choice, nothing preselected (the reference preselects sharing; we
-/// don't). The decision is recorded with the policy version and time.
+/// An explicit choice about the user's data, with nothing preselected. The decision is recorded
+/// with the policy version and time.
 struct DataChoiceView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let store = model.onboarding
         let choice = store.answers.dataChoice?.choice
-        OnboardingPage(scrollable: false) {
-            ScrollView {
-                VStack(spacing: 0) {
-                    SerifTitle("Your data is safe", accent: "safe", size: 33, color: Palette.ink, tracking: -0.3)
-                        .padding(.top, 11)
-                    Text("Choose how \(Brand.name) handles your\nvoice and text")
-                        .font(.ui(16, .medium))
-                        .foregroundStyle(Palette.ink)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 16)
-                    VStack(spacing: 10) {
-                        DataChoiceCard(
-                            title: "Improve \(Brand.name) for everyone",
-                            detail: "To make \(Brand.name) better, this option lets us review your transcripts and edits to improve transcription and cleanup.",
-                            locked: false, isSelected: choice == .improveModel) {
-                                store.send(.selectDataChoice(.improveModel, at: Date()))
-                            }
-                        DataChoiceCard(
-                            title: "Don’t share data",
-                            detail: "Your dictations are only used to write your text, never for training by us or anyone else.",
-                            locked: true, isSelected: choice == .doNotShare) {
-                                store.send(.selectDataChoice(.doNotShare, at: Date()))
-                            }
-                    }
-                    .padding(.horizontal, 31)
-                    .padding(.top, 17)
+        OnboardingPage {
+            OnboardingTitle(OnboardingCopy.DataChoice.title, line: OnboardingCopy.DataChoice.line)
+                .padding(.top, 14)
+            VStack(spacing: 12) {
+                DataChoiceCard(title: OnboardingCopy.DataChoice.improveTitle,
+                               detail: OnboardingCopy.DataChoice.improveDetail,
+                               isSelected: choice == .improveModel) {
+                    store.send(.selectDataChoice(.improveModel, at: Date()))
+                }
+                DataChoiceCard(title: OnboardingCopy.DataChoice.privateTitle,
+                               detail: OnboardingCopy.DataChoice.privateDetail,
+                               isSelected: choice == .doNotShare) {
+                    store.send(.selectDataChoice(.doNotShare, at: Date()))
                 }
             }
-            .scrollIndicators(.hidden)
+            .padding(.top, 22)
         } actions: {
-            Button("Next") { store.send(.next) }
-                .buttonStyle(.pill(.ink))
+            Button(OnboardingCopy.next) { store.send(.next) }
+                .buttonStyle(.murmur(.primary))
                 .disabled(!store.allows(.next))
         }
     }
@@ -50,46 +37,41 @@ struct DataChoiceView: View {
 private struct DataChoiceCard: View {
     let title: String
     let detail: String
-    let locked: Bool
     let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 9) {
-                HStack(alignment: .top) {
-                    Text(title)
-                        .font(.ui(21, .medium))
-                        .foregroundStyle(Palette.text)
-                    Spacer(minLength: 12)
-                    if locked {
-                        Image(systemName: "lock.fill").font(.system(size: 19)).foregroundStyle(Palette.text)
-                    }
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(verbatim: title)
+                        .font(.murmur(.headline))
+                        .foregroundStyle(Theme.ink)
+                    Text(verbatim: detail)
+                        .font(.murmur(.subhead))
+                        .lineSpacing(2)
+                        .foregroundStyle(Theme.second)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(detail)
-                    .font(.ui(17))
-                    .foregroundStyle(Palette.textSecondary)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                SelectionMark(isOn: isSelected)
             }
-            .multilineTextAlignment(.leading)
-            .padding(.leading, 23)
-            .padding(.trailing, 25)
-            .padding(.vertical, 22.2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Palette.selectedFill : Palette.paper, in: .rect(cornerRadius: 22))
+            .padding(16)
             .overlay {
-                RoundedRectangle(cornerRadius: 22)
-                    .stroke(isSelected ? Palette.ink : Palette.cardBorder, lineWidth: isSelected ? 2.5 : Metrics.borderWidth)
+                RoundedRectangle(cornerRadius: 20)
+                    .strokeBorder(isSelected ? Theme.ink : Theme.line, lineWidth: 1.5)
             }
-            .contentShape(.rect(cornerRadius: 22))
+            .contentShape(.rect(cornerRadius: 20))
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 }
 
-/// Reference 33: languages from the enabled keyboards, filtered to what dictation supports.
+/// The languages from the enabled keyboards, filtered to what dictation supports, to confirm or
+/// change.
 struct ConfirmLanguagesView: View {
     @Environment(AppModel.self) private var model
     @State private var editing = false
@@ -97,35 +79,34 @@ struct ConfirmLanguagesView: View {
     var body: some View {
         let store = model.onboarding
         OnboardingPage {
-            VStack(spacing: 0) {
-                SerifTitle("Confirm your language", size: 33, color: Palette.ink, tracking: -0.3)
-                    .padding(.top, 11)
-                Text("We picked this from your keyboard. Add or\nremove languages if needed.")
-                    .font(.ui(16))
-                    .foregroundStyle(Palette.ink)
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 16)
-                VStack(spacing: 10) {
-                    ForEach(store.answers.languages, id: \.self) { tag in
-                        Text(Self.displayName(tag))
-                            .font(.transcript(.title3))
-                            .foregroundStyle(Palette.text)
-                            .padding(.horizontal, 23)
-                            .frame(maxWidth: .infinity, minHeight: 62, alignment: .leading)
-                            .background(Palette.selectedFill, in: .rect(cornerRadius: 16))
-                            .overlay { RoundedRectangle(cornerRadius: 16).stroke(Palette.ink, lineWidth: 2) }
+            OnboardingTitle(OnboardingCopy.Languages.title, line: OnboardingCopy.Languages.line)
+                .padding(.top, 14)
+            VStack(spacing: 8) {
+                ForEach(Array(store.answers.languages.enumerated()), id: \.element) { index, tag in
+                    HStack(spacing: 12) {
+                        Text(verbatim: Self.displayName(tag))
+                            .font(.transcript(.callout))
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Theme.ink)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(verbatim: index == 0 ? OnboardingCopy.Languages.primary : OnboardingCopy.Languages.second)
+                            .font(.murmur(.footnote, weight: .semibold))
+                            .foregroundStyle(Theme.third)
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(Theme.ink, lineWidth: 1.5) }
+                    .accessibilityElement(children: .combine)
                 }
-                .padding(.horizontal, 31)
-                .padding(.top, 33)
-                Spacer(minLength: 0)
             }
+            .padding(.top, 22)
         } actions: {
-            VStack(spacing: 16) {
-                Button("Edit") { editing = true }
-                    .buttonStyle(.pill(.outline))
-                Button("Next") { applyAndContinue() }
-                    .buttonStyle(.pill(.ink))
+            VStack(spacing: 10) {
+                Button(OnboardingCopy.Languages.edit) { editing = true }
+                    .buttonStyle(.murmur(.secondary))
+                Button(OnboardingCopy.next) { applyAndContinue() }
+                    .buttonStyle(.murmur(.primary))
                     .disabled(!store.allows(.next))
             }
         }
@@ -175,45 +156,59 @@ private struct LanguagePicker: View {
     }
 
     var body: some View {
-        NavigationStack {
-            List(available) { language in
-                Button {
-                    toggle(language.tag)
-                } label: {
-                    HStack {
-                        Text(language.localizedFullName).font(.transcript()).foregroundStyle(Palette.text)
-                        Spacer()
-                        if let index = selected.firstIndex(of: language.tag) {
-                            Text(index == 0 ? "Primary" : "Second")
-                                .font(.ui(13, .medium))
-                                .foregroundStyle(Palette.textSecondary)
-                            Image(systemName: "checkmark").foregroundStyle(Palette.ink)
-                        }
+        VStack(spacing: 0) {
+            SheetHeader(OnboardingCopy.Languages.pickerTitle, confirmTitle: OnboardingCopy.Languages.done,
+                        canConfirm: !selected.isEmpty, cancel: { dismiss() }) {
+                onDone(selected)
+                dismiss()
+            }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    Text(verbatim: OnboardingCopy.Languages.pickerLine)
+                        .font(.murmur(.subhead))
+                        .foregroundStyle(Theme.second)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 12)
+                    ForEach(available) { language in
+                        row(language)
+                        Hairline()
                     }
                 }
-                .disabled(selected.count >= 2 && !selected.contains(language.tag))
-            }
-            .navigationTitle("Languages")
-            .navigationBarTitleDisplayMode(.inline)
-            .safeAreaInset(edge: .top) {
-                Text("\(Brand.name) dictates in up to two languages and switches between them from the keyboard.")
-                    .font(.ui(14))
-                    .foregroundStyle(Palette.textSecondary)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
-            }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        onDone(selected)
-                        dismiss()
-                    }
-                    .disabled(selected.isEmpty)
-                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
             }
         }
+        .background(Theme.canvas)
+        .presentationBackground(Theme.canvas)
+        // As in onboarding: text scales up to XXXL, the accessibility sizes beyond it are capped.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .task { available = await model.onboardingServices.languages.availableLanguages() }
+    }
+
+    private func row(_ language: DictationLanguage) -> some View {
+        let index = selected.firstIndex(of: language.tag)
+        return Button {
+            toggle(language.tag)
+        } label: {
+            HStack(spacing: 12) {
+                Text(verbatim: language.localizedFullName)
+                    .font(.transcript(.body))
+                    .foregroundStyle(Theme.ink)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if let index {
+                    Text(verbatim: index == 0 ? OnboardingCopy.Languages.primary : OnboardingCopy.Languages.second)
+                        .font(.murmur(.footnote, weight: .semibold))
+                        .foregroundStyle(Theme.third)
+                }
+                CheckCircle(isOn: index != nil)
+            }
+            .frame(minHeight: 52)
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .disabled(selected.count >= 2 && index == nil)
+        .opacity(selected.count >= 2 && index == nil ? 0.4 : 1)
+        .accessibilityAddTraits(index == nil ? [] : .isSelected)
     }
 
     private func toggle(_ tag: String) {
@@ -225,121 +220,101 @@ private struct LanguagePicker: View {
     }
 }
 
-/// Reference 34: writes the default style the keyboard uses.
+/// Writes the default style the keyboard uses, with what each style makes of one sentence.
 struct DefaultStyleView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let store = model.onboarding
-        OnboardingPage(scrollable: false) {
-            ScrollView {
-                VStack(spacing: 0) {
-                    SerifTitle("Set your default style", accent: "default style", accentStyle: .purple, size: 32.5,
-                               color: Palette.ink, tracking: -0.3)
-                        .padding(.top, 16.7)
-                    Text("\(Brand.name) will use this style for all your dictations.\nYou can change it anytime from the keyboard.")
-                        .font(.ui(16))
-                        .foregroundStyle(Palette.ink)
-                        .multilineTextAlignment(.center)
-                        .padding(.top, 15)
-                    VStack(spacing: 18) {
-                        ForEach(StylePreset.allCases) { style in
-                            OptionCard(style.title, subtitle: style.subtitle,
-                                       isSelected: store.answers.style == style, height: 71.3) {
-                                store.send(.selectStyle(style))
-                            }
-                        }
+        OnboardingPage {
+            OnboardingTitle(OnboardingCopy.Style.title, line: OnboardingCopy.Style.line)
+                .padding(.top, 14)
+            SectionLabel(OnboardingCopy.Style.youSay)
+                .padding(.top, 22)
+            Text(verbatim: "“\(StyleView.spoken)”")
+                .font(.transcript(.body))
+                .lineSpacing(2)
+                .foregroundStyle(Theme.ink)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+            VStack(spacing: 12) {
+                ForEach(StylePreset.allCases) { style in
+                    StyleCard(style: style, isSelected: store.answers.style == style) {
+                        store.send(.selectStyle(style))
                     }
-                    .padding(.horizontal, 31)
-                    .padding(.top, 41)
                 }
             }
-            .scrollIndicators(.hidden)
-            // Word for word is the default; one tap on Next keeps it. After a reinstall it's the
-            // style the account had, taken when the user signed in (`StyleSync`).
-            .onAppear {
-                if store.answers.style == nil {
-                    let style = model.launchOptions.usesOnboardingFixtures ? .verbatim : SharedSettings.shared.defaultStyle
-                    store.send(.selectStyle(style))
-                }
-            }
+            .padding(.top, 20)
         } actions: {
-            Button("Next") {
+            Button(OnboardingCopy.next) {
                 if let style = store.answers.style, store.send(.next), !model.launchOptions.usesOnboardingFixtures {
                     SharedSettings.shared.defaultStyle = style
                 }
             }
-            .buttonStyle(.pill(.ink))
+            .buttonStyle(.murmur(.primary))
             .disabled(!store.allows(.next))
+        }
+        // Word for word is the default; one tap on Next keeps it. After a reinstall it's the
+        // style the account had, taken when the user signed in (`StyleSync`).
+        .onAppear {
+            if store.answers.style == nil {
+                let style = model.launchOptions.usesOnboardingFixtures ? .verbatim : SharedSettings.shared.defaultStyle
+                store.send(.selectStyle(style))
+            }
         }
     }
 }
 
-
-/// References 35–36: benefits first, then the system prompt. "Maybe later" never blocks.
+/// What notifications are for, with an example, before the system asks. "Not now" never blocks.
 struct NotificationsView: View {
     @Environment(AppModel.self) private var model
     @State private var requesting = false
 
     var body: some View {
         let store = model.onboarding
-        OnboardingPage(actionInset: 16) {
-            VStack(spacing: 0) {
-                SerifTitle("Allow notifications", size: 33, color: Palette.ink, tracking: -0.3)
-                    .padding(.top, 11)
-                Text("Remember, you can opt out anytime.")
-                    .font(.ui(16))
-                    .foregroundStyle(Palette.ink)
-                    .padding(.top, 12)
-                NotificationsIllustration()
-                    .scaleEffect(0.78)
-                    .frame(width: 220, height: 220)
-                    .padding(.top, 12)
-                VStack(alignment: .leading, spacing: 13.5) {
-                    benefit("lightbulb", "Learn tips that help you dictate faster")
-                    benefit("arrow.triangle.2.circlepath", "Stay in the loop with new features")
-                    benefit("clock.badge.checkmark", "Receive gentle reminders to use \(Brand.name)")
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 49)
-                .padding(.top, 93.7)
-                Spacer(minLength: 0)
-            }
-        } actions: {
-            VStack(spacing: 14) {
-                Button {
-                    requesting = true
-                    Task {
-                        defer { requesting = false }
-                        _ = await model.requestNotifications()
-                        store.send(.next)
+        OnboardingPage {
+            Spacer(minLength: 16)
+            NotificationPicture()
+            Spacer(minLength: 16)
+            OnboardingTitle(OnboardingCopy.Notifications.title, line: OnboardingCopy.Notifications.line)
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(OnboardingCopy.Notifications.benefits, id: \.self) { benefit in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.ink)
+                            .accessibilityHidden(true)
+                        Text(verbatim: benefit)
+                            .font(.murmur(.callout))
+                            .foregroundStyle(Theme.ink)
                     }
-                } label: {
-                    if requesting { ProgressView().tint(.white) } else { Text("Allow notifications") }
                 }
-                .buttonStyle(.pill(.ink))
-                .disabled(requesting)
-                Button("Maybe later") { store.send(.skipOptional) }
-                    .buttonStyle(.quiet(size: 14))
-                    .padding(.top, 2)
-                    .padding(.bottom, -22)
             }
+            .padding(.top, 18)
+            .padding(.bottom, 2)
+        } actions: {
+            Button {
+                requesting = true
+                Task {
+                    defer { requesting = false }
+                    _ = await model.requestNotifications()
+                    store.send(.next)
+                }
+            } label: {
+                // Disabled, and so grey, while the system asks.
+                if requesting { ProgressView().tint(Theme.ink) } else { Text(OnboardingCopy.Notifications.allow) }
+            }
+            .buttonStyle(.murmur(.primary))
+            .disabled(requesting)
+            Button(OnboardingCopy.Notifications.later) { store.send(.skipOptional) }
+                .buttonStyle(.textOnly)
+                .padding(.top, 4)
         }
-    }
-
-    private func benefit(_ symbol: String, _ text: String) -> some View {
-        HStack(spacing: 15) {
-            Image(systemName: symbol)
-                .font(.system(size: 18))
-                .frame(width: 20)
-            Text(text).font(.ui(17))
-        }
-        .foregroundStyle(Palette.ink)
     }
 }
 
-/// Reference 37. Murmur has no desktop app yet, so this offers a link for when it does, and asks
-/// before recording the request.
+/// Murmur has no desktop app yet, so this offers a link for when it does, and asks before
+/// recording the request.
 struct DesktopOfferView: View {
     @Environment(AppModel.self) private var model
     @State private var confirming = false
@@ -349,53 +324,37 @@ struct DesktopOfferView: View {
 
     var body: some View {
         let store = model.onboarding
-        OnboardingPage(actionInset: 16) {
-            VStack(spacing: 0) {
-                SerifTitle("\(Brand.name) is coming to your computer", size: 33.5, color: Palette.ink,
-                           tracking: -0.3, lineHeight: 43.3)
-                    .padding(.horizontal, 40)
-                    .padding(.top, 9.3)
-                Text("\(Brand.name) is great on iPhone. Want it on your Mac or PC too? We’ll email you a link when it’s ready.")
-                    .font(.ui(16))
-                    .foregroundStyle(Palette.ink)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 13.4)
-                DesktopIllustration()
-                    .frame(height: 245)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 34)
-                if let error {
-                    Text(error).font(.ui(14)).foregroundStyle(Palette.danger).padding(.top, 12)
-                }
-                Spacer(minLength: 0)
-            }
+        OnboardingPage {
+            Spacer(minLength: 16)
+            DesktopPicture()
+            Spacer(minLength: 16)
+            OnboardingTitle(OnboardingCopy.Desktop.title, line: OnboardingCopy.Desktop.line)
+            FieldError(message: error)
+                .padding(.top, 12)
         } actions: {
-            VStack(spacing: 14) {
-                Button {
-                    email = model.onboardingServices.auth.accountEmail ?? ""
-                    confirming = true
-                } label: {
-                    if sending { ProgressView().tint(.white) } else { Text("Email me a link for later") }
-                }
-                .buttonStyle(.pill(.ink))
-                .disabled(sending)
-                Button("Another time") { store.send(.desktopLinkDeclined) }
-                    .buttonStyle(.quiet(size: 14))
-                    .padding(.top, -6)
-                    .padding(.bottom, -22)
+            Button {
+                email = model.onboardingServices.auth.accountEmail ?? ""
+                confirming = true
+            } label: {
+                // Disabled, and so grey, while it sends.
+                if sending { ProgressView().tint(Theme.ink) } else { Text(OnboardingCopy.Desktop.accept) }
             }
+            .buttonStyle(.murmur(.primary))
+            .disabled(sending)
+            Button(OnboardingCopy.Desktop.decline) { store.send(.desktopLinkDeclined) }
+                .buttonStyle(.textOnly)
+                .padding(.top, 4)
         }
-        .alert("Email a link?", isPresented: $confirming) {
-            TextField("Email address", text: $email)
+        .alert(OnboardingCopy.Desktop.alertTitle, isPresented: $confirming) {
+            TextField(OnboardingCopy.Desktop.alertField, text: $email)
                 .textContentType(.emailAddress)
                 .keyboardType(.emailAddress)
                 .textInputAutocapitalization(.never)
-            Button("Cancel", role: .cancel) {}
-            Button("Send") { send() }
+            Button(OnboardingCopy.Desktop.cancel, role: .cancel) {}
+            Button(OnboardingCopy.Desktop.send) { send() }
                 .disabled(!EmailSignInView.isValidEmail(email))
         } message: {
-            Text("We’ll send it when \(Brand.name) for desktop is available.")
+            Text(OnboardingCopy.Desktop.alertMessage)
         }
     }
 
@@ -408,19 +367,19 @@ struct DesktopOfferView: View {
                 try await model.onboardingServices.profile.requestDesktopLink(email: email)
                 model.onboarding.send(.desktopLinkRequested(at: Date()))
             } catch {
-                self.error = "Couldn’t save that. Try again, or choose Another time."
+                self.error = OnboardingCopy.Desktop.failed
             }
         }
     }
 }
 
-/// Reference 38.
+/// "How did you find Murmur?"
 struct ReferralSourceView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let store = model.onboarding
-        ReferralPage(title: "Where did you hear about us?",
+        ReferralPage(title: OnboardingCopy.Referral.title,
                      options: ReferralSource.allCases.map { ($0.rawValue, $0.title) },
                      selected: store.answers.referralSource?.rawValue) { value in
             if let source = ReferralSource(rawValue: value) { store.send(.selectReferral(source)) }
@@ -428,14 +387,14 @@ struct ReferralSourceView: View {
     }
 }
 
-/// Reference 39: only after "Search engine".
+/// Which one, only after "Search engine".
 struct ReferralDetailView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let store = model.onboarding
         let options = store.answers.referralSource?.detailOptions ?? []
-        ReferralPage(title: "Which search engine?", options: options.map { ($0, $0) },
+        ReferralPage(title: OnboardingCopy.Referral.detailTitle, options: options.map { ($0, $0) },
                      selected: store.answers.referralDetail) { store.send(.selectReferralDetail($0)) }
     }
 }
@@ -449,29 +408,20 @@ private struct ReferralPage: View {
 
     var body: some View {
         let store = model.onboarding
-        OnboardingPage(scrollable: false) {
-            ScrollView {
-                VStack(spacing: 0) {
-                    SerifTitle(title, size: 33, color: Palette.ink, tracking: -2.1)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 24)
-                    VStack(spacing: 18) {
-                        ForEach(options, id: \.id) { option in
-                            OptionCard(option.title, isSelected: selected == option.id, height: 64) {
-                                select(option.id)
-                            }
-                        }
+        OnboardingPage {
+            OnboardingTitle(title)
+                .padding(.top, 14)
+            VStack(spacing: 8) {
+                ForEach(options, id: \.id) { option in
+                    OptionRow(option.title, isSelected: selected == option.id, marker: .mark) {
+                        select(option.id)
                     }
-                    .padding(.horizontal, 36)
-                    .padding(.top, 31)
-                    .padding(.bottom, 40)
                 }
             }
-            .scrollIndicators(.hidden)
-            .overlay(alignment: .bottom) { BottomFade() }
+            .padding(.top, 18)
         } actions: {
-            Button("Next") { store.send(.next) }
-                .buttonStyle(.pill(.ink))
+            Button(OnboardingCopy.next) { store.send(.next) }
+                .buttonStyle(.murmur(.primary))
                 .disabled(!store.allows(.next))
         }
     }
@@ -480,16 +430,16 @@ private struct ReferralPage: View {
 extension ReferralSource {
     var title: String {
         switch self {
-        case .xTwitter: "X / Twitter"
-        case .searchEngine: "Search engine"
-        case .tikTok: "TikTok"
-        case .articleNews: "Article / News"
-        case .newsletter: "Newsletter"
-        case .linkedIn: "LinkedIn"
-        case .friendColleague: "Friend / Colleague"
-        case .youTube: "YouTube"
-        case .reddit: "Reddit"
-        case .other: "Other"
+        case .xTwitter: OnboardingCopy.Referral.xTwitter
+        case .searchEngine: OnboardingCopy.Referral.searchEngine
+        case .tikTok: OnboardingCopy.Referral.tikTok
+        case .articleNews: OnboardingCopy.Referral.articleNews
+        case .newsletter: OnboardingCopy.Referral.newsletter
+        case .linkedIn: OnboardingCopy.Referral.linkedIn
+        case .friendColleague: OnboardingCopy.Referral.friendColleague
+        case .youTube: OnboardingCopy.Referral.youTube
+        case .reddit: OnboardingCopy.Referral.reddit
+        case .other: OnboardingCopy.Referral.other
         }
     }
 }

@@ -1,8 +1,8 @@
 import MurmurUI
 import SwiftUI
 
-/// Reference 08: "Continue with your email", then a six-digit code from the email (or its link,
-/// handled by the `murmur://auth-callback` deep link).
+/// "Continue with your email", then a six-digit code from the email (or its link, handled by the
+/// `murmur://auth-callback` deep link).
 struct EmailSignInView: View {
     /// Back from the address step, and a finished sign-in. Nil is onboarding's: its back and
     /// `.authenticated(.email)` events.
@@ -22,94 +22,78 @@ struct EmailSignInView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            SerifTitle(sentTo == nil ? "Continue with your email" : "Check your email", size: 33,
-                       color: Palette.ink, tracking: 0)
-                .padding(.top, 73.3)
-            if let sentTo {
-                Text("Enter the 6-digit code we sent to \(sentTo), or open the link in that email on this iPhone.")
-                    .font(.ui(16))
-                    .foregroundStyle(Palette.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 30)
-                    .padding(.top, 10)
-            }
+        OnboardingPage(top: .back(goBack)) {
+            OnboardingTitle(sentTo == nil ? OnboardingCopy.Email.title : OnboardingCopy.Email.sentTitle,
+                            line: sentTo.map(OnboardingCopy.Email.sentLine(to:)))
+                .padding(.top, 14)
             field
-                .padding(.top, sentTo == nil ? 36 : 24)
-            if let error {
-                Text(error)
-                    .font(.ui(14))
-                    .foregroundStyle(Palette.danger)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 10)
-            }
+                .padding(.top, 24)
+            FieldError(message: error)
+                .padding(.top, 10)
             Button {
                 submit()
             } label: {
-                if busy { ProgressView().tint(.white) } else { Text("Continue") }
+                // Disabled, and so grey, while it is busy.
+                if busy { ProgressView().tint(Theme.ink) } else { Text(OnboardingCopy.continue) }
             }
-            .buttonStyle(.pill(.ink))
+            .buttonStyle(.murmur(.primary))
             .disabled(!canSubmit || busy)
-            .padding(.top, error == nil ? 54 : 24)
+            .padding(.top, 24)
             if sentTo != nil {
-                Button("Send a new code") { resend() }
-                    .buttonStyle(.quiet(size: 15, weight: .medium))
-                    .padding(.top, 12)
+                Button(OnboardingCopy.Email.resend) { resend() }
+                    .buttonStyle(.textOnly)
                     .disabled(busy)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 4)
             }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, Metrics.authMargin)
-        .background(Palette.paper)
-        .overlay(alignment: .topLeading) {
-            CircleBackButton {
-                if sentTo != nil {
-                    sentTo = nil
-                    code = ""
-                    error = nil
-                } else if let onBack {
-                    onBack()
-                } else {
-                    model.onboarding.send(.back)
-                }
-            }
-            .padding(.leading, 16)
-            .padding(.top, -1)
         }
         .onAppear { focused = true }
         .onChange(of: sentTo) { focused = true }
+    }
+
+    /// From the code step, back to the address; from the address, out of this page.
+    private func goBack() {
+        if sentTo != nil {
+            sentTo = nil
+            code = ""
+            error = nil
+        } else if let onBack {
+            onBack()
+        } else {
+            model.onboarding.send(.back)
+        }
     }
 
     @ViewBuilder
     private var field: some View {
         Group {
             if sentTo == nil {
-                TextField("", text: $email, prompt: Text("Email address").foregroundStyle(Color(hex: 0xBDBCC1)))
+                TextField("", text: $email,
+                          prompt: Text(OnboardingCopy.Email.addressPrompt).foregroundStyle(Theme.third))
                     .textContentType(.emailAddress)
                     .keyboardType(.emailAddress)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .submitLabel(.continue)
             } else {
-                TextField("", text: $code, prompt: Text("123456").foregroundStyle(Color(hex: 0xBDBCC1)))
+                TextField("", text: $code,
+                          prompt: Text(OnboardingCopy.Email.codePrompt).foregroundStyle(Theme.third))
                     .textContentType(.oneTimeCode)
                     .keyboardType(.numberPad)
+                    .monospacedDigit()
                     .onChange(of: code) { _, newValue in
                         code = String(newValue.filter(\.isNumber).prefix(6))
                     }
             }
         }
-        .font(.ui(19))
-        .foregroundStyle(Palette.text)
-        .tint(Color(hex: 0x0A84FF))
+        .font(.murmur(.body))
+        .foregroundStyle(Theme.ink)
+        .tint(Theme.ink)
         .focused($focused)
         .onSubmit(submit)
-        .padding(.horizontal, 17)
-        .frame(height: 54)
-        .overlay {
-            RoundedRectangle(cornerRadius: Metrics.buttonRadius)
-                .stroke(Palette.ink, lineWidth: Metrics.borderWidth)
-        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 52)
+        .background(Theme.fill, in: .rect(cornerRadius: 16))
     }
 
     private var canSubmit: Bool {

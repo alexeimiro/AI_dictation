@@ -1,48 +1,33 @@
-import MurmurCore
 import MurmurUI
 import SwiftUI
 
-/// Reference 04: "Which of these do you resonate with?" Multi-select; Next needs one answer.
+/// "What do you want help with?" Any number of answers; Next needs one.
 struct UseCasesView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let store = model.onboarding
-        OnboardingPage(scrollable: false) {
-            ScrollView {
-                VStack(spacing: 0) {
-                    SerifTitle("Which of these do you resonate with?", size: 33, color: Palette.ink,
-                               tracking: -1.9, lineHeight: 40.5)
-                        .padding(.horizontal, 70)
-                        .padding(.top, 10)
-                    Text("Select all that apply.")
-                        .font(.ui(16, .medium))
-                        .foregroundStyle(Palette.ink)
-                        .padding(.top, 10)
-                    VStack(spacing: 14) {
-                        ForEach(UseCase.allCases) { useCase in
-                            OptionCard(useCase.title, systemImage: useCase.systemImage,
-                                       isSelected: store.answers.useCases.contains(useCase), height: 64) {
-                                store.send(.toggleUseCase(useCase))
-                            }
-                        }
+        OnboardingPage {
+            OnboardingTitle(OnboardingCopy.Survey.title, line: OnboardingCopy.Survey.line)
+                .padding(.top, 14)
+            VStack(spacing: 8) {
+                ForEach(UseCase.allCases) { useCase in
+                    OptionRow(useCase.title, isSelected: store.answers.useCases.contains(useCase)) {
+                        store.send(.toggleUseCase(useCase))
                     }
-                    .padding(.horizontal, 30)
-                    .padding(.top, 25)
-                    .padding(.bottom, 40)
                 }
             }
-            .scrollIndicators(.hidden)
-            .overlay(alignment: .bottom) { BottomFade() }
+            .padding(.top, 18)
         } actions: {
-            Button("Next") { store.send(.next) }
-                .buttonStyle(.pill(.ink))
+            Button(OnboardingCopy.next) { store.send(.next) }
+                .buttonStyle(.murmur(.primary))
                 .disabled(!store.allows(.next))
         }
     }
 }
 
-/// Reference 05: what Murmur does for the first thing the user picked.
+/// What Murmur does for the first thing the user picked: the talk button over a text box with
+/// that kind of writing in it.
 struct PersonalizedExplainerView: View {
     @Environment(AppModel.self) private var model
 
@@ -50,79 +35,67 @@ struct PersonalizedExplainerView: View {
         let store = model.onboarding
         let useCase = UseCase.allCases.first { store.answers.useCases.contains($0) } ?? .typeFaster
         OnboardingPage {
-            VStack(spacing: 0) {
-                SerifTitle("\(Brand.name) helps you \(useCase.benefit) in any app you like", accent: "any app",
-                           accentStyle: .italic, size: 33, color: Palette.ink, tracking: -1.9, lineHeight: 40.5)
-                    .padding(.horizontal, 22)
-                    .padding(.top, 10)
-                AnyAppIllustration(useCase: useCase)
-                    .frame(width: 345, height: 345)
-                    .padding(.top, 102.7)
-                Spacer(minLength: 0)
+            OnboardingTitle(OnboardingCopy.Explainer.title(benefit: useCase.benefit))
+                .padding(.top, 14)
+            Spacer(minLength: 32)
+            VStack(spacing: 44) {
+                TalkButtonPicture(size: 72, mode: .listening(reach: 1.9))
+                TextBoxPicture(label: useCase.place, text: useCase.sample)
             }
+            .frame(maxWidth: .infinity)
+            Spacer(minLength: 32)
         } actions: {
-            Button("Next") { store.send(.next) }
-                .buttonStyle(.pill(.ink))
+            Button(OnboardingCopy.next) { store.send(.next) }
+                .buttonStyle(.murmur(.primary))
         }
-    }
-}
-
-/// Fades scrolling cards out above the bottom button.
-struct BottomFade: View {
-    var body: some View {
-        LinearGradient(colors: [Palette.paper.opacity(0), Palette.paper], startPoint: .top, endPoint: .bottom)
-            .frame(height: 28)
-            .allowsHitTesting(false)
     }
 }
 
 extension UseCase {
     var title: String {
         switch self {
-        case .messages: "I can’t keep up with my messages"
-        case .emails: "Writing emails takes forever"
-        case .chatWithAI: "I want to chat with AI faster"
-        case .captureIdeas: "I struggle to capture ideas quickly"
-        case .onTheGo: "I often have to work on-the-go"
-        case .typeFaster: "I want to type faster on my phone"
-        case .typingIsHard: "Typing is hard for me"
+        case .messages: OnboardingCopy.Survey.messages
+        case .emails: OnboardingCopy.Survey.emails
+        case .chatWithAI: OnboardingCopy.Survey.chatWithAI
+        case .captureIdeas: OnboardingCopy.Survey.captureIdeas
+        case .onTheGo: OnboardingCopy.Survey.onTheGo
+        case .typeFaster: OnboardingCopy.Survey.typeFaster
+        case .typingIsHard: OnboardingCopy.Survey.typingIsHard
         }
     }
 
-    var systemImage: String {
-        switch self {
-        case .messages: "message"
-        case .emails: "envelope.open"
-        case .chatWithAI: "wand.and.sparkles"
-        case .captureIdeas: "lightbulb"
-        case .onTheGo: "shoe"
-        case .typeFaster: "keyboard.badge.ellipsis"
-        case .typingIsHard: "hand.raised"
-        }
-    }
-
-    /// "Murmur helps you <benefit> in any app you like".
+    /// "Murmur helps you <benefit>, wherever you write."
     var benefit: String {
         switch self {
-        case .messages: "answer messages faster"
-        case .emails: "write emails faster"
-        case .chatWithAI: "chat with AI faster"
-        case .captureIdeas: "capture ideas faster"
-        case .onTheGo: "write on the go"
-        case .typeFaster: "type faster"
-        case .typingIsHard: "write without typing"
+        case .messages: OnboardingCopy.Explainer.messages
+        case .emails: OnboardingCopy.Explainer.emails
+        case .chatWithAI: OnboardingCopy.Explainer.chatWithAI
+        case .captureIdeas: OnboardingCopy.Explainer.captureIdeas
+        case .onTheGo: OnboardingCopy.Explainer.onTheGo
+        case .typeFaster: OnboardingCopy.Explainer.typeFaster
+        case .typingIsHard: OnboardingCopy.Explainer.typingIsHard
         }
     }
 
-    /// The app tile on the explainer's illustration.
-    var appGlyph: String {
+    /// The label on the explainer's text box: where this kind of writing goes.
+    var place: String {
         switch self {
-        case .messages: "message.fill"
-        case .emails: "envelope.fill"
-        case .chatWithAI: "sparkles"
-        case .captureIdeas: "note.text"
-        case .onTheGo: "figure.walk"
-        case .typeFaster, .typingIsHard: "text.bubble.fill"
+        case .messages, .onTheGo, .typeFaster: OnboardingCopy.Explainer.message
+        case .emails: OnboardingCopy.Explainer.email
+        case .chatWithAI: OnboardingCopy.Explainer.assistant
+        case .captureIdeas, .typingIsHard: OnboardingCopy.Explainer.note
+        }
+    }
+
+    /// What was said into it.
+    var sample: String {
+        switch self {
+        case .messages, .typeFaster: OnboardingCopy.Explainer.messageSample
+        case .emails: OnboardingCopy.Explainer.emailSample
+        case .chatWithAI: OnboardingCopy.Explainer.assistantSample
+        case .captureIdeas: OnboardingCopy.Explainer.ideaSample
+        case .onTheGo: OnboardingCopy.Explainer.onTheGoSample
+        case .typingIsHard: OnboardingCopy.Explainer.noteSample
         }
     }
 }

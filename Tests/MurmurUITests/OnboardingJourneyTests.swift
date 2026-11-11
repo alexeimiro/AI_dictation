@@ -3,7 +3,11 @@ import XCTest
 /// The onboarding journey end to end on fake services (`-onboarding-fixtures`): sign-in, Settings,
 /// permission prompts and dictation are simulated, so nothing leaves the app. Its checkpoint lives
 /// in its own defaults suite, which lets these tests terminate and relaunch mid-journey.
+///
+/// The words come from `OnboardingCopy`, which the app's pages read too.
 final class OnboardingJourneyTests: XCTestCase {
+    private typealias Copy = OnboardingCopy
+
     private var app: XCUIApplication!
 
     override func setUp() {
@@ -12,8 +16,15 @@ final class OnboardingJourneyTests: XCTestCase {
     }
 
     private func launch(reset: Bool = true, extra: [String] = []) {
-        app.launchArguments = ["-onboarding-fixtures"] + (reset ? ["-onboarding-reset"] : []) + extra
+        launch(arguments: ["-onboarding-fixtures"] + (reset ? ["-onboarding-reset"] : []) + extra)
+    }
+
+    private func launch(arguments: [String]) {
+        app.launchArguments = arguments
         app.launch()
+        // A simulator that has only just booted takes its time over the first launch: wait for
+        // the first page (each has a button) before any test starts counting.
+        _ = app.buttons.firstMatch.waitForExistence(timeout: 45)
     }
 
     // MARK: Helpers
@@ -53,62 +64,69 @@ final class OnboardingJourneyTests: XCTestCase {
     }
 
     private func dictate() {
-        tap("Simulate dictation")
-        tap("Next", timeout: 6)
+        tap(Copy.Practice.simulate)
+        tap(Copy.next, timeout: 6)
     }
 
     // Steps, each ending on the next screen.
     private func throughSurvey() {
-        tap("Get started")
-        XCTAssertFalse(button("Next").isEnabled, "Next needs an answer")
-        tap("I want to type faster on my phone")
-        tap("Next")
-        expectText("in any app")
-        tap("Next")
+        tap(Copy.Welcome.button)
+        XCTAssertFalse(button(Copy.next).isEnabled, "Next needs an answer")
+        tap(Copy.Survey.typeFaster)
+        tap(Copy.next)
+        expectText(Copy.Explainer.ending)
+        tap(Copy.next)
     }
 
     private func throughSignIn() {
-        tap("Continue with Apple")
-        expectText("This only takes a moment")
+        tap(Copy.SignIn.apple)
+        expectText(Copy.SetupIntro.line)
     }
 
     private func throughKeyboardSetup() {
-        tap("Set up")
-        tap("Go to Settings")
-        expectText("Try a quick dictation")
-        tap("Try Murmur")
-        tap("Continue")
+        tap(Copy.SetupIntro.button)
+        tap(Copy.Keyboard.button)
+        expectText(Copy.PracticeIntro.line)
+        tap(Copy.PracticeIntro.button)
+        // The microphone page; the fake prompt grants it.
+        tap(Copy.continue)
     }
 
     private func throughPractice() {
-        expectText("appear like magic")
+        expectText(Copy.Practice.basicLine)
         dictate()
-        expectText("formatting and fixes mistakes")
+        expectText(Copy.Practice.emailLine)
         dictate()
-        tap("Continue")
-        expectText("Bring your phone close to your face")
+        // "You can whisper, too."
+        tap(Copy.continue)
+        expectText(Copy.Practice.whisperLine)
         dictate()
-        tap("Continue")
+        expectText(Copy.PracticeDone.title)
+        tap(Copy.continue)
     }
 
     private func throughWrapUp() {
-        tap("Next")
-        expectText("Choose how Murmur handles")
-        XCTAssertFalse(button("Next").isEnabled, "no consent is preselected")
-        tap("Don’t share data")
-        tap("Next")
-        expectText("Confirm your language")
-        tap("Next")
+        tap(Copy.next)
+        expectText(Copy.DataChoice.line)
+        XCTAssertFalse(button(Copy.next).isEnabled, "no consent is preselected")
+        tap(Copy.DataChoice.privateTitle)
+        tap(Copy.next)
+        expectText(Copy.Languages.title)
+        tap(Copy.next)
+        // A style's name, from MurmurCore.
         tap("Word for word")
-        tap("Next")
-        tap("Maybe later")
-        tap("Another time")
-        tap("Search engine")
-        tap("Next")
+        tap(Copy.next)
+        tap(Copy.Notifications.later)
+        tap(Copy.Desktop.decline)
+        tap(Copy.Referral.searchEngine)
+        tap(Copy.next)
         tap("Google")
-        tap("Next")
-        tap("Start Murmuring")
+        tap(Copy.next)
+        tap(Copy.Ready.button)
     }
+
+    /// The offer the fake server grants: a two-week trial.
+    private var trialTitle: String { Copy.Offer.trialTitle(days: 14) }
 
     // MARK: Journeys
 
@@ -119,81 +137,95 @@ final class OnboardingJourneyTests: XCTestCase {
         throughKeyboardSetup()
         throughPractice()
         throughWrapUp()
-        expectText("unlimited access for 2 weeks")
-        tap("Get started")
+        expectText(trialTitle)
+        tap(Copy.Offer.button)
         XCTAssertTrue(app.buttons["Menu"].waitForExistence(timeout: 5), "Home after the offer")
 
         // The next launch opens Home directly.
         app.terminate()
         launch(reset: false)
         XCTAssertTrue(app.buttons["Menu"].waitForExistence(timeout: 5))
-        XCTAssertFalse(button("Get started").exists)
+        XCTAssertFalse(button(Copy.Welcome.button).exists)
     }
 
     func testBackKeepsAnswersAndReturnsToTheRightScreen() {
         launch()
-        tap("Get started")
-        tap("I want to type faster on my phone")
-        tap("Next")
-        expectText("in any app")
-        tap("Back")
-        let choice = button("I want to type faster on my phone")
+        tap(Copy.Welcome.button)
+        tap(Copy.Survey.typeFaster)
+        tap(Copy.next)
+        expectText(Copy.Explainer.ending)
+        tap(Copy.back)
+        let choice = button(Copy.Survey.typeFaster)
         XCTAssertTrue(choice.waitForExistence(timeout: 5))
         XCTAssertTrue(choice.isSelected, "the answer survives going back")
-        XCTAssertTrue(button("Next").isEnabled)
-        tap("Back")
-        XCTAssertTrue(button("Get started").waitForExistence(timeout: 5))
+        XCTAssertTrue(button(Copy.next).isEnabled)
+        tap(Copy.back)
+        XCTAssertTrue(button(Copy.Welcome.button).waitForExistence(timeout: 5))
+    }
+
+    /// The welcome's three pages turn with a swipe (a screenshot route, where they don't turn by
+    /// themselves).
+    func testTheWelcomePagesTurnWithASwipe() {
+        launch(arguments: ["-onboarding-step", "welcome"])
+        expectText(Copy.Welcome.talk)
+        app.swipeLeft()
+        expectText(Copy.Welcome.languages)
+        app.swipeLeft()
+        expectText(Copy.Welcome.dictionary)
+        app.swipeRight()
+        expectText(Copy.Welcome.languages)
+        XCTAssertTrue(button(Copy.Welcome.button).isEnabled)
     }
 
     func testMoreOptionsOffersEmailWhichNeedsAValidAddress() {
         launch()
         throughSurvey()
-        tap("More options")
-        XCTAssertTrue(button("Continue with Email").waitForExistence(timeout: 5))
+        tap(Copy.SignIn.more)
+        XCTAssertTrue(button(Copy.SignIn.email).waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Continue with Microsoft")).firstMatch.exists,
                        "providers that don't work aren't shown")
-        tap("Continue with Email")
+        tap(Copy.SignIn.email)
         let field = app.textFields.firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.typeText("not-an-email")
-        XCTAssertFalse(button("Continue").isEnabled)
+        XCTAssertFalse(button(Copy.continue).isEnabled)
         field.typeText("@example.com")
-        tap("Continue")
-        expectText("Enter the 6-digit code")
+        tap(Copy.continue)
+        expectText(Copy.Email.sentLineStart)
         let code = app.textFields.firstMatch
         code.tap()
         code.typeText("123456")
-        tap("Continue")
-        expectText("This only takes a moment")
+        tap(Copy.continue)
+        expectText(Copy.SetupIntro.line)
     }
 
     func testTerminationResumesAtKeyboardSetupEachExerciseAndTheOffer() {
         launch()
         throughSurvey()
         throughSignIn()
-        tap("Set up")
+        tap(Copy.SetupIntro.button)
         relaunch()
-        expectText("Keyboard in Settings")
+        expectText(Copy.Keyboard.title)
 
-        tap("Go to Settings")
-        tap("Try Murmur")
-        tap("Continue")
+        tap(Copy.Keyboard.button)
+        tap(Copy.PracticeIntro.button)
+        tap(Copy.continue)
         relaunch()
-        expectText("appear like magic")
+        expectText(Copy.Practice.basicLine)
         dictate()
         relaunch()
-        expectText("formatting and fixes mistakes")
+        expectText(Copy.Practice.emailLine)
         dictate()
-        tap("Continue")
+        tap(Copy.continue)
         relaunch()
-        expectText("Bring your phone close to your face")
+        expectText(Copy.Practice.whisperLine)
         dictate()
-        tap("Continue")
+        tap(Copy.continue)
         throughWrapUp()
-        expectText("unlimited access")
+        expectText(trialTitle)
         relaunch()
-        expectText("unlimited access")
-        tap("Get started")
+        expectText(trialTitle)
+        tap(Copy.Offer.button)
         XCTAssertTrue(app.buttons["Menu"].waitForExistence(timeout: 5))
     }
 
@@ -205,35 +237,33 @@ final class OnboardingJourneyTests: XCTestCase {
     // MARK: Offer variants (screenshot routes)
 
     func testOfferVariantsComeFromTheServerAnswer() {
-        for (variant, text) in [("trial", "unlimited access for 2 weeks"), ("subscriber", "subscription is active"),
-                                ("free", "words of dictation every week")] {
-            app.launchArguments = ["-onboarding-step", "trialOffer", "-onboarding-variant", variant]
-            app.launch()
+        for (variant, text) in [("trial", trialTitle), ("subscriber", Copy.Offer.subscriberTitle),
+                                ("free", Copy.Offer.freeTitle)] {
+            launch(arguments: ["-onboarding-step", "trialOffer", "-onboarding-variant", variant])
             expectText(text)
-            XCTAssertTrue(button("Get started").isEnabled)
+            XCTAssertTrue(button(Copy.Offer.button).isEnabled)
             app.terminate()
         }
-        app.launchArguments = ["-onboarding-step", "trialOffer", "-onboarding-variant", "offline"]
-        app.launch()
-        expectText("Couldn’t load your plan")
-        XCTAssertTrue(button("Try again").waitForExistence(timeout: 5))
+        launch(arguments: ["-onboarding-step", "trialOffer", "-onboarding-variant", "offline"])
+        expectText(Copy.Offer.failedTitle)
+        XCTAssertTrue(button(Copy.Offer.retry).waitForExistence(timeout: 5))
     }
 
     /// The server rejected the session after sign-in, so the offer can't load and this page has
     /// no way back. It opens the sign-in sheet instead of a retry that can't work, and going on
     /// as a guest there finishes onboarding.
     func testASignOutBeforeTheOfferStillLetsOnboardingFinish() {
-        app.launchArguments = ["-onboarding-step", "trialOffer", "-account-state", "signedOut",
-                               "-account-email", "olga@example.com"]
-        app.launch()
-        expectText("You’re signed out")
-        XCTAssertFalse(button("Try again").exists)
-        tap("Sign in again")
+        launch(arguments: ["-onboarding-step", "trialOffer", "-account-state", "signedOut",
+                           "-account-email", "olga@example.com"])
+        expectText(Copy.Offer.signedOutTitle)
+        XCTAssertFalse(button(Copy.Offer.retry).exists)
+        tap(Copy.Offer.signInAgain)
+        // The sign-in sheet's own words.
         expectText("You were signed in as olga@example.com")
         tap("Continue without an account")
         tap("Continue as a guest")
-        expectText("unlimited access for 2 weeks")
-        tap("Get started")
+        expectText(trialTitle)
+        tap(Copy.Offer.button)
         XCTAssertTrue(app.buttons["Menu"].waitForExistence(timeout: 5), "Home after the offer")
     }
 }

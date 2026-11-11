@@ -51,8 +51,9 @@ struct StyleView: View {
     }
 }
 
-/// A style with its example: what Murmur writes from `StyleView.spoken`.
-private struct StyleCard: View {
+/// A style with its example: what Murmur writes from `StyleView.spoken`. Onboarding's style page
+/// shows the same cards.
+struct StyleCard: View {
     let style: StylePreset
     let isSelected: Bool
     let select: () -> Void

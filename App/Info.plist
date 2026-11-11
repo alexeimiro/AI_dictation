@@ -80,15 +80,6 @@
 	<string>Murmur listens only while you dictate, to turn your speech into text.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
-	<key>UIAppFonts</key>
-	<array>
-		<string>EBGaramond-Regular.ttf</string>
-		<string>EBGaramond-Medium.ttf</string>
-		<string>EBGaramond-Italic.ttf</string>
-		<string>Figtree-Regular.ttf</string>
-		<string>Figtree-Medium.ttf</string>
-		<string>Figtree-SemiBold.ttf</string>
-	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

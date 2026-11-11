@@ -2,8 +2,7 @@ import MurmurCore
 import MurmurUI
 import SwiftUI
 
-/// References 06–07: "Start typing 4x faster with your voice", Google and Apple first, then
-/// "More options" for email. Wispr Flow's Microsoft and SSO aren't offered.
+/// "Sign in to start": Google and Apple first, then "More options" for email.
 struct SignInView: View {
     let expanded: Bool
     @Environment(AppModel.self) private var model
@@ -12,60 +11,37 @@ struct SignInView: View {
 
     var body: some View {
         let auth = model.onboardingServices.auth
-        VStack(spacing: 0) {
-            Wordmark(height: 35)
-                .padding(.top, 33.3)
-            SerifTitle("Start typing 4x faster with your voice", accent: "4x faster", size: 33,
-                       color: Palette.ink, tracking: -0.85, lineHeight: 37)
-                .padding(.horizontal, 60)
-                .padding(.top, 165.6)
-            VStack(spacing: 15) {
+        OnboardingPage(top: expanded ? .back({ model.onboarding.send(.back) }) : .wordmark) {
+            Spacer(minLength: 24)
+            OnboardingTitle(OnboardingCopy.SignIn.title, line: OnboardingCopy.SignIn.line, size: .statement)
+        } actions: {
+            VStack(spacing: 10) {
                 // Provider marks other than Apple's need the providers' official assets; until
                 // they're added, these buttons are text only.
-                providerButton(.google, title: "Continue with Google", style: .outline) { EmptyView() }
-                providerButton(.apple, title: "Continue with Apple", style: .ink) {
-                    Image(systemName: "apple.logo").font(.system(size: 21)).accessibilityHidden(true)
+                providerButton(.google, title: OnboardingCopy.SignIn.google, kind: .secondary) { EmptyView() }
+                providerButton(.apple, title: OnboardingCopy.SignIn.apple, kind: .apple) {
+                    Image(systemName: "apple.logo").font(.system(size: 19)).accessibilityHidden(true)
                 }
                 if expanded {
-                    Button("Continue with Email") { model.onboarding.send(.showEmailSignIn) }
-                        .buttonStyle(.pill(.subtle))
-                        .transition(.move(edge: .top).combined(with: .opacity))
+                    Button(OnboardingCopy.SignIn.email) { model.onboarding.send(.showEmailSignIn) }
+                        .buttonStyle(.murmur(.secondary))
+                        .disabled(busy != nil)
                 }
             }
-            .padding(.horizontal, Metrics.authMargin)
-            .padding(.top, 50.8)
-            .animation(.smooth(duration: 0.35), value: expanded)
             if !expanded {
-                Button("More options") { model.onboarding.send(.showSignInOptions) }
-                    .buttonStyle(.quiet(size: 19, weight: .medium))
-                    .padding(.top, 21.8)
+                Button(OnboardingCopy.SignIn.more) { model.onboarding.send(.showSignInOptions) }
+                    .buttonStyle(.textOnly)
+                    .padding(.top, 4)
             }
-            if let error {
-                Text(error)
-                    .font(.ui(14))
-                    .foregroundStyle(Palette.danger)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 30)
-                    .padding(.top, 12)
-            }
+            FieldError(message: error)
+                .padding(.top, 8)
             if !auth.isAvailable {
-                Button("Continue without an account") { model.onboarding.send(.authenticated(.localOnly)) }
-                    .buttonStyle(.quiet(size: 16, weight: .medium))
-                    .padding(.top, 8)
+                Button(OnboardingCopy.SignIn.withoutAccount) { model.onboarding.send(.authenticated(.localOnly)) }
+                    .buttonStyle(.textOnly)
             }
             LegalFootnote()
-                .padding(.horizontal, 46.5)
-                .padding(.top, expanded ? 14 : 23.7)
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity)
-        .background(Palette.paper)
-        .overlay(alignment: .topLeading) {
-            if expanded {
-                CircleBackButton { model.onboarding.send(.back) }
-                    .padding(.leading, 16)
-                    .padding(.top, -1)
-            }
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
         }
         .task {
             // A session from an earlier install (kept in the Keychain) skips this screen.
@@ -73,22 +49,23 @@ struct SignInView: View {
         }
     }
 
-    private func providerButton(_ method: AuthMethod, title: String, style: PillButtonStyle.Variant,
+    private func providerButton(_ method: AuthMethod, title: String, kind: MurmurButtonStyle.Kind,
                                 @ViewBuilder icon: () -> some View) -> some View {
         let icon = icon()
         return Button {
             signIn(method)
         } label: {
-            HStack(spacing: 13) {
+            HStack(spacing: 10) {
                 if busy == method {
-                    ProgressView().tint(style == .ink ? .white : Palette.ink)
+                    // Every button is disabled, and so grey, while one of them is busy.
+                    ProgressView().tint(Theme.ink)
                 } else {
                     icon
                 }
                 Text(title)
             }
         }
-        .buttonStyle(.pill(style))
+        .buttonStyle(.murmur(kind))
         .disabled(busy != nil)
     }
 
@@ -116,18 +93,18 @@ struct SignInView: View {
 struct LegalFootnote: View {
     var body: some View {
         Text(attributed)
-            .font(.ui(12))
-            .foregroundStyle(Palette.fineprint)
+            .font(.murmur(.footnote))
+            .foregroundStyle(Theme.third)
             .multilineTextAlignment(.center)
-            .lineSpacing(1.7)
-            .tint(Palette.ink)
+            .tint(Theme.ink)
+            .frame(maxWidth: .infinity)
     }
 
     private var attributed: AttributedString {
-        var text = AttributedString("By continuing, you acknowledge that you have read and agreed to our ")
-        text += link("Terms of Service", url: Brand.termsURL)
-        text += AttributedString(" and ")
-        text += link("Privacy Policy", url: Brand.privacyURL)
+        var text = AttributedString(OnboardingCopy.SignIn.legalStart)
+        text += link(OnboardingCopy.SignIn.terms, url: Brand.termsURL)
+        text += AttributedString(OnboardingCopy.SignIn.legalJoin)
+        text += link(OnboardingCopy.SignIn.privacy, url: Brand.privacyURL)
         text += AttributedString(".")
         return text
     }
@@ -135,7 +112,7 @@ struct LegalFootnote: View {
     private func link(_ title: String, url: URL?) -> AttributedString {
         var part = AttributedString(title)
         part.underlineStyle = .single
-        part.foregroundColor = Palette.ink
+        part.foregroundColor = Theme.ink
         part.link = url
         return part
     }

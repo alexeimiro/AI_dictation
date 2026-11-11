@@ -5,7 +5,7 @@ import MurmurCore
 /// Deterministic onboarding states for `-onboarding-step` screenshot routes: the answers and setup
 /// a user would have on that screen, plus the screen-specific `-onboarding-variant`.
 ///
-/// Variants: `welcome` page1…page3 · `keyboardInstructions` partial · `microphonePrimer` denied ·
+/// Variants: `welcome` talk, languages, dictionary · `keyboardInstructions` partial · `microphonePrimer` denied ·
 /// practice screens guide, ready, listening, result · `dataChoice` improve, doNotShare ·
 /// `trialOffer` trial, subscriber, free, offline.
 enum OnboardingFixtures {
@@ -61,10 +61,10 @@ enum OnboardingFixtures {
         }
     }
 
-    /// Welcome carousel page: references 01, 02 and 03 show the dictionary, speed and languages pages.
+    /// Which of the welcome's three pages shows.
     static func welcomePage(variant: String?) -> Int {
         switch variant {
-        case "speed": WelcomePage.speed.rawValue
+        case "talk": WelcomePage.talk.rawValue
         case "languages": WelcomePage.languages.rawValue
         case "dictionary": WelcomePage.dictionary.rawValue
         default: 0
@@ -93,7 +93,7 @@ enum OnboardingFixtures {
         }
     }
 
-    /// Home after onboarding (reference 42): the three practice takes, newest first.
+    /// Home after onboarding: the three practice takes, newest first.
     @MainActor
     static func seedCompletedHistory(_ history: HistoryStore, now: Date = Date()) {
         for (index, exercise) in PracticeExercise.allCases.enumerated() {

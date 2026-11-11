@@ -14,6 +14,9 @@ final class NavigationTests: XCTestCase {
     private func launch(route: String = "home", extra: [String] = []) {
         app.launchArguments = ["-route", route, "-fixtures"] + extra
         app.launch()
+        // A simulator that has only just booted takes its time over the first launch: wait for
+        // the first screen (each has a button) before any test starts counting.
+        _ = app.buttons.firstMatch.waitForExistence(timeout: 45)
     }
 
     // MARK: Helpers

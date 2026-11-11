@@ -5,19 +5,26 @@ import SwiftUI
 /// which, and pages only send events.
 struct OnboardingRootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let store = model.onboarding
         ZStack {
-            Palette.paper.ignoresSafeArea()
+            Theme.canvas.ignoresSafeArea()
             page(for: store.step)
+                .environment(\.onboardingStep, store.step)
                 .id(store.step)
-                .transition(store.movedBack ? .onboardingBackward : .onboardingForward)
+                .transition(transition(back: store.movedBack))
         }
         .animation(.smooth(duration: 0.35), value: store.step)
-        .preferredColorScheme(.light)
         // Text scales up to XXXL; the accessibility sizes beyond it are capped here.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+    }
+
+    /// Pages slide the way the journey moves; under Reduce Motion they fade.
+    private func transition(back: Bool) -> AnyTransition {
+        if reduceMotion { return .opacity }
+        return back ? .onboardingBackward : .onboardingForward
     }
 
     @ViewBuilder

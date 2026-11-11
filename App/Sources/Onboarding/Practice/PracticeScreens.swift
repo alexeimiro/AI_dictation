@@ -1,97 +1,69 @@
-import MurmurCore
 import MurmurUI
 import SwiftUI
 
-/// Reference 26.
+/// Before the last exercise: the talk button with a whisper's rings, which stay close.
 struct WhisperIntroView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        OnboardingPage(actionInset: Metrics.authMargin) {
-            VStack(spacing: 0) {
-                SerifTitle("You can even whisper with \(Brand.name).", accent: "whisper", accentStyle: .italic,
-                           size: 33, color: Palette.ink, tracking: -0.2, lineHeight: 42.2)
-                    .padding(.horizontal, 40)
-                    .padding(.top, 20)
-                WhisperIllustration()
-                    .frame(width: 232, height: 401)
-                    .padding(.top, 38.3)
-                Spacer(minLength: 0)
+        OnboardingPage {
+            Spacer(minLength: 16)
+            VStack(spacing: 44) {
+                TalkButtonPicture(mode: .listening(reach: 1.35))
+                Text(verbatim: OnboardingCopy.WhisperIntro.caption)
+                    .font(.murmur(.footnote, weight: .semibold))
+                    .foregroundStyle(Theme.second)
             }
+            .frame(maxWidth: .infinity)
+            Spacer(minLength: 16)
+            OnboardingTitle(OnboardingCopy.WhisperIntro.title, line: OnboardingCopy.WhisperIntro.line)
         } actions: {
-            Button("Continue") { model.onboarding.send(.next) }
-                .buttonStyle(.pill(.ink))
+            Button(OnboardingCopy.continue) { model.onboarding.send(.next) }
+                .buttonStyle(.murmur(.primary))
         }
     }
 }
 
-/// Reference 30: Continue commits the practice section.
+/// After the exercises: a tick for each one done. Continue commits the practice section.
 struct PracticeCompleteView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        VStack(spacing: 0) {
-            OnboardingHeader()
-            SerifTitle("Congrats! You’ve experienced the magic of \(Brand.name)", size: 46, color: Palette.ink,
-                       tracking: -1.2, lineHeight: 58.7, trailing: Sparkles.image(size: 36), alignment: .leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 55)
-                .padding(.trailing, 0)
-                .padding(.top, 66)
-            StreakCard(days: 1)
-                .padding(.horizontal, 45)
-                .padding(.top, 64)
-            Spacer(minLength: 0)
-            Button("Continue") { model.onboarding.send(.next) }
-                .buttonStyle(.pill(.ink, height: 53))
-                .padding(.horizontal, Metrics.authMargin)
-                .padding(.bottom, 10)
+        let record = model.onboarding.record
+        // Every exercise can be skipped, so the page says only what happened.
+        let anyDone = PracticeExercise.allCases.contains(where: record.isDone)
+        OnboardingPage {
+            Spacer(minLength: 24)
+            VStack(alignment: .leading, spacing: 18) {
+                ForEach(PracticeExercise.allCases, id: \.self) { exercise in
+                    let done = record.isDone(exercise)
+                    HStack(spacing: 12) {
+                        CheckCircle(isOn: done)
+                        Text(verbatim: exercise.doneTitle)
+                            .font(.murmur(.body, weight: done ? .semibold : .regular))
+                            .foregroundStyle(done ? Theme.ink : Theme.second)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityValue(done ? OnboardingCopy.PracticeDone.done : OnboardingCopy.PracticeDone.skipped)
+                }
+            }
+            Spacer(minLength: 24)
+            OnboardingTitle(anyDone ? OnboardingCopy.PracticeDone.title : OnboardingCopy.PracticeDone.skippedTitle,
+                            line: anyDone ? nil : OnboardingCopy.PracticeDone.skippedLine, size: .statement)
+        } actions: {
+            Button(OnboardingCopy.continue) { model.onboarding.send(.next) }
+                .buttonStyle(.murmur(.primary))
         }
-        .background(Palette.paper)
     }
 }
 
-/// "1 Day Streak", with the first of five days ticked.
-private struct StreakCard: View {
-    let days: Int
-
-    var body: some View {
-        VStack(spacing: 0) {
-            Text("\(days) Day Streak 🔥")
-                .font(.serif(30))
-                .foregroundStyle(Palette.ink)
-                .padding(.top, 27)
-            Text("Keep dictating for the next 5 days\nto make it a habit!")
-                .font(.ui(16, .medium))
-                .foregroundStyle(Palette.text)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 18)
-                .padding(.top, 12)
-            HStack(spacing: 0) {
-                ForEach(1...5, id: \.self) { day in
-                    VStack(spacing: 8) {
-                        Circle()
-                            .fill(day <= days ? Palette.accent : Color(hex: 0xF4F2F4))
-                            .frame(width: 32, height: 32)
-                            .overlay {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(day <= days ? .white : Palette.accent.opacity(0.35))
-                            }
-                        Text("Day \(day)")
-                            .font(.ui(13))
-                            .foregroundStyle(day <= days ? Palette.ink : Palette.muted)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            }
-            .padding(.horizontal, 22)
-            .padding(.top, 16)
-            .padding(.bottom, 24)
+extension PracticeExercise {
+    /// What the user did in it, on the page after the exercises.
+    var doneTitle: String {
+        switch self {
+        case .basic: OnboardingCopy.PracticeDone.spoke
+        case .formatting: OnboardingCopy.PracticeDone.email
+        case .whisper: OnboardingCopy.PracticeDone.whispered
         }
-        .frame(maxWidth: .infinity)
-        .background(Palette.paper, in: .rect(cornerRadius: 20))
-        .overlay { RoundedRectangle(cornerRadius: 20).stroke(Color(hex: 0xE6E5E9), lineWidth: 1.5) }
-        .accessibilityElement(children: .combine)
     }
 }

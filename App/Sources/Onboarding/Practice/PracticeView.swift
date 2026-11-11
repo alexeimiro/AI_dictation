@@ -3,8 +3,8 @@ import MurmurUI
 import SwiftUI
 import UIKit
 
-/// References 19–29: the three exercises. The text box is a real text view, so the dictation runs
-/// through the real Murmur keyboard and session; the screen only watches the result.
+/// The three exercises. The text box is a real text view, so the dictation runs through the real
+/// Murmur keyboard and session; the page only watches the result.
 struct PracticeView: View {
     let exercise: PracticeExercise
     @Environment(AppModel.self) private var model
@@ -15,50 +15,46 @@ struct PracticeView: View {
     var body: some View {
         let store = model.onboarding
         let done = store.record.isDone(exercise)
-        VStack(spacing: 0) {
-            OnboardingHeader()
-            VStack(spacing: 0) {
-                title
-                    .padding(.top, showsKeyboardGuide ? 28 : exercise == .basic ? 26 : 24.5)
-                if let subtitle {
-                    Text(subtitle)
-                        .font(.ui(14.5, .medium))
-                        .foregroundStyle(Palette.ink)
-                        .padding(.top, 9)
-                }
-                if showsKeyboardGuide {
-                    GlobeKeyIllustration()
-                        .frame(width: 271, height: 232)
-                        .padding(.top, 30.7)
-                }
-                // Under the guide the box stays focused but hidden, so the real keyboard is up to
-                // switch from (reference 20); picking Murmur's reveals the same box, keyboard still up.
-                editor
-                    .padding(.top, exercise == .basic ? 13 : 14)
-                    .padding(.horizontal, 20)
-                    .frame(height: showsKeyboardGuide ? 0 : nil, alignment: .top)
-                    .opacity(showsKeyboardGuide ? 0 : 1)
-                    .allowsHitTesting(!showsKeyboardGuide)
-                    .accessibilityHidden(showsKeyboardGuide)
-                feedback
-                if done {
-                    Button("Next") { store.send(.next) }
-                        .buttonStyle(.pill(.ink))
-                        .padding(.horizontal, 20)
-                        .padding(.top, 14)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-                Spacer(minLength: 0)
+        // Next is held above the keyboard; what is over it scrolls when it doesn't fit.
+        OnboardingPage {
+            title
+                .padding(.top, 8)
+            if let line {
+                Text(verbatim: line)
+                    .font(.murmur(.callout))
+                    .foregroundStyle(Theme.second)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 6)
             }
-            .animation(.smooth(duration: 0.3), value: done)
+            if showsKeyboardGuide {
+                KeyboardPickerPicture()
+                    .padding(.top, 22)
+            }
+            // Under the guide the box stays focused but hidden, so the real keyboard is up to
+            // switch from; picking Murmur's reveals the same box, keyboard still up.
+            editor
+                .padding(.top, 12)
+                .frame(height: showsKeyboardGuide ? 0 : nil, alignment: .top)
+                .opacity(showsKeyboardGuide ? 0 : 1)
+                .allowsHitTesting(!showsKeyboardGuide)
+                .accessibilityHidden(showsKeyboardGuide)
+            feedback
+        } actions: {
+            if done {
+                Button(OnboardingCopy.next) { store.send(.next) }
+                    .buttonStyle(.murmur(.primary))
+                    .transition(.opacity)
+            }
         }
-        .background(Palette.paper)
+        .animation(.smooth(duration: 0.3), value: done)
         .overlay(alignment: .bottomTrailing) {
             // UI tests drive the scripted dictation from here; never shown otherwise.
             if model.launchOptions.onboardingFixtures {
-                Button("Simulate dictation") { model.practice.simulateDictation() }
-                    .font(.ui(13))
+                Button(OnboardingCopy.Practice.simulate) { model.practice.simulateDictation() }
+                    .font(.murmur(.footnote))
                     .padding(12)
+                    // Clear of Next.
+                    .padding(.bottom, 84)
             }
         }
         .task {
@@ -90,136 +86,142 @@ struct PracticeView: View {
 
     @ViewBuilder
     private var title: some View {
+        Group {
+            switch exercise {
+            case .basic where showsKeyboardGuide:
+                Text(verbatim: OnboardingCopy.Practice.guideTitle)
+            case .basic:
+                // The red ✓ the talk button shows while it listens.
+                let check = Text(Image(systemName: "checkmark.circle.fill")).foregroundStyle(Theme.live)
+                Text("\(OnboardingCopy.Practice.basicTitle) \(check)")
+                    .accessibilityLabel(OnboardingCopy.Practice.basicTitleSpoken)
+            case .formatting:
+                Text(verbatim: OnboardingCopy.Practice.emailTitle)
+            case .whisper:
+                Text(verbatim: OnboardingCopy.Practice.whisperTitle)
+            }
+        }
+        .font(.murmur(.title2))
+        .tracking(-0.4)
+        .foregroundStyle(Theme.ink)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private var line: String? {
         switch exercise {
-        case .basic where showsKeyboardGuide:
-            SerifTitle("Tap and hold 🌐, then\npick the \(Brand.name) keyboard", size: 33,
-                       color: Palette.ink, tracking: -0.4, lineHeight: 39)
-                .padding(.horizontal, 20)
-        case .basic:
-            let check = Text(CheckBadge.image(size: 30)).baselineOffset(-5)
-            let sparkles = Text(Sparkles.image(size: 23)).baselineOffset(-1)
-            Text("Say anything, tap \(check), and see it appear like magic\u{00A0}\(sparkles)")
-                .font(.serif(31))
-                .tracking(0)
-                .foregroundStyle(Palette.ink)
-                .multilineTextAlignment(.center)
-                .lineHeight(.exact(points: 42.7))
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 22)
-        case .formatting:
-            SwashTitle(lead: "Try dictating an ", accent: "email", tail: "", size: 39)
-        case .whisper:
-            SwashTitle(lead: "Try ", accent: "whispering", tail: " a note", size: 41)
+        case .basic: showsKeyboardGuide ? nil : OnboardingCopy.Practice.basicLine
+        case .formatting: OnboardingCopy.Practice.emailLine
+        case .whisper: OnboardingCopy.Practice.whisperLine
         }
     }
 
-    private var subtitle: String? {
-        switch exercise {
-        case .basic: nil
-        case .formatting: "\(Brand.name) handles formatting and fixes mistakes!"
-        case .whisper: "Bring your phone close to your face"
-        }
-    }
-
-    @ViewBuilder
+    /// The box: a soft card with the text view in it, and for the email and the note a small
+    /// label saying what it stands for.
     private var editor: some View {
         // Fixture runs keep the keyboard down: they dictate through the scripted client.
-        let field = PracticeTextView(text: $text, fontSize: textSize,
-                                     focusOnAppear: !model.launchOptions.usesOnboardingFixtures) { active in
+        let field = PracticeTextView(text: $text, focusOnAppear: !model.launchOptions.usesOnboardingFixtures) { active in
             if !model.launchOptions.usesOnboardingFixtures { murmurKeyboardActive = active }
         }
-        switch exercise {
-        case .basic:
+        return VStack(alignment: .leading, spacing: 0) {
+            if let label = boxLabel {
+                Text(verbatim: label)
+                    .font(.murmur(.footnote, weight: .semibold))
+                    .foregroundStyle(Theme.third)
+                    .padding(.leading, 5)
+                    .padding(.top, 6)
+            }
             field
-                .overlay(alignment: .topLeading) { placeholder("Say something!") }
-                .padding(.horizontal, 22)
-                .padding(.vertical, 12)
-                .frame(height: 149)
-                .background(Palette.paper, in: .rect(cornerRadius: 16))
-                .overlay { RoundedRectangle(cornerRadius: 16).stroke(Color(hex: 0xE6E5E9), lineWidth: 1) }
-        case .formatting:
-            PracticeCard(height: 189) {
-                HStack(spacing: 12) {
-                    Image(systemName: "envelope.fill").font(.system(size: 16)).foregroundStyle(Palette.accent)
-                    Text("Mail").font(.ui(15, .medium))
-                    Spacer()
-                    Image(systemName: "paperplane").font(.system(size: 16))
-                }
-            } content: {
-                field.overlay(alignment: .topLeading) {
-                    placeholder("Hey Tim, are you available on Friday at 3pm…actually 4pm?")
-                }
-            }
-        case .whisper:
-            PracticeCard(height: 187) {
-                HStack(spacing: 18) {
-                    Image(systemName: "checkmark")
-                    Image(systemName: "arrow.uturn.backward")
-                    Image(systemName: "arrow.uturn.forward")
-                    Spacer()
-                    Image(systemName: "ellipsis")
-                }
-                .font(.system(size: 16))
-                .overlay { Text("Notes").font(.ui(14.5, .medium)) }
-            } content: {
-                field.overlay(alignment: .topLeading) {
-                    placeholder("Things to do today:\n1. Run the laundry\n2. Buy groceries")
-                }
-            }
+                .overlay(alignment: .topLeading) { placeholder }
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 6)
+        // As tall as three lines need, and no taller: on the smallest iPhone the page then fits
+        // over the keyboard.
+        .frame(height: exercise == .basic ? 112 : 124)
+        .background(Theme.fill, in: .rect(cornerRadius: 20))
+    }
+
+    private var boxLabel: String? {
+        switch exercise {
+        case .basic: nil
+        case .formatting: OnboardingCopy.Practice.emailLabel
+        case .whisper: OnboardingCopy.Practice.noteLabel
         }
     }
 
-    /// The box text: a little smaller in the email and note cards.
-    private var textSize: CGFloat { exercise == .basic ? 17 : 17.5 }
-
+    /// What to say, in the empty box. It sits where the text view's first line does.
     @ViewBuilder
-    private func placeholder(_ value: String) -> some View {
+    private var placeholder: some View {
         if text.isEmpty {
-            Text(value)
-                .font(.ui(textSize))
-                .foregroundStyle(Color(hex: 0xA9A7AD))
-                .lineSpacing(exercise == .formatting ? 6.5 : PracticeTextView.lineSpacing)
+            Text(verbatim: prompt)
+                .font(.transcript(.body))
+                .foregroundStyle(Theme.third)
+                .lineSpacing(PracticeTextView.lineSpacing)
                 .padding(.top, 8)
                 .padding(.leading, 5)
                 .allowsHitTesting(false)
+                .accessibilityHidden(true)
         }
     }
 
+    private var prompt: String {
+        switch exercise {
+        case .basic: OnboardingCopy.Practice.basicPrompt
+        case .formatting: OnboardingCopy.Practice.emailPrompt
+        case .whisper: OnboardingCopy.Practice.notePrompt
+        }
+    }
+
+    /// Under the box: what the dictation is doing, since the keyboard's own talk button is easy
+    /// to miss while watching the box for the result.
     @ViewBuilder
     private var feedback: some View {
-        switch model.practice.state {
-        case .listening:
-            PracticeRecognitionIndicator(mode: .listening)
-                .padding(.top, 12)
-                .transition(.opacity.combined(with: .scale(scale: 0.96)))
-        case .processing:
-            PracticeRecognitionIndicator(mode: .processing)
-                .padding(.top, 12)
-                .transition(.opacity.combined(with: .scale(scale: 0.96)))
-        default:
-            fallbackFeedback
+        Group {
+            switch model.practice.state {
+            case .listening:
+                status(OnboardingCopy.Practice.listening) {
+                    Circle()
+                        .fill(Theme.live)
+                        .frame(width: 10, height: 10)
+                }
+            case .processing:
+                status(OnboardingCopy.Practice.writing) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(Theme.ink)
+                }
+            default:
+                fallbackFeedback
+            }
         }
+        .padding(.top, 12)
+    }
+
+    private func status(_ words: String, @ViewBuilder marker: () -> some View) -> some View {
+        HStack(spacing: 10) {
+            marker()
+            Text(verbatim: words)
+                .font(.murmur(.subhead, weight: .semibold))
+                .foregroundStyle(Theme.ink)
+        }
+        .accessibilityElement(children: .combine)
+        .transition(.opacity)
     }
 
     @ViewBuilder
     private var fallbackFeedback: some View {
         if fullAccessHint {
-            HStack(spacing: 10) {
-                Text("Turn on Allow Full Access so the keyboard can dictate.")
-                    .font(.ui(14))
-                    .foregroundStyle(Palette.text)
-                Button("Open Settings") { model.setup.openSettings() }
-                    .font(.ui(14, .semibold))
-                    .foregroundStyle(Palette.ink)
+            ActionRow {
+                Text(verbatim: OnboardingCopy.Practice.fullAccess)
+                    .font(.murmur(.subhead))
+                    .foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(OnboardingCopy.openSettings) { model.setup.openSettings() }
+                    .buttonStyle(.murmur(.secondary, size: .compact))
             }
-            .padding(.horizontal, 22)
-            .padding(.top, 12)
         } else if case .failed(let message) = model.practice.state {
-            Text(message)
-                .font(.ui(14))
-                .foregroundStyle(Palette.danger)
-                .padding(.horizontal, 22)
-                .padding(.top, 12)
+            FieldError(message: message)
         }
     }
 
@@ -245,150 +247,12 @@ struct PracticeView: View {
     }
 }
 
-/// Keeps speech recognition visible above the system keyboard. The practice screen previously
-/// relied on the keyboard's changing mic glyph, which was easy to miss while watching the text
-/// field for the result.
-private struct PracticeRecognitionIndicator: View {
-    enum Mode: Equatable { case listening, processing }
-
-    let mode: Mode
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulses = false
-
-    var body: some View {
-        HStack(spacing: 10) {
-            if mode == .listening {
-                ZStack {
-                    Circle()
-                        .fill(Palette.danger.opacity(0.16))
-                        .frame(width: 24, height: 24)
-                        .scaleEffect(pulses ? 1.2 : 0.85)
-                    Circle()
-                        .fill(Palette.danger)
-                        .frame(width: 10, height: 10)
-                }
-                Image(systemName: "waveform")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(Palette.danger)
-                Text("Listening — speak now")
-            } else {
-                ProgressView()
-                    .tint(Palette.accent)
-                Text("Turning your speech into text…")
-            }
-        }
-        .font(.ui(15, .semibold))
-        .foregroundStyle(Palette.ink)
-        .padding(.horizontal, 16)
-        .frame(height: 44)
-        .background(Palette.paper, in: .capsule)
-        .overlay {
-            Capsule()
-                .stroke(mode == .listening ? Palette.danger.opacity(0.45) : Palette.accent.opacity(0.35),
-                        lineWidth: 1.5)
-        }
-        .shadow(color: Palette.ink.opacity(0.08), radius: 8, y: 3)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(mode == .listening ? "Listening. Speak now." : "Turning your speech into text.")
-        .onAppear {
-            guard mode == .listening, !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.75).repeatForever(autoreverses: true)) {
-                pulses = true
-            }
-        }
-    }
-}
-
-/// "Try dictating an *email*" with an orange swash under the accent word.
-private struct SwashTitle: View {
-    let lead: String
-    let accent: String
-    let tail: String
-    let size: CGFloat
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 0) {
-            Text(lead)
-            Text(accent)
-                .font(.serif(size, .italic))
-                .overlay(alignment: .bottom) {
-                    Swash()
-                        .stroke(Palette.accent, style: StrokeStyle(lineWidth: 2.6, lineCap: .round))
-                        .frame(height: 8)
-                        .offset(y: 1)
-                }
-            Text(tail)
-        }
-        .font(.serif(size))
-        .tracking(-0.9)
-        .foregroundStyle(Palette.ink)
-        .lineLimit(1)
-        .minimumScaleFactor(0.7)
-        .padding(.horizontal, 20)
-        .accessibilityElement(children: .combine)
-    }
-}
-
-/// A loose hand-drawn underline.
-private struct Swash: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addCurve(to: CGPoint(x: rect.maxX, y: rect.minY + rect.height * 0.35),
-                      control1: CGPoint(x: rect.width * 0.25, y: rect.minY),
-                      control2: CGPoint(x: rect.width * 0.7, y: rect.maxY + rect.height * 0.4))
-        return path
-    }
-}
-
-/// The ink ✓ badge from the keyboard, inline in a title.
-private enum CheckBadge {
-    static func image(size: CGFloat) -> Image {
-        Image(size: CGSize(width: size, height: size), label: Text("check mark")) { context in
-            context.fill(Path(ellipseIn: CGRect(x: 0, y: 0, width: size, height: size)), with: .color(Palette.ink))
-            var check = Path()
-            check.move(to: CGPoint(x: size * 0.29, y: size * 0.52))
-            check.addLine(to: CGPoint(x: size * 0.44, y: size * 0.67))
-            check.addLine(to: CGPoint(x: size * 0.72, y: size * 0.36))
-            context.stroke(check, with: .color(.white),
-                           style: StrokeStyle(lineWidth: size * 0.09, lineCap: .round, lineJoin: .round))
-        }
-    }
-}
-
-/// A compose card with an app-like header strip (Mail, Notes).
-private struct PracticeCard<Header: View, Content: View>: View {
-    let height: CGFloat
-    @ViewBuilder var header: Header
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(spacing: 0) {
-            header
-                .foregroundStyle(Palette.text)
-                .padding(.horizontal, 18)
-                .frame(height: 40)
-                .frame(maxWidth: .infinity)
-                .background(Color(hex: 0xF2F1F4))
-            content
-                .padding(.horizontal, 22)
-                .padding(.top, 10.5)
-                .padding(.bottom, 10)
-        }
-        .frame(height: height)
-        .background(Palette.paper)
-        .clipShape(.rect(cornerRadius: 16))
-        .overlay { RoundedRectangle(cornerRadius: 16).stroke(Color(hex: 0xE6E5E9), lineWidth: 1) }
-    }
-}
-
-/// A UITextView so the Murmur keyboard can type into it, and so the screen can tell which
-/// keyboard is up (switching to Murmur's changes the title).
+/// A UITextView so the Murmur keyboard can type into it, and so the page can tell which keyboard
+/// is up (switching to Murmur's changes the title). Its text is the system font at the body size.
 struct PracticeTextView: UIViewRepresentable {
     static let lineSpacing: CGFloat = 1.2
 
     @Binding var text: String
-    var fontSize: CGFloat = 17
     var focusOnAppear = true
     let onKeyboardChange: (Bool) -> Void
 
@@ -398,18 +262,20 @@ struct PracticeTextView: UIViewRepresentable {
         view.backgroundColor = .clear
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = Self.lineSpacing
+        let font = UIFont.preferredFont(forTextStyle: .body)
         view.typingAttributes = [
-            .font: UIFont(name: FontName.uiRegular, size: fontSize) ?? .systemFont(ofSize: fontSize),
-            .foregroundColor: UIColor(Palette.text),
+            .font: font,
+            .foregroundColor: UIColor.brand(.ink),
             .paragraphStyle: paragraph,
         ]
-        view.font = UIFont(name: FontName.uiRegular, size: fontSize) ?? .systemFont(ofSize: fontSize)
-        view.textColor = UIColor(Palette.text)
-        view.tintColor = UIColor(Color(hex: 0x9C86E8))
+        view.font = font
+        view.adjustsFontForContentSizeCategory = true
+        view.textColor = .brand(.ink)
+        view.tintColor = .brand(.ink)
         view.textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
         view.autocorrectionType = .no
         view.spellCheckingType = .no
-        view.accessibilityLabel = "Practice text"
+        view.accessibilityLabel = OnboardingCopy.Practice.box
         context.coordinator.textView = view
         context.coordinator.observe()
         if focusOnAppear {
