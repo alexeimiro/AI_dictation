@@ -49,7 +49,7 @@ struct SessionPolicyTests {
 
     // MARK: Interruptions
 
-    @Test func interruptionsResumeLikeWisprFlow() {
+    @Test func interruptionsResumeUnlessTheyOutlastTheSetting() {
         #expect(DisableAfter.never.resumesAfterInterruption(lasting: 7200))
         #expect(DisableAfter.fiveMinutes.resumesAfterInterruption(lasting: 120))
         #expect(!DisableAfter.fiveMinutes.resumesAfterInterruption(lasting: 400))

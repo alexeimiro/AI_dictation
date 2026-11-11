@@ -31,7 +31,7 @@ public enum Brand {
         return components.url!
     }
 
-    /// "Get unlimited words" in Murmur (`murmur://pro`), from the keyboard's limit message.
+    /// Murmur Pro's page in Murmur (`murmur://pro`), from the keyboard's limit message.
     public static var proURL: URL {
         var components = URLComponents()
         components.scheme = urlScheme
@@ -51,7 +51,7 @@ public enum Brand {
         infoValue("MurmurPrivacyURL").flatMap(URL.init(string:))
     }
 
-    /// The menu's Help center; nil until `MURMUR_SUPPORT_URL` is set.
+    /// The menu's Help; nil until `MURMUR_SUPPORT_URL` is set.
     public static var supportURL: URL? {
         infoValue("MurmurSupportURL").flatMap(URL.init(string:))
     }

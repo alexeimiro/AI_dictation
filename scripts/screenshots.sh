@@ -6,7 +6,8 @@
 #   scripts/screenshots.sh home debug    only these routes
 #   scripts/screenshots.sh "home-on=-route home -session-fixture on"   a named shot with its own launch arguments
 # SIM, DD (the derived data folder), OUT (where the PNGs go), WAIT (seconds before each shot) and
-# SLOW_WAIT can be set in the environment.
+# SLOW_WAIT can be set in the environment. docs/APP_STORE.md has the command for the App Store's
+# 6.9-inch set, and docs/ONBOARDING.md the launch arguments for onboarding's pages.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 SIM="${SIM:-iPhone 16 (Murmur)}"

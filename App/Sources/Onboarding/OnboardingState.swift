@@ -4,7 +4,7 @@ import MurmurCore
 /// Every onboarding screen, in journey order. The raw values are persisted and used by the
 /// `-onboarding-step` launch argument, so renaming a case needs a migration (`OnboardingMigration`).
 enum OnboardingStep: String, Codable, CaseIterable, Sendable {
-    /// The three-page carousel (references 01–03); the page is view state, not a step.
+    /// The welcome's three pages; the page is view state, not a step.
     case welcome
     case useCases, personalizedExplainer
     case signIn, signInOptions, emailSignIn
@@ -19,14 +19,14 @@ enum OnboardingStep: String, Codable, CaseIterable, Sendable {
     var order: Int { Self.allCases.firstIndex(of: self) ?? 0 }
 }
 
-/// "Which of these do you resonate with?" (reference 04). Multi-select.
+/// "What do you want help with?" Any number of them.
 enum UseCase: String, Codable, CaseIterable, Sendable, Identifiable {
     case messages, emails, chatWithAI, captureIdeas, onTheGo, typeFaster, typingIsHard
 
     var id: String { rawValue }
 }
 
-/// "Your data is safe" (reference 32). Nothing is preselected.
+/// "Your words, your call." Nothing is preselected.
 enum DataChoice: String, Codable, CaseIterable, Sendable {
     case improveModel
     case doNotShare
@@ -42,14 +42,14 @@ struct DataChoiceDecision: Codable, Equatable, Sendable {
     var decidedAt: Date
 }
 
-/// "Where did you hear about us?" (reference 38).
+/// "How did you find Murmur?"
 enum ReferralSource: String, Codable, CaseIterable, Sendable, Identifiable {
     case xTwitter, searchEngine, tikTok, articleNews, newsletter, linkedIn, friendColleague
     case youTube, reddit, other
 
     var id: String { rawValue }
 
-    /// The follow-up question's options (reference 39), or nil when there is none.
+    /// The follow-up question's options, or nil when there is none.
     var detailOptions: [String]? {
         switch self {
         case .searchEngine: ["Google", "Bing", "DuckDuckGo", "Brave Search", "Yahoo", "Other"]
@@ -87,7 +87,7 @@ enum AuthMethod: String, Codable, Sendable {
     case localOnly
 }
 
-/// What the server granted, shown on the last screen (reference 41).
+/// What the server granted, shown on the last screen.
 enum OfferVariant: Codable, Equatable, Sendable {
     case trial(days: Int)
     case subscriber
@@ -132,7 +132,7 @@ struct OnboardingRecord: Codable, Equatable, Sendable {
     var permissions = PermissionSnapshot()
     /// Exercises finished in this run (typed or dictated text, or a dictation for the later ones).
     var practiceDone: [PracticeExercise] = []
-    /// Set by Continue on "Congrats!" (reference 30).
+    /// Set by Continue on the page after the exercises.
     var practiceCommittedAt: Date?
     var completedAt: Date?
     /// The practice dictations were copied into history (once, after completion).

@@ -1,7 +1,7 @@
 import Foundation
 import SwiftData
 
-/// Version 1 of the user's library: the personal dictionary, snippets and Scratchpad notes. A store
+/// Version 1 of the user's library: the personal dictionary, snippets and notes. A store
 /// of its own (`Library.store`), so history's schema and its users' data are left alone. Field
 /// limits match the server tables (`dictionary_entries`, `snippets`, `notes`) for a later sync.
 enum LibrarySchemaV1: VersionedSchema {
@@ -91,7 +91,7 @@ struct DictionaryEntry: Identifiable, Equatable, Sendable {
     }
 }
 
-/// A Scratchpad note. An empty title shows the note's first words, or its date.
+/// A note. An empty title shows the note's first words, or its date.
 struct Note: Identifiable, Equatable, Sendable {
     let id: UUID
     var title: String

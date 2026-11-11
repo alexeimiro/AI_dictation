@@ -4,8 +4,8 @@ import Observation
 import os
 import UIKit
 
-/// Sends the user back to the app they were typing in after the keyboard opened Murmur, as Wispr
-/// Flow does. iOS has no API for it (Apple DTS; FB22247647), so it takes two steps:
+/// Sends the user back to the app they were typing in after the keyboard opened Murmur. iOS has
+/// no API for it (Apple DTS; FB22247647), so it takes two steps:
 /// - UIKit keeps a record of the app that last showed a keyboard (`KeyboardHostObserver`). That
 ///   is an implementation detail, not API: if UIKit changes, the app is unknown and the
 ///   swipe-back screen stays, as before.
@@ -20,7 +20,7 @@ final class HostReturn {
     private(set) var isPending = false
 
     /// How long after the keyboard's link a return may still happen. Past that, swiping back by
-    /// hand is about as quick (Wispr Flow gives up after about two seconds without audio).
+    /// hand is about as quick.
     static let window: TimeInterval = 3
 
     @ObservationIgnored private let observer = KeyboardHostObserver()

@@ -1,19 +1,18 @@
 # Murmur
 
-A Wispr Flow–style voice keyboard for iOS. You dictate in any app, OpenAI transcribes the
-speech, and an OpenAI model cleans up the text before the keyboard inserts it. "Murmur" is a
-working name: it is set in `Config/Base.xcconfig` and `Brand.swift`.
+A voice keyboard for iOS. You dictate in any app, OpenAI transcribes the speech, and an OpenAI
+model cleans up the text before the keyboard inserts it. "Murmur" is a working name: it is set in
+`Config/Base.xcconfig` and `Brand.swift`.
 
-The product plan, decisions and phases are in [docs/PLAN.md](docs/PLAN.md). The implementation
-plan for matching the complete 42-screen reference onboarding is in
-[docs/ONBOARDING_PARITY_PLAN.md](docs/ONBOARDING_PARITY_PLAN.md).
+The product plan, decisions, design system and phases are in [docs/PLAN.md](docs/PLAN.md).
+Onboarding is described in [docs/ONBOARDING.md](docs/ONBOARDING.md).
 
 ## How it works
 
 A custom keyboard can't use the microphone, so the app does the recording. The first dictation
 opens the app briefly: it starts a background audio session, shows a Live Activity, starts
 recording, and sends you back to the app you were typing in (or, for apps it can't reopen, asks
-you to swipe back). Later dictations reuse that session until it times out ("Disable after"),
+you to swipe back). Later dictations reuse that session until it times out ("Turn off after"),
 which only counts while the keyboard is off screen.
 
 ```
@@ -31,7 +30,9 @@ Keyboard ext ──command file + Darwin notify──► App session (hot mic) �
 | `Keyboard/` | The keyboard extension: the voice keyboard, UIKit key grid, SwiftUI toolbar, overlays and listening panel |
 | `Widgets/` | The Live Activity UI |
 | `Shared/Activity/` | Live Activity attributes and intents, compiled into the app and the widget extension |
-| `Packages/MurmurKit/` | `MurmurCore` (IPC, keyboard session client, text utilities) and `MurmurUI` (design tokens, components) |
+| `Packages/MurmurKit/` | `MurmurCore` (IPC, keyboard session client, text utilities), `MurmurBrand` (color tokens, the mark, the echo rings) and `MurmurUI` (type roles, components) |
+| `Tools/BrandKit/` | Draws the app icon and launch assets from the mark (`scripts/build_brand.sh`) |
+| `site/` | The website's pages and stylesheet (`scripts/build_site.mjs`, `scripts/publish_site.sh`) |
 | `supabase/` | Backend: migrations, the `cleanup` Edge Function (English and Russian language packs), tests |
 
 ## Setup
@@ -56,22 +57,25 @@ xcodebuild -project Murmur.xcodeproj -scheme Murmur \
 # Screenshots of every screen with seeded history (scripts/out/*.png)
 scripts/screenshots.sh
 
-# The onboarding journey on fake services: sign-in, Settings, prompts and dictation are simulated
+# UI tests: the onboarding journey on fake services (sign-in, Settings, prompts and dictation are
+# simulated), and every screen through the menu
 xcodebuild -project Murmur.xcodeproj -scheme OnboardingJourney \
   -destination 'platform=iOS Simulator,name=iPhone 16 Pro (Onboarding)' test
 
-# Every onboarding state next to its reference (build/onboarding-parity/*-compare.png)
-scripts/onboarding_parity.sh
+# The app icon, launch logo and asset colors are drawn from code; --check fails if they drifted
+scripts/build_brand.sh --check
+
+# No leftover mention of the apps Murmur was once modelled on
+scripts/check_no_wispr.sh
 ```
 
 ## Onboarding
 
-A fresh install opens onboarding (`App/Sources/Onboarding/`) instead of Home: the 42-screen
-journey in [docs/ONBOARDING_PARITY_PLAN.md](docs/ONBOARDING_PARITY_PLAN.md), with Murmur's own
-copy and artwork. Each screen sends events to `OnboardingReducer`, a pure state machine; the
-checkpoint is saved in the App Group after every step, so going to Settings, a permission change or
-a termination resumes on the same screen. Completion is written only after the plan offer is
-acknowledged, and the practice dictations then land in history once.
+A fresh install opens onboarding (`App/Sources/Onboarding/`) instead of Home; its steps and rules
+are in [docs/ONBOARDING.md](docs/ONBOARDING.md). Each screen sends events to `OnboardingReducer`,
+a pure state machine; the checkpoint is saved in the App Group after every step, so going to
+Settings, a permission change or a termination resumes on the same screen. Completion is written
+only after the plan offer is acknowledged, and the practice dictations then land in history once.
 
 - Installs that already have history or a keyboard that has run skip it; Settings › Debug ›
   Replay onboarding starts it again.
@@ -98,7 +102,7 @@ translation target follow the iPhone's language (ЙЦУКЕН on a Russian iPhon
 
 ## Modes
 
-Two, in the keyboard's style pill and Settings › Default style:
+Two, in the keyboard's style chip and the menu's Style:
 - **Word for word** (the default): your words as spoken, punctuated. The AI runs only when the
   transcript has no punctuation, a spoken command ("comma", "new line") or a spelled-out address.
 - **Improve my grammar**: the same words and tone, made grammatically correct; fillers and false
@@ -119,17 +123,17 @@ Cyrillic, brands in Latin).
 
 ## Keyboard
 
-The default is the voice keyboard, after Anton's November 2026 design:
-- a toolbar with settings, the style pill and Delete;
-- the translate row (From, swap, To and a switch);
-- a big indigo talk button that turns red with pulse rings and a waveform while it listens;
+The default is the voice keyboard:
+- a bar with the menu, outlined chips for translation and the style, and Delete;
+- a big ink talk button with a ring around it, which turns red with ✓ and echo rings that follow
+  the voice while it listens (nothing else on the keyboard is red);
 - space and return.
 
-It is 320 pt tall (272 in landscape). It can't dictate without Allow Full Access, so until that is
+It is 278 pt tall (272 in landscape). It can't dictate without Allow Full Access, so until that is
 on the keyboard shows Numbers first, where typing works. Settings › Keyboard › Layout also offers
-Numbers first and QWERTY (272 pt), with the same pills and listening panel. The sliders button opens
-the keyboard's own settings: haptics, the ready vibration, start and stop sounds, and Light / Dark /
-Auto, with a link to Murmur's Settings.
+Numbers first and QWERTY, with the same chips and a listening panel. The menu button opens the
+keyboard's own page: translation, Add to dictionary, haptics, the ready vibration, start and stop
+sounds, and Light / Dark / Auto, with ABC and a link to Murmur's Settings.
 
 Debug builds can pin any keyboard state for screenshots: launch the app with
 `-keyboard-demo <state>[@voice|@numbers|@qwerty]` (e.g. `listening@numbers`; the states are in
@@ -203,6 +207,6 @@ To use the backend from the app, set `SUPABASE_HOST` and `SUPABASE_ANON_KEY` in
 4. Open Notes, switch to the Murmur keyboard (globe key) and tap the mic.
 5. Murmur opens once and takes you back to Notes (in an app it can't reopen, swipe right along
    the bottom edge). It's already listening: speak and tap the red stop button.
-6. Home lists every dictation by day: tap to copy, swipe for Retry / Regenerate / Delete, open a
-   row for the raw transcript and timings. Settings › Debug shows median / p95 latencies and the
+6. Home lists every dictation by day: tap to copy, swipe for Copy, Retry / Regenerate and Delete,
+   hold a row for its details (the raw transcript and timings). Settings › Debug shows median / p95 latencies and the
    engine in use; the keyboard toolbar shows the extension's remaining memory in Debug builds.

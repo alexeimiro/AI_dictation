@@ -4,7 +4,7 @@ extension MainTab {
     /// The menu's places, top to bottom.
     static let menuOrder: [MainTab] = [.home, .scratchpad, .dictionary, .snippets, .style]
 
-    /// The place's name in the menu and at the top of its screen. Scratchpad's screen is Notes.
+    /// The place's name in the menu and at the top of its screen. The scratchpad is called Notes.
     var title: String {
         switch self {
         case .home: "Home"

@@ -10,7 +10,7 @@ import UIKit
 /// The dictation session: a hot mic in the app that the keyboard drives through IPC.
 ///
 /// Lifecycle: `start()` (foreground only) → `ready` ⇄ `recording` → `processing` → `ready` …
-/// → `stop()` after the "Disable after" idle timeout, from the Live Activity, or manually.
+/// → `stop()` after the "Turn off after" idle timeout, from the Live Activity, or manually.
 @MainActor
 @Observable
 final class SessionController {
@@ -84,20 +84,20 @@ final class SessionController {
     @ObservationIgnored private var queuedStart: KeyboardCommand?
     /// Requests the keyboard cancelled, so a start armed or queued for them is dropped.
     @ObservationIgnored private var cancelledRequests: Set<UUID> = []
-    /// Where an in-app dictation's result goes (the Scratchpad note dictated into); nil drops it.
+    /// Where an in-app dictation's result goes (the note dictated into); nil drops it.
     @ObservationIgnored var inAppResultHandler: ((DictationResult) -> Void)?
-    /// "Disable after" counts from the latest of these and the keyboard leaving the screen.
+    /// "Turn off after" counts from the latest of these and the keyboard leaving the screen.
     @ObservationIgnored private var idleSince = Date()
     @ObservationIgnored private var backgroundSince: Date?
     @ObservationIgnored private var interruptedAt: Date?
     @ObservationIgnored private var keyboardObservation: IPCObservation?
 
-    /// Wispr Flow caps dictations at 5 minutes; we do the same.
+    /// A dictation ends by itself after 5 minutes.
     static let maxDictationSeconds: TimeInterval = 300
-    /// With "Disable after: Immediately", a session that isn't used still ends after this.
+    /// With "Turn off after: Immediately", a session that isn't used still ends after this.
     static let immediateIdleGrace: TimeInterval = 60
-    /// How long a dictation the app started for the keyboard waits for it to come back. As in
-    /// Wispr Flow, the automatic start expires after that.
+    /// How long a dictation the app started for the keyboard waits for it to come back. The
+    /// automatic start expires after that.
     static let keyboardReturnWindow: TimeInterval = 10
     /// How long a start that arrived while the app was busy stays valid.
     static let queuedStartLifetime: TimeInterval = 15
@@ -454,7 +454,7 @@ final class SessionController {
         logger.info("Session stopped")
     }
 
-    /// Called when the app becomes active: no "Disable after" countdown while it's on screen, and
+    /// Called when the app becomes active: no "Turn off after" countdown while it's on screen, and
     /// recover from interruptions that left us stranded.
     func appDidBecomeActive() {
         #if DEBUG
@@ -475,7 +475,7 @@ final class SessionController {
 
     // MARK: Dictation
 
-    /// In-app dictation (Scratchpad's mic) uses the same pipeline as the keyboard, in the
+    /// In-app dictation (the mic in a note) uses the same pipeline as the keyboard, in the
     /// keyboard's Speak language (Auto-detect until one is picked there). Its result goes to
     /// `inAppResultHandler` instead of the keyboard.
     func beginInAppDictation() -> UUID? {
@@ -780,7 +780,7 @@ final class SessionController {
     }
 
     /// The app started this dictation for the keyboard, which never came back for it. It's
-    /// dropped, not saved, since nobody confirmed it (Wispr Flow lets it expire too). A keyboard
+    /// dropped, not saved, since nobody confirmed it. A keyboard
     /// attaching at this very moment finds a `cancelled` result instead of waiting for one.
     private func expireUnattachedDictation() {
         guard let dictation = active, dictation.keyboardAttachedAt == nil else { return }
@@ -839,8 +839,8 @@ final class SessionController {
         }
     }
 
-    /// "Disable after", counted like Wispr Flow's: only while the app is in the background and the
-    /// keyboard is off screen (`IdleStop`), so typing on the keyboard keeps the session on.
+    /// "Turn off after" counts only while the app is in the background and the keyboard is off
+    /// screen (`IdleStop`), so typing on the keyboard keeps the session on.
     private func scheduleIdleStop() {
         idleTask?.cancel()
         guard let deadline = idleStopDate() else { return }
@@ -924,8 +924,8 @@ final class SessionController {
             transport.post(.stateChanged)
             scheduleIdleStop()
         case .ended:
-            // Like Wispr Flow: resume after a call or Siri unless it outlasted "Disable after",
-            // whatever `shouldResume` says. If it can't, the keyboard offers Reconnect.
+            // Resume after a call or Siri unless it outlasted "Turn off after", whatever
+            // `shouldResume` says. If it can't, the keyboard offers Reconnect.
             let lasted = interruptedAt.map { Date().timeIntervalSince($0) } ?? 0
             interruptedAt = nil
             logger.notice("Interruption ended after \(Int(lasted)) s (shouldResume: \(options.contains(.shouldResume)))")

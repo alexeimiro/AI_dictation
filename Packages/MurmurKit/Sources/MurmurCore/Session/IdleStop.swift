@@ -1,7 +1,7 @@
 import Foundation
 
-/// When an unused session turns the microphone off ("Disable after"). As in Wispr Flow, the
-/// countdown only runs while the app is in the background and the keyboard is off screen, and it
+/// When an unused session turns the microphone off ("Turn off after"). The countdown only runs
+/// while the app is in the background and the keyboard is off screen, and it
 /// starts from whichever came last: the end of the last dictation, the app leaving the screen,
 /// or the keyboard leaving it. Typing on the keyboard therefore keeps the session on.
 public enum IdleStop {

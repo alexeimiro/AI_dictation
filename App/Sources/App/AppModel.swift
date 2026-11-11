@@ -13,9 +13,9 @@ final class AppModel {
     let assets: SpeechAssetManager
     let languages: LanguageSettingsModel
     let history: HistoryStore
-    /// The personal dictionary, snippets and Scratchpad notes.
+    /// The personal dictionary, snippets and notes.
     let library: LibraryStore
-    /// Scratchpad's mic.
+    /// The mic in a note.
     let noteDictation: NoteDictation
     /// The library on every device signed in to the account; nil without a backend, and in
     /// screenshot runs.
@@ -480,7 +480,7 @@ final class AppModel {
         }
     }
 
-    /// Scratchpad on a new note: `DictateIntent` when the keyboard isn't on screen, "New Murmur
+    /// Notes, on a new note: `DictateIntent` when the keyboard isn't on screen, "New Murmur
     /// Note", and Auto open note. `dictating` records into it straight away.
     func openNewNote(dictating: Bool) {
         guard onboarding.isComplete else { return }

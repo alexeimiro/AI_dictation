@@ -1,6 +1,6 @@
 import Foundation
 
-/// "Disable Murmur after" — how long an idle session keeps the microphone ready.
+/// "Turn off after": how long an idle session keeps the microphone ready.
 public enum DisableAfter: String, Codable, Sendable, CaseIterable, Identifiable {
     case never
     case oneHour
@@ -31,9 +31,8 @@ public enum DisableAfter: String, Codable, Sendable, CaseIterable, Identifiable 
         }
     }
 
-    /// Whether the microphone comes back after a call or Siri took it, as in Wispr Flow: always
-    /// with Never, with a timed option only after an interruption shorter than it, and never
-    /// with Immediately.
+    /// Whether the microphone comes back after a call or Siri took it: always with Never, with a
+    /// timed option only after an interruption shorter than it, and never with Immediately.
     public func resumesAfterInterruption(lasting duration: TimeInterval) -> Bool {
         switch self {
         case .never: true
@@ -44,7 +43,7 @@ public enum DisableAfter: String, Codable, Sendable, CaseIterable, Identifiable 
 }
 
 public enum KeyboardLayoutPreference: String, Codable, Sendable, CaseIterable {
-    /// Numbers-first layout with a dictation row, like Wispr Flow.
+    /// Numbers-first layout with a dictation row.
     case numbers
     case qwerty
     /// The voice keyboard (the default): a big talk button, the translate row, space and return.
@@ -119,7 +118,7 @@ public final class SharedSettings: @unchecked Sendable {
     }
 
     /// ABC shows the keyboard's own letters instead of switching to the next keyboard for typing
-    /// letters, Wispr Flow's "Show full QWERTY keyboard". Off by default.
+    /// letters ("Show full QWERTY keyboard"). Off by default.
     public var keyboardFullQwerty: Bool {
         get { bool(.keyboardFullQwerty, default: false) }
         set { defaults.set(newValue, forKey: Key.keyboardFullQwerty.rawValue) }
@@ -211,7 +210,7 @@ public final class SharedSettings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Key.keepRecordings.rawValue) }
     }
 
-    /// "Auto open note": opening Murmur starts a new Scratchpad note. App-only.
+    /// "Auto open note": opening Murmur starts a new note. App-only.
     public var autoOpenNote: Bool {
         get { bool(.autoOpenNote, default: false) }
         set { defaults.set(newValue, forKey: Key.autoOpenNote.rawValue) }

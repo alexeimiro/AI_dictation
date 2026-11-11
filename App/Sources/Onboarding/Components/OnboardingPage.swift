@@ -201,8 +201,8 @@ struct IntroPage: View {
     var body: some View {
         OnboardingPage(top: .empty) {
             Spacer(minLength: 24)
-            BigNumber(number: "\(part)", caption: OnboardingCopy.step(part, of: OnboardingProgress.parts),
-                      meter: (OnboardingProgress.parts, part))
+            let step = OnboardingCopy.step(part, of: OnboardingProgress.parts)
+            BigNumber(number: "\(part)", caption: step, meter: (OnboardingProgress.parts, part), spoken: step)
             Spacer(minLength: 24)
             OnboardingTitle(title, line: line, size: .statement)
         } actions: {

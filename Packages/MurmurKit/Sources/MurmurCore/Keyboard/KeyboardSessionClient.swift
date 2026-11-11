@@ -28,7 +28,7 @@ public enum DictationOutcome: Equatable, Sendable {
 ///
 /// Flow: mic tap → write `start` command → wait ≤500 ms for the app to report `recording` with
 /// our request tag → otherwise open the app (one-time token). The app starts recording that
-/// dictation as soon as it has the microphone and, like Wispr Flow, sends the user back; the
+/// dictation as soon as it has the microphone and sends the user back; the
 /// keyboard attaches to the recording when it reappears.
 @MainActor
 public final class KeyboardSessionClient {
@@ -333,8 +333,8 @@ public final class KeyboardSessionClient {
         transport.payloads.clearPendingStart()
         if case .listening = phase { return }
         // The field can't be recognized by its documentIdentifier: iOS gives it a new one after the
-        // trip to the app (seen on the iPhone, iOS 26.6). As in Wispr Flow, the dictation goes into
-        // the field the user came back to, and its result follows the request.
+        // trip to the app (seen on the iPhone, iOS 26.6). The dictation goes into the field the
+        // user came back to, and its result follows the request.
         activeDocumentIdentifier = host?.currentDocumentIdentifier ?? pending.documentIdentifier
         resumedRequestId = pending.requestId
         switch state.status {

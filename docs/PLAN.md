@@ -1,33 +1,29 @@
-# Murmur: a Wispr Flow–style voice keyboard for iOS
+# Murmur: a voice keyboard for iOS
 
 ## Context
-Build an iOS clone of Wispr Flow, a voice-first keyboard: dictate in any app, and AI cleans up the text before it is inserted.
-- **Inputs:** 42 captured onboarding/home screenshots in `artifacts/wispr-onboarding/`, the
-  matching contact sheet and demo video, and `App_Structure.md` (39 broader product flows). See
-  `ONBOARDING_PARITY_PLAN.md` for the implementation-ready screen mapping.
-- **Public research:** Wispr's help center, changelog and App Store listing fill in the screens we have no screenshots for.
-- **Starting point:** the repo holds only those files, so this is greenfield.
+Build a voice keyboard for iPhone: dictate in any app, and AI cleans up the text before it is inserted.
+- **Starting point:** greenfield.
 - **Toolchain:** Xcode 26.6 / iOS 26.5 SDK, Homebrew, Node 26, Docker. The paired iPhone 16 Pro runs iOS 26.6.1 with Developer Mode on.
 
 **Decisions made with the user**
 - **Speech recognition:** OpenAI (`gpt-transcribe`) through the `transcribe` Supabase function, chosen on 2026-11-03; the audio leaves the iPhone but isn't stored. On-device Apple SpeechAnalyzer, the original choice, remains the fallback for installed languages and the engine for builds without a backend.
 - **AI cleanup:** an OpenAI model (`gpt-6-astra` at reasoning effort `low` by default) inside a Supabase Edge Function (TypeScript), so no API key ships in the app. Chosen on 2026-11-03 so that OpenAI handles both transcription and cleanup; it replaced Claude `claude-opus-5-5`, and Anthropic is no longer used.
 - **Backend:** Supabase for Auth, Postgres with RLS, and Functions.
-- **Branding:** working codename **Murmur**, set in one place (`Brand.swift` + `Config/Base.xcconfig`). We recreate the screenshots' layout, type and colors with original logo, visuals and copy; no Wispr videos, illustrations or trademarks.
+- **Branding:** working codename **Murmur**, set in one place (`Brand.swift` + `Config/Base.xcconfig`). The look, the mark and the words are Murmur's own (see Design system); onboarding's behavior is in [ONBOARDING.md](ONBOARDING.md).
 - **Deployment target:** iOS 26.0.
 
 ## Platform constraints this design rests on
 These are verified against Apple docs, the 26.5 SDK, and Apple staff forum replies.
 - **No microphone for keyboards:** keyboards have no mic access, and that is unchanged on iOS 27.
 - **Recording start:** recording must *begin* while the containing app is in the foreground.
-- **No return path:** no public API returns the user to the previous app or identifies it (since iOS 26.4; Apple DTS, FB22247647). Like Wispr Flow, the app reads UIKit's `_UIRemoteKeyboards` `currentState.sourceBundleIdentifier` (an implementation detail, ~0.7–1 s after launch) and reopens that app by URL scheme; see Session lifecycle.
+- **No return path:** no public API returns the user to the previous app or identifies it (since iOS 26.4; Apple DTS, FB22247647). The app reads UIKit's `_UIRemoteKeyboards` `currentState.sourceBundleIdentifier` (an implementation detail, ~0.7–1 s after launch) and reopens that app by URL scheme; see Session lifecycle.
 - **Without Full Access**, the keyboard:
   - can only read the App Group container
   - has no network
   - can't open its containing app (error -54 on iOS 26)
 
   So voice requires Full Access, while typing must work without it (guideline 4.4.1).
-- **What competitors do:** Wispr, Willow and dictus use the "hot mic" pattern. The app starts audio in the foreground, keeps the input tap running in the background, and shows a Live Activity.
+- **What other voice keyboards do:** the "hot mic" pattern (Willow, dictus). The app starts audio in the foreground, keeps the input tap running in the background, and shows a Live Activity.
 
 ## Core architecture
 ```
@@ -40,18 +36,18 @@ Keyboard ext ── Darwin post + command file (one-time token) ──► Murmur
 2. **No acknowledgement.** The keyboard writes a one-time `launchToken` and a `PendingStart` (request id, field, style/language/translation, `autoStart`) and opens `murmur://session/start?t=…`.
    - It walks the responder chain to the `UIApplication` and calls `open(_:options:completionHandler:)`, which compiles against the 26.5 SDK.
    - The app starts the session only if the token is fresh (under 20 s). Otherwise it asks for confirmation, so a web page can't turn on the mic.
-   - As soon as the mic is on, the app records the requested dictation (`SessionController.start(beginning:)`), as Wispr Flow does, so the user can talk on the way back. In the cloud path the on-device fallback is prepared afterwards, off this critical path.
+   - As soon as the mic is on, the app records the requested dictation (`SessionController.start(beginning:)`), so the user can talk on the way back. In the cloud path the on-device fallback is prepared afterwards, off this critical path.
    - Once it's recording, `HostReturn` reopens the app the keyboard was used in: it learns its bundle id from UIKit (above) and opens it by a URL scheme from `HostAppCatalog`. Within 3 s of the link, or not at all.
    - Otherwise it shows "Murmur is on — Swipe right along the bottom edge of the screen to go back to your app", with a finger animated over the real home indicator (iOS shows no ◀︎ breadcrumb for keyboard-initiated opens).
-   - When the keyboard reappears it attaches to that recording (`attachToPendingStart`); its first listening heartbeat tells the app. A recording nobody attaches to within 10 s is discarded. iOS gives the field a new `documentIdentifier` after the trip to the app (found on the iPhone on 2026-11-10), so the keyboard can't tell it from another field: like Wispr Flow, it types the dictation into the field it comes back to.
+   - When the keyboard reappears it attaches to that recording (`attachToPendingStart`); its first listening heartbeat tells the app. A recording nobody attaches to within 10 s is discarded. iOS gives the field a new `documentIdentifier` after the trip to the app (found on the iPhone on 2026-11-10), so the keyboard can't tell it from another field: it types the dictation into the field it comes back to.
 3. **Hot mic.**
    - **Audio session:** `.playAndRecord`, mode `.default`, options `[.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]`. Without HFP, the mic is the built-in one and AirPods music quality is kept. Also `setAllowHapticsAndSystemSoundsDuringRecording(true)`.
    - **Engine:** the `AVAudioEngine` tap runs throughout, with `UIBackgroundModes: audio`. A gate drops buffers unless a dictation is in progress.
    - **Live Activity:** started at session start (foreground only).
-   - **"Disable after":** Never / 1 h / 15 min / 5 min (default) / Immediately. "Immediately" ends the session after the result is delivered, inside `beginBackgroundTask`.
-   - **The countdown** (`IdleStop`) runs, as in Wispr Flow, only while the app is in the background and the keyboard is off screen, from whichever came last. The keyboard reports itself every 5 s while visible and once more when hidden (`KeyboardStatus.hiddenAt`), so typing keeps the session on.
+   - **"Turn off after":** Never / 1 h / 15 min / 5 min (default) / Immediately. "Immediately" ends the session after the result is delivered, inside `beginBackgroundTask`.
+   - **The countdown** (`IdleStop`) runs only while the app is in the background and the keyboard is off screen, from whichever came last. The keyboard reports itself every 5 s while visible and once more when hidden (`KeyboardStatus.hiddenAt`), so typing keeps the session on.
 4. **Resilience.**
-   - **Interruptions:** `.began` pauses. `.ended` reactivates, whatever `.shouldResume` says, when the interruption was shorter than "Disable after" (always with Never, never with Immediately), retrying for ~3.5 s. If that still fails with `'!int'` (after phone calls), the state becomes `needsReconnect` and the keyboard shows "Reconnect", which reopens the app.
+   - **Interruptions:** `.began` pauses. `.ended` reactivates, whatever `.shouldResume` says, when the interruption was shorter than "Turn off after" (always with Never, never with Immediately), retrying for ~3.5 s. If that still fails with `'!int'` (after phone calls), the state becomes `needsReconnect` and the keyboard shows "Reconnect", which reopens the app.
    - **Busy app:** a `start` that arrives while the previous dictation is processing is queued and acknowledged as `starting` with its tag, so the keyboard waits instead of opening the app.
    - **Route or `AVAudioEngineConfigurationChange`:** rebuild the tap and `AVAudioConverter`; the session stays up. `mediaServicesWereReset` rebuilds everything.
    - **Keyboard dies while listening:** its heartbeat stops. The app finalizes the dictation into history as `pending`, and a relaunched keyboard offers it if `documentIdentifier` matches.
@@ -110,8 +106,8 @@ Keyboard/   KeyboardViewController, KeyGrid (UIKit KeyButton: UIControl, touch-d
             HostAppOpener, KeyRepeat
 Widgets/    Live Activity UI (later a Control Center toggle)
 Packages/MurmurKit/  MurmurCore (IPC, Brand, WordCounter, StylePreset, TextJoiner, LocalFormatter,
-            KeyboardSessionClient — testable keyboard-side logic), MurmurUI (tokens, fonts, components),
-            MurmurActivity (ActivityAttributes + LiveActivityIntents for app+widget), Tests/
+            KeyboardSessionClient — testable keyboard-side logic), MurmurBrand (color tokens, the mark,
+            echo rings), MurmurUI (type roles, components), Tests/
 supabase/   config.toml, migrations/, functions/{cleanup,auth-lookup,signup-status,delete-account,
             verify-transaction,appstore-notifications,_shared}/, functions/cleanup/golden_test.ts
 ```
@@ -125,168 +121,139 @@ supabase/   config.toml, migrations/, functions/{cleanup,auth-lookup,signup-stat
   - `NSMicrophoneUsageDescription`
   - `NSSupportsLiveActivities`
   - URL scheme `murmur`
-  - `LSApplicationQueriesSchemes` for the app carousel
-  - `UIAppFonts`, with fonts also registered via `CTFontManagerRegisterFontURLs` in the extension
+  - `LSApplicationQueriesSchemes` for returning to the app the keyboard was used in
   - `NSSpeechRecognitionUsageDescription` only if SpeechAnalyzer turns out to need it
 - **Keyboard scheme:** `askForAppToLaunch`. Builds use `-allowProvisioningUpdates`.
 - **`PrivacyInfo.xcprivacy` per target:** UserDefaults `CA92.1` and `1C8F.1`; system boot time `35F9.1` if signposts need it.
 - **Localization:** String Catalogs.
-- **Keyboard memory:** the extension stays lean, with no SwiftData, Supabase, display fonts or Liquid Glass.
+- **Keyboard memory:** the extension stays lean, with no SwiftData, Supabase, bundled fonts or Liquid Glass.
 
-## Design system (MurmurUI), with colors sampled from the screenshots
-- **Fonts:** EB Garamond for display (accent words in italic or orange) and Figtree for UI. Both are OFL fonts from Google Fonts and are bundled.
-- **Colors:**
+## Design system (MurmurBrand and MurmurUI)
+Murmur's look is its own (November 2026): a white canvas, near-black ink, a few grays, the system
+font, capsule buttons and no shadows. One color, red, means the microphone is open and nothing else.
+- **Type:** the system font in the roles of `Font.murmur(_:)`: 34/28/22 bold titles, 17 semibold
+  headlines, 17/16/15 text, 13/12 metadata. Every role follows Dynamic Type. Dictated text is the
+  system font too, which covers every script.
+- **Colors** (`BrandToken`). The app is light only; the keyboard and the Live Activity use both
+  columns, and a few tokens have Increase Contrast values.
 
-| Token | Hex | Used for |
-|---|---|---|
-| `ink` | #312D38 | buttons, borders, active progress segment |
-| `text` | #28272C | body text |
-| `textSecondary` | #5A595C | secondary text |
-| `splash` | #2E2A34 | splash background |
-| `cream` | #FFFFF0 | "Get started" button |
-| `selectedFill` | #FEFFEB | selected survey card |
-| `cardBorder` | #D0CED2 | card borders |
-| `disabled` | #ACACB0 | disabled buttons |
-| `progressOff` | #C1BDC4 | inactive progress segment |
-| `accent` | #FFA83E | accent words, sparkle |
-| `lavender` | #F0D7FF | "Set up", "Next", "Start" buttons |
-| `offerPill` | #DDD4F0 | "Exclusive Offer" pill |
-| `proBadge` | #A08AFF | plan badge |
-| `toggleGreen` | #4FBF77 on #C4EAD2 | on/off toggle |
-| `teal` | #004F47 | dictionary pills |
-| `bubble` | #1C1A1D | chat bubble |
-| `canvas` | #F3F3F5 | Home background |
-| `tabSelected` | #ECE9EC, label #6A4B97 | selected tab |
-| `lockGray` | #A8A5A9 | lock badges |
+| Token | Light | Dark | Used for |
+|---|---|---|---|
+| `canvas` | #FFFFFF | #121212 | screen background |
+| `fill`, `fillPressed` | #F4F4F4, #E8E8E8 | #2C2C2E, #3A3A3C | cards, fields, chips |
+| `line` | #E5E5E5 | #3A3A3C | hairlines |
+| `ink`, `onInk` | #0D0D0D, #FFFFFF | #FFFFFF, #0D0D0D | text, icons, primary buttons and their labels |
+| `second`, `third` | #5D5D5D, #6B6B6B | #C7C7CC, #A0A0A6 | secondary and tertiary text |
+| `graphic`, `track`, `disabled` | #8A8A8A, #DDDDDD, #C9C9C9 | #8E8E93, #48484A, #48484A | rings and markers, meter tracks, disabled fills |
+| `live`, `onLive` | #D92D20, #FFFFFF | #FF5247, #0D0D0D | only while the microphone is open |
+| `keyboardPanel`, `key`, `keyPressed`, `functionKey`, `keyboardCard` | #E3E4E8, #FFFFFF, #D1D1D6, #C6C8CE, #FFFFFF | #1C1C1E, #4A4A4D, #5C5C5E, #333336, #2C2C2E | the keyboard |
+| `activity` | #0D0D0D | #0D0D0D | the Live Activity's surface |
 
-- **Components:**
-  - `PillButton(.ink/.cream/.lavender/.outline)`: 60 pt, 14 pt corner radius, 2 pt ink border on the outlined styles, plus a disabled state
-  - `SegmentedProgressHeader`
-  - `OptionCard`
-  - `CircleBackButton`
-  - `PageDots`, with the active dot drawn as a pill
-  - `SerifTitle(accent:)`
-  - original `LogoMark`
-  - floating `TabView` with lock badges
-- **Replacements for Wispr's video and illustration assets:**
-  - Welcome carousel: `MeshGradient` backgrounds, with native animations of a WPM counter with curved marquee text, a chat bubble with a waveform pill, and dictionary pills.
-  - "Any app" and "Ready" screens: a SwiftUI phone and keyboard mock.
-  - Offer screen: an illustration slot.
+- **Rules:** delete and errors are ink (bold, with an icon), never red. Text is at least 4.5:1 on
+  whatever it sits on and graphics 3:1; `MurmurBrandTests` holds both.
+- **Shapes:** capsule buttons (56 pt full-width, 44 pt compact), 1.5 pt outlines for secondary
+  buttons and chips, 20 pt card corners, 16 pt fields, 1 px hairlines.
+- **The mark:** a dot inside a ring (`MarkGeometry`); the wordmark is the mark and "murmur" in
+  lowercase. `Tools/BrandKit` and `scripts/build_brand.sh` draw the app icon and the launch assets
+  from it.
+- **The voice visual:** echo rings (`EchoRings`), thin rings that swell from the talk button with
+  each syllable.
+- **Components (MurmurUI):** `.murmur(.primary | .secondary | .apple)` and `.textOnly` buttons,
+  `Chip`, `StatusBadge`, `OptionRow`, `CheckCircle`, `SelectionMark`, `Meter`, `LiveDot`,
+  `PulseRings`, `NoticeCard`, `EmptyState`, `ScreenTitle`, `SectionLabel`, `SearchField`,
+  `LabeledField`, `SheetHeader`, `Toast`.
 
-## Screens (covers all 39 flows in App_Structure.md)
-**Onboarding:**
-1. [0] Splash
-2. [1–3] Welcome carousel, ending in "Get started"
-3. [4–5] Survey (multi-select)
-4. [6] "Works in *any app*", ending in "Set up Murmur"
-5. [7–8] Sign in: Google and Apple, then "More options" for Email. Wispr's Microsoft and SSO were left out of 1.0 (2026-11-10).
-6. [9–10] Email. The `auth-lookup` function (rate-limited) decides the branch: password sign-in ("Logging in") or create account.
-7. [11–13] Create account: password, name, hCaptcha
-8. [14] "Check your email"
-   - It auto-advances on the `murmur://auth-callback?code=` deep link, handled by `auth.session(from:)`.
-   - If the email is confirmed on another device, it polls `signup-status(user_id)` and then signs in once.
-   - "Resend" calls `resend(email:type: .signup)`.
-9. [15] "Let's *set up* Murmur"
-10. **Keyboard setup:**
-    1. **Privacy and AI consent card** (guideline 5.1.2(i)): "Your voice stays on your iPhone. The text is sent to Anthropic's Claude for cleanup." The user must Agree.
-    2. Add the keyboard via "Go to Settings" (`openSettingsURLString` › Keyboards › Murmur › Allow Full Access).
-    3. Detection on return (re-checked ~0.8 s after becoming active):
-       - The keyboard is added if the KVC `identifier` of an entry in `activeInputModes` matches. This is best effort.
-       - Full Access is on if the keyboard's timestamp is present. A missing timestamp means "unknown or off".
-       - The step is persisted, because toggling Full Access can SIGKILL the app.
-    4. Microphone permission, followed by the speech asset download
-    5. Start session
-    6. Practice field: Next unlocks when the field is non-empty
-11. [16] "Congrats!"
-12. [17] "Wrap up the setup", then:
-    1. Survey: role, and how you heard about us
-    2. Data choice (default off)
-    3. **Languages** ("Changing language"): from `SpeechTranscriber.supportedLocales`, with no auto-detect on device; one primary language plus quick switching
-    4. Notifications
-13. [18] "You're ready!"
-14. [19] Offer: a 14-day Pro trial granted by the server, then Basic at 1,000 words a week (resets Sunday 00:00 PT)
-15. [20] Home
+## Screens
+**Onboarding:** signs the user in, sets up the keyboard and the microphone, runs three practice
+dictations, records a few choices and shows the plan the server granted. Its steps, rules, fixtures
+and tests are in [ONBOARDING.md](ONBOARDING.md).
+
+**Navigation:** there is no tab bar. One menu on the left leads everywhere:
+- the five places: Home, Notes, Dictionary, Snippets, Style;
+- the plan with its meter, and "Upgrade to Pro" (hidden for Pro);
+- Invite a friend, Help, Contact support, Settings;
+- the account's row, which opens Account.
+
+Every `-route` name still opens its screen; `menu` opens the menu.
 
 **Home:**
-- **Header:** menu, logo with plan badge ("Pro Trial"), session toggle ("Turning on Flow").
-- **"Try Murmur in <app>" carousel:** installed apps only; tapping one opens it ("Open an app").
-- **Stats.**
+- **Top bar:** the menu, the wordmark with the plan chip ("Trial · 6 days"), and a new note.
+- **Notices first:** the setup steps that are missing, a failed or interrupted session, the weekly
+  limit ("See Murmur Pro"), a signed-out account, and a tip to try a dictation.
 - **History by day:**
-  - Tap to copy: "Transcript copied to clipboard"
-  - Swipe for Report, Retry, Copy, Play
-  - Long-press to delete
-  - Failed items in orange
-- **Detail** ("Transcript information"): raw vs. cleaned text, duration, words, WPM, playback of the local .m4a, "Regenerate" (re-runs cleanup), and feedback 👍/👎 with a comment.
-- **Locked tabs:** unlock on the first result delivered while the app is in the background.
+  - Tap to copy: "Copied".
+  - Swipe for Copy, Retry or Regenerate, and Delete; hold for Details, Copy, Insert via keyboard
+    and Delete.
+  - A status badge on dictations that are pending, failed or not cleaned up.
+- **The session control** is a bar at the bottom, one switch for VoiceOver: off, turning on, on,
+  listening, writing.
+- **Detail:** raw vs. cleaned text, duration, words, playback of the kept recording, "Regenerate"
+  (re-runs cleanup), and 👍/👎 with a comment.
 
-**Tabs:**
+**The places:**
+- **Notes** (the scratchpad):
+  - Notes by date, with search; an empty state offers a new note.
+  - A mic in each note: the app is in the foreground, so it records directly, at the cursor.
+  - Tap the title to rename; the default title is the note's first words.
+  - Swipe to Share or Delete.
 - **Dictionary:**
-  - Add a term, with an optional "Correct a misspelling" replacement; 59-character limit.
+  - Add a word, with an optional replacement for a misspelling; 59-character limit.
   - Edit, and swipe to delete.
   - The keyboard has "Add to dictionary", which feeds a queue file.
-  - Terms are used in the prompt, the local pass, and contextual strings when DictationTranscriber is in use.
+  - Words are used in the prompt, the local pass, and contextual strings when DictationTranscriber is in use.
 - **Snippets:**
   - Fields: Snippet (under 60 characters) and Expansion.
   - Errors: "Please enter a snippet", "Snippet too long", "Snippet already exists".
-- **Style:** "Your default style": Word for word (exact words, literal translation; the default) or Improve my grammar (the same words and tone, grammatically correct), with a pill on the keyboard that sets it. The four earlier styles were removed in November 2026. Since iOS 26.4 there's no per-app context.
-- **Scratchpad:**
-  - Notes by date, empty state "Create a note".
-  - In-app mic: the app is in the foreground, so it records directly.
-  - Tap the title to rename; the default title is the first three words.
-  - Search; swipe to Share or Delete.
-  - "Refresh from cloud".
+- **Style:** "How Murmur writes": Word for word (exact words, literal translation; the default) or Improve my grammar (the same words and tone, grammatically correct), each shown on one spoken sentence, with a pill on the keyboard that sets it. The four earlier styles were removed in November 2026. Since iOS 26.4 there's no per-app context.
 
 **Menu and Account:**
 - **Account:**
-  - Edit profile
-  - Manage plan: `SubscriptionStoreView`, and `showManageSubscriptions` for subscribers
-  - Report an issue
-  - Log out: wipes local data
+  - The plan, words and speed
+  - Manage subscription (`showManageSubscriptions`) for subscribers, otherwise Upgrade to Pro
+  - Report an issue and Leave feedback
+  - Sign out: wipes local data
   - Delete account: calls the `delete-account` function, which deletes the data and revokes the Sign in with Apple token. The App Store subscription isn't cancelled automatically, so we tell the user.
-- **Invite:** copy or share a referral link.
-- **"Get Murmur on your computer":** a stub with "Email me a download link".
-- **Report an issue:** writes to `issue_reports`.
+- **Invite a friend:** copy or share an invite link.
+- **Contact support** (in the menu): the same two forms; both write to `issue_reports`.
 
 **Settings:**
 - Languages
-- Disable after
-- Haptic feedback
-- Start and stop sounds ("Turning off audio")
-- Use built-in mic
-- Keyboard layout: Voice (the default), Numbers first or QWERTY
-- Keyboard appearance: Auto, Light or Dark
-- AI cleanup on/off
-- Notifications
-- Live Activities
-- Privacy: data sharing, auto-delete transcripts, cloud sync
+- Turn off after
+- The Action Button shortcut, Auto open note, Low data mode, Live Activities
+- Keyboard layout: Voice (the default), Numbers first or QWERTY; show full QWERTY; appearance: Auto, Light or Dark
+- Keyboard feedback, and a vibration when text is ready
+- Interaction sounds, and the built-in mic
+- Smart formatting
+- Data and privacy: data sharing, keep recordings, local data storage, refresh from cloud
 
 **Keyboard:**
-- **Typing without Full Access:** works fully. "Almost there!" is a banner over working keys, and
+- **Typing without Full Access:** works fully. "One switch left" is a card over working keys, and
   the keyboard shows Numbers first even when Voice is picked, since the voice keyboard has no
   letters and can't dictate without Full Access.
-- **Layouts and keys** (Anton's November 2026 design):
-  - The voice keyboard by default: the translate row, a big talk button, space and return; 320 pt
-    tall, 272 in landscape.
-  - Numbers-first `123` / `#+=` and QWERTY as options, 272 pt.
+- **Layouts and keys:**
+  - The voice keyboard by default: the bar, a big talk button, space and return; 278 pt tall
+    (the bar is 66 pt), 272 in landscape.
+  - Numbers-first `123` / `#+=` and QWERTY as options, with function keys on their own fill.
   - Space, return labeled from `returnKeyType`, delete that speeds up from characters to words.
-  - Globe only when `needsInputModeSwitchKey` (via `handleInputModeList`).
+  - ABC goes to the next keyboard unless "Show full QWERTY keyboard" is on.
   - `hasDictationKey = true`.
-- **Toolbar:**
-  - Settings: an in-keyboard sheet with haptics, the ready vibration, start and stop sounds, the
-    appearance, and a link to Murmur's Settings.
-  - The style pill and its menu.
-  - Delete on the voice keyboard; the language pill and the mic on the key layouts.
-- **Listening:** the talk button turns red with a stop square and pulse rings, with a waveform and
-  "Listening 0:12 · tap to stop" under it and ✕ beside it. Space and return dim.
-- **Processing:** a spinner and "Translating to English…" or "Transcribing…"; ✕ cancels.
-- **States:** limit reached, no network, logged out, Reconnect.
+- **The bar:**
+  - The menu: translation, Add to dictionary, feedback and the appearance, with ABC and a link to
+    Murmur's Settings.
+  - Outlined chips for translation and the style.
+  - Delete on the voice keyboard; the talk button, or "Start" while no session runs, on the key layouts.
+- **The talk button:** ink with a ring around it at rest. While it listens it is red with ✓
+  (which finishes the dictation) and echo rings that follow the voice, with "Listening" and the
+  time under it and ✕ in the bar. Nothing else on the keyboard is red.
+- **Writing:** a spinner and "Writing…" or "Translating to English…"; ✕ cancels.
+- **States:** the weekly limit, no network, signed out, Reconnect, a dictation waiting to be inserted.
 - **Feedback:** haptics and key clicks, which need Full Access.
 
 **Live Activity:**
-- Shows "on", "recording" with a timer, or "processing".
-- Buttons: Stop (`LiveActivityIntent`, in both targets) and Notes.
-- Compact and minimal views show the mark and a dot.
-- **Later:** a Control Center toggle and App Shortcuts "Turn Murmur on/off".
+- Shows the mark with a red dot and the state in words: "Ready", "Listening" with a timer, or "Writing…".
+- Buttons: Stop (`LiveActivityIntent`, in both targets) and Turn off.
+- The timer is the only thing that moves.
+- "Dictate with Murmur" is also an App Shortcut, an Action Button action and a Control Center control.
 
 ## Backend (Supabase)
 **Auth:**
@@ -374,12 +341,12 @@ supabase/   config.toml, migrations/, functions/{cleanup,auth-lookup,signup-stat
    - **Done when:** cleaned text is inserted on device; airplane mode inserts raw text with Retry; over-limit returns 402 and shows the limit card; latency is reported. If the median is over 2.5 s, I come back to you with tuning options.
    - **Status (2026-10-10):** the function and client are built and tested offline (English + Russian), but no cleanup has run from the iPhone yet: the local stack needs `supabase/functions/.env` with `ANTHROPIC_API_KEY` and `supabase functions serve`, and `Config/Local.xcconfig` points at the Mac's LAN address. A 402 now inserts the locally formatted text and shows the limit notice instead of discarding the dictation.
 5. **Phase 3: Onboarding and real auth** (all screens and flows above).
-   - **Done when:** each screen is within ±4 pt of its reference on the iPhone 16 simulator; a fresh install on the device reaches Home through email signup and Sign in with Apple.
-   - **Status (2026-11-01):** the full onboarding is built to `ONBOARDING_PARITY_PLAN.md` against the 42 captured references (iPhone 16 Pro, 402 pt): reducer, checkpoints, Settings round trips, practice through the real keyboard, server-backed offer, Home handoff. Simulator only so far: unit and UI journey tests pass and the parity harness is within ±4 pt on the app-owned screens. Still open: the Sign in with Apple capability and a Google client, then the device journey (see the parity plan's implementation notes).
+   - **Done when:** a fresh install on the device reaches Home through email signup and Sign in with Apple.
+   - **Status (2026-11-01):** the full onboarding is built (see [ONBOARDING.md](ONBOARDING.md)): reducer, checkpoints, Settings round trips, practice through the real keyboard, server-backed offer, Home handoff. Simulator only so far: unit and UI journey tests pass. Still open: the Sign in with Apple capability and a Google client, then the device journey.
 6. **Phase 4: Home and tabs**, with SwiftData in the app's private container and SyncEngine.
    - **Done when:** tabs unlock on the first result delivered in the background; reinstall plus login restores dictionary, snippets, notes and style.
-   - **Status (2026-11-09):** the tab bar (Home, Dictionary, Snippets, Style, Scratchpad) and the side menu are built, from a capture of Wispr Flow 1.78 on the iPhone (`Wispr Flow iOS App/`, local only). Dictionary words and snippets live in `LibraryStore` (SwiftData, `Library.store`) and now reach the pipeline, so the recognizer's keywords, the cleanup prompt and the local formatter use them. Scratchpad notes are local; a blank note is discarded. Not built: cloud sync of words, snippets and notes (the tables exist; notes leaving the iPhone changes the privacy copy) and locked tabs.
-   - **Status (2026-11-09, evening):** built on top: the keyboard's ☰ "Add to dictionary" (the selection or the word before the cursor, queued in the App Group for the app); a mic in each note that records into it at the cursor, and Auto open note; "Dictate with Murmur" for the Action Button, Control Center and Shortcuts (`DictateIntent`); a Wispr-style language picker whose languages go to the cloud as hints under Auto-detect (needs `transcribe` and `dictate` redeployed); 👍/👎 on transcripts (`feedback`) and playback of each dictation's kept recording; Settings with a line per row (Low data mode, Smart formatting, Keep recordings, data sharing); Home's "Try it now" sheet; iOS's rating prompt after 10 good dictations over 3 days.
+   - **Status (2026-11-09):** the tab bar (Home, Dictionary, Snippets, Style, Scratchpad) and the side menu are built. Dictionary words and snippets live in `LibraryStore` (SwiftData, `Library.store`) and now reach the pipeline, so the recognizer's keywords, the cleanup prompt and the local formatter use them. Scratchpad notes are local; a blank note is discarded. Not built: cloud sync of words, snippets and notes (the tables exist; notes leaving the iPhone changes the privacy copy) and locked tabs.
+   - **Status (2026-11-09, evening):** built on top: the keyboard's ☰ "Add to dictionary" (the selection or the word before the cursor, queued in the App Group for the app); a mic in each note that records into it at the cursor, and Auto open note; "Dictate with Murmur" for the Action Button, Control Center and Shortcuts (`DictateIntent`); a language picker whose languages go to the cloud as hints under Auto-detect (needs `transcribe` and `dictate` redeployed); 👍/👎 on transcripts (`feedback`) and playback of each dictation's kept recording; Settings with a line per row (Low data mode, Smart formatting, Keep recordings, data sharing); Home's "Try it now" sheet; iOS's rating prompt after 10 good dictations over 3 days.
    - **Status (2026-11-10):** the default style syncs too (`StyleSync`, `profiles.default_style`): a change on this iPhone is sent, otherwise the account's is taken, and a new install signing in during onboarding takes the account's, which onboarding's style step then shows selected.
 7. **Phase 5: Account, Settings, menu items, StoreKit 2** (local `.storekit`, monthly and annual), plus the Control Center toggle and Shortcuts.
    - **Done when:** a sandbox purchase updates the server entitlement within 5 s; a refund revokes it; account deletion removes the data and revokes the Sign in with Apple token.
@@ -388,6 +355,7 @@ supabase/   config.toml, migrations/, functions/{cleanup,auth-lookup,signup-stat
    - **Status (2026-11-09, night):** invites (Refer a friend in the menu, `ReferralView`): a friend who enters a code within 14 days of signing up gets a month of Pro, and the code's owner gets a month when that friend first dictates, up to 12 (`redeem_referral`, `my_referrals` and a trigger on `usage_events`, migration `20261111000000_referrals`, not yet pushed). The website (`site/`, `scripts/publish_site.sh`, GitHub Pages) has the privacy policy, terms, support page and the invite page, whose Open in Murmur (`murmur://invite?code=`) uses the code once signed in; the menu's Help center opens the support page. Version 1.0's listing, screenshots, age rating and review notes are in App Store Connect (`scripts/fill_app_store_listing.mjs`).
 8. **Phase 6: Polish.** QWERTY with long-press accents, accessibility, localization, App Store notes explaining the session pattern.
    - **Done when:** keyboard peak memory stays under 40 MB over 50 dictations.
+   - **Status (2026-11-11):** the app, the keyboard, the Live Activity, onboarding and the website were redesigned (see Design system and Screens): a white canvas with ink and grays, the system font, a dot-in-a-ring mark, red only while the microphone is open, and one menu in place of the tab bar. Every feature and behavior stayed; the look, the words and the map changed.
 
 ## Verification
 - **Unit tests:**
@@ -401,10 +369,10 @@ supabase/   config.toml, migrations/, functions/{cleanup,auth-lookup,signup-stat
 - **Simulator vs device:**
   - The simulator covers UI, layouts, and `simctl openurl` deep links.
   - The device covers the background mic, speech latency, swipe-back, AirPods, calls and memory.
-- **UI fidelity:**
-  - The references are 393 pt @3x with a 120 px Mobbin footer.
-  - Launch with `-route <screen>`, take `simctl io booted screenshot`, crop the footer, and run ImageMagick `compare` against each reference.
-  - A debug-only reference overlay helps with tuning.
+- **UI:**
+  - `scripts/screenshots.sh` launches every `-route` with sample data and takes a screenshot; DEBUG launch arguments pin the session, the plan, the keyboard and each onboarding step.
+  - `MurmurBrandTests` holds the contrast of text and graphics on every background they sit on.
+  - The UI tests (`OnboardingJourney` scheme) walk onboarding on fake services and every screen through the menu.
 - **Latency:** `OSSignposter` intervals in both processes; the keyboard reports its insert time back. `DictationMetrics` is shown in Debug › Metrics.
 - **End-to-end on the device:**
   1. Notes, Messages (return key = send), ChatGPT.

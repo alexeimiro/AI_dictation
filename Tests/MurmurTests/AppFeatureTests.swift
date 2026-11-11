@@ -43,7 +43,7 @@ struct LanguagePickerTests {
     }
 }
 
-/// Scratchpad's mic puts the text in at the cursor, as the keyboard would.
+/// The mic in a note puts the text in at the cursor, as the keyboard would.
 struct NoteInsertionTests {
     @Test func appendsWithASpaceAndLowercasesMidSentence() {
         let result = NoteInsertion.insert("And then lunch.", into: "Call mom", at: nil, language: "en-US")

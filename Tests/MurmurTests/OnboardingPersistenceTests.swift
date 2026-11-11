@@ -195,6 +195,33 @@ struct OnboardingHelperTests {
         #expect(TrialOfferView.duration(1) == "1 day")
     }
 
+    /// The plan page's title spells out a number that opens it, and its lines keep the digits.
+    @Test func theTrialIsNamedByItsLength() {
+        #expect(OnboardingCopy.Offer.trialTitle(days: 14) == "Two weeks of Pro, on us")
+        #expect(OnboardingCopy.Offer.trialTitle(days: 7) == "One week of Pro, on us")
+        #expect(OnboardingCopy.Offer.trialTitle(days: 10) == "Ten days of Pro, on us")
+        #expect(OnboardingCopy.Offer.trialTitle(days: 12) == "12 days of Pro, on us")
+        #expect(OnboardingCopy.Offer.trialLine(days: 14) == "Unlimited words for 2 weeks. No card needed.")
+        #expect(OnboardingCopy.Offer.trialCaption(days: 1) == "day of unlimited words")
+        #expect(OnboardingCopy.Offer.trialCaption(days: 14) == "days of unlimited words")
+    }
+
+    /// The bar at the top counts four parts, in order; the pages that open a part, sign-in and
+    /// the last two pages have no bar.
+    @Test func everyStepWithABarBelongsToOnePartInOrder() {
+        let parts = OnboardingStep.allCases.compactMap(OnboardingProgress.part(for:))
+        #expect(parts == parts.sorted())
+        #expect(Set(parts) == Set(1...OnboardingProgress.parts))
+        for step in [OnboardingStep.welcome, .signIn, .signInOptions, .emailSignIn, .setupIntro, .practiceIntro,
+                     .wrapUpIntro, .ready, .trialOffer, .complete] {
+            #expect(OnboardingProgress.part(for: step) == nil, "\(step)")
+        }
+        // Skip is offered only where the journey's rules let a page be skipped.
+        for step in OnboardingStep.allCases where OnboardingProgress.showsSkip(step) {
+            #expect(OnboardingReducer.skipTarget(from: step) != nil, "\(step)")
+        }
+    }
+
     @Test @MainActor func emailValidation() {
         for valid in ["a@b.co", "  name.surname@mail.example.org ", "x+tag@domain.io"] {
             #expect(EmailSignInView.isValidEmail(valid), "\(valid)")

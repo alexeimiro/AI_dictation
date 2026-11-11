@@ -266,7 +266,7 @@ struct SessionControllerTests {
         #expect(await waitUntil { harness.transport.payloads.readResult(pending.requestId) != nil })
     }
 
-    /// Scratchpad's mic: the result goes to the note, not to the keyboard's files.
+    /// The mic in a note: the result goes to the note, not to the keyboard's files.
     @Test func anInAppDictationGoesToItsHandler() async throws {
         let harness = makeHarness()
         var delivered: [DictationResult] = []

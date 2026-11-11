@@ -128,7 +128,7 @@ final class AccountService: StyleRemote {
         }
     }
 
-    /// `my_referrals()`: Refer a friend's code and counts.
+    /// `my_referrals()`: the code and counts Invite a friend shows.
     struct Referrals: Decodable, Equatable, Sendable {
         let code: String
         let friendsJoined: Int

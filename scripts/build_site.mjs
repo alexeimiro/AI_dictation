@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Builds Murmur's website into build/site: the privacy policy and terms (docs/legal), the support
-// page (site/support.md), the home and invite pages (site/*.html), the stylesheet and the app's
-// fonts. scripts/publish_site.sh publishes it to GitHub Pages; the app and App Store Connect link
-// to its pages.
+// page (site/support.md), the home and invite pages (site/*.html) and the stylesheet.
+// scripts/publish_site.sh publishes it to GitHub Pages; the app and App Store Connect link to its
+// pages.
 //
 // Usage: node scripts/build_site.mjs
 import fs from "node:fs";
@@ -14,7 +14,7 @@ const out = path.join(root, "build/site");
 const PAGES = [
   {
     file: "index.html", source: "site/home.html", title: "Murmur: talk instead of typing",
-    description: "Murmur is a voice keyboard for iPhone: talk in any app and it types for you.",
+    description: "Murmur is a keyboard for iPhone that writes what you say, in any text field.",
   },
   {
     file: "privacy/index.html", source: "docs/legal/privacy-policy.md", title: "Privacy Policy · Murmur",
@@ -34,10 +34,9 @@ const PAGES = [
   },
 ];
 
-const FONTS = [
-  "Figtree-Regular.ttf", "Figtree-Medium.ttf", "Figtree-SemiBold.ttf", "EBGaramond-Medium.ttf",
-  "OFL-Figtree.txt", "OFL-EBGaramond.txt",
-];
+// Murmur's mark, a dot in a ring, on the app's 24-unit grid (MarkGeometry in MurmurBrand).
+const MARK = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor"/>`
+  + `<circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>`;
 
 const escape = (text) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -112,7 +111,7 @@ function page({ file, title, description }, body) {
 <link rel="stylesheet" href="${up}style.css">
 </head>
 <body>
-<header class="site"><a class="brand" href="${up}">Murmur</a></header>
+<header class="site"><a class="brand" href="${up}" aria-label="Murmur">${MARK}<span>murmur</span></a></header>
 <main>
 ${body.trim()}
 </main>
@@ -134,10 +133,6 @@ for (const spec of PAGES) {
   fs.writeFileSync(target, page(spec, body));
 }
 fs.copyFileSync(path.join(root, "site/style.css"), path.join(out, "style.css"));
-fs.mkdirSync(path.join(out, "fonts"));
-for (const font of FONTS) {
-  fs.copyFileSync(path.join(root, "App/Resources/Fonts", font), path.join(out, "fonts", font));
-}
 // GitHub Pages serves the files as they are, without Jekyll.
 fs.writeFileSync(path.join(out, ".nojekyll"), "");
 // The custom domain. Each publish replaces the whole gh-pages branch, so the CNAME file that keeps

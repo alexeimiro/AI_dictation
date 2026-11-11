@@ -97,14 +97,14 @@ enum LibraryItem: Equatable, Sendable {
     }
 }
 
-/// The personal dictionary, snippets and Scratchpad notes, in the app's private container. Words
+/// The personal dictionary, snippets and notes, in the app's private container. Words
 /// and snippets feed the dictation pipeline through `onChange`. Signed in, `LibrarySync` keeps
 /// them in step with the account: every change made here goes through `onLocalChange`, and the
 /// other devices' changes come in through `applyRemote`.
 @MainActor
 @Observable
 final class LibraryStore {
-    /// By the word as written in the list ("Alexey", "btw → by the way", "Wispr Flow").
+    /// By the word as written in the list ("Alexey", "btw → by the way", "Voice Memos").
     private(set) var entries: [DictionaryEntry] = []
     /// Newest first.
     private(set) var snippets: [SnippetDefinition] = []

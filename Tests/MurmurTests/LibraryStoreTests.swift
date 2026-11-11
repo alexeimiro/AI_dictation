@@ -14,14 +14,14 @@ struct LibraryStoreTests {
     // MARK: Dictionary
 
     @Test func savesWordsAndReplacementsSortedAsListed() throws {
-        try store.saveEntry(term: "Wispr Flow", misspelling: nil)
+        try store.saveEntry(term: "Voice Memos", misspelling: nil)
         try store.saveEntry(term: "by the way", misspelling: " btw ")
         try store.saveEntry(term: "  Alexey ", misspelling: nil)
-        #expect(store.entries.map(\.term) == ["Alexey", "by the way", "Wispr Flow"])
+        #expect(store.entries.map(\.term) == ["Alexey", "by the way", "Voice Memos"])
         #expect(store.entries[1].misspelling == "btw")
         #expect(store.dictionaryTerms == [
             DictionaryTerm(term: "Alexey"), DictionaryTerm(term: "by the way", misspelling: "btw"),
-            DictionaryTerm(term: "Wispr Flow"),
+            DictionaryTerm(term: "Voice Memos"),
         ])
     }
 

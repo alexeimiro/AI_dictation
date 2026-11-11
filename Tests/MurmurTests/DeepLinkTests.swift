@@ -14,7 +14,7 @@ struct DeepLinkTests {
         #expect(DeepLink(url: URL(string: "murmur://settings/")!) == .openSettings)
     }
 
-    /// The keyboard's limit message opens "Get unlimited words".
+    /// The keyboard's limit message opens Murmur Pro's page.
     @Test func parsesPro() {
         #expect(DeepLink(url: Brand.proURL) == .pro)
         #expect(DeepLink(url: URL(string: "murmur://pro/")!) == .pro)
