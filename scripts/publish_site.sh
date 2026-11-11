@@ -1,7 +1,8 @@
 #!/bin/bash
 # Publishes Murmur's website to GitHub Pages: builds it (scripts/build_site.mjs), then pushes
 # build/site as the whole content of the gh-pages branch, one commit per publish. Nothing on the
-# current branch changes. GitHub serves it at https://alexeimiro.github.io/AI_dictation/.
+# current branch changes. GitHub serves it at https://simplymurmur.com/ (the build's CNAME file),
+# and https://alexeimiro.github.io/AI_dictation/ redirects there.
 #
 # Usage: scripts/publish_site.sh
 set -euo pipefail

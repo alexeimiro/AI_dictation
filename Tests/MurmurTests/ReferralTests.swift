@@ -71,8 +71,8 @@ struct ReferralTests {
     /// The link Share invite sends opens the website's invite page with the code.
     @Test func inviteLinkOpensTheInvitePage() throws {
         let url = try #require(Brand.inviteURL(code: "a1b2c3d4"))
-        #expect(url.absoluteString == "https://alexeimiro.github.io/AI_dictation/invite/?code=a1b2c3d4")
-        #expect(Brand.supportURL?.absoluteString == "https://alexeimiro.github.io/AI_dictation/support/")
+        #expect(url.absoluteString == "https://simplymurmur.com/invite/?code=a1b2c3d4")
+        #expect(Brand.supportURL?.absoluteString == "https://simplymurmur.com/support/")
         #expect(ReferralView.shareMessage(code: "a1b2c3d4").contains("A1B2C3D4"))
     }
 }

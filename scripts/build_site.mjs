@@ -140,4 +140,7 @@ for (const font of FONTS) {
 }
 // GitHub Pages serves the files as they are, without Jekyll.
 fs.writeFileSync(path.join(out, ".nojekyll"), "");
+// The custom domain. Each publish replaces the whole gh-pages branch, so the CNAME file that keeps
+// the domain set has to be part of every build.
+fs.writeFileSync(path.join(out, "CNAME"), "simplymurmur.com\n");
 console.log(`Built ${PAGES.length} pages into ${path.relative(root, out)}`);

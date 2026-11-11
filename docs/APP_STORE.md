@@ -44,16 +44,16 @@ App Store Connect only takes in its web page). Character limits are App Store Co
 > MURMUR PRO
 > Murmur is free with 1,000 words a week, after a 14-day trial of Pro. Murmur Pro has no weekly limit: $9.99 a month or $79.99 a year. Payment is charged to your Apple Account, and the subscription renews automatically unless cancelled at least 24 hours before the end of the period. Manage or cancel it in Settings › Apple Account › Subscriptions.
 >
-> Terms of Use: https://alexeimiro.github.io/AI_dictation/terms/
-> Privacy Policy: https://alexeimiro.github.io/AI_dictation/privacy/
+> Terms of Use: https://simplymurmur.com/terms/
+> Privacy Policy: https://simplymurmur.com/privacy/
 
 **Category**: Productivity (secondary: Utilities)
 
-**Support URL**: `https://alexeimiro.github.io/AI_dictation/support/`
+**Support URL**: `https://simplymurmur.com/support/`
 
-**Marketing URL**: `https://alexeimiro.github.io/AI_dictation/`
+**Marketing URL**: `https://simplymurmur.com/`
 
-**Privacy Policy URL**: `https://alexeimiro.github.io/AI_dictation/privacy/`, from `docs/legal/privacy-policy.md`.
+**Privacy Policy URL**: `https://simplymurmur.com/privacy/`, from `docs/legal/privacy-policy.md`.
 
 **Copyright**: `2026 OKNENOR L.L.C-FZ`
 
