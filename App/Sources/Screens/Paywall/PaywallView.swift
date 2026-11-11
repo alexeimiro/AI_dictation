@@ -3,9 +3,9 @@ import MurmurUI
 import StoreKit
 import SwiftUI
 
-/// "Get unlimited words", Wispr Flow's paywall: what Pro adds, the annual and monthly plans with
-/// the App Store's local prices, Continue, Restore purchase and the terms. A subscriber sees their
-/// plan and Manage subscription instead.
+/// Murmur Pro: what it adds, the annual and monthly plans with the App Store's local prices,
+/// Continue, Restore purchase and the terms. A subscriber sees their plan and Manage subscription
+/// instead.
 struct PaywallView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -14,60 +14,79 @@ struct PaywallView: View {
     @State private var managing = false
     @State private var unavailable = false
     @State private var restoring = false
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         let store = model.pro
         let options = model.launchOptions.useFixtures ? PlanOption.fixtures : PlanOption.options(from: store.products)
+        // At the largest text sizes the buttons scroll with the rest: pinned, they would leave
+        // no room for the plans.
+        let pinsFooter = !dynamicTypeSize.isAccessibilitySize
         VStack(spacing: 0) {
             HStack {
                 Button { dismiss() } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(Palette.textSecondary)
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(Theme.ink)
                         .frame(width: 44, height: 44)
+                        .contentShape(.rect)
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel("Close")
                 Spacer()
             }
             .padding(.horizontal, 8)
             ScrollView {
-                VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 8) {
-                        Wordmark(height: 26)
-                        PlanBadge(text: "Pro")
+                        Wordmark(height: 24)
+                        Chip("Pro", solid: true)
                     }
                     .dynamicTypeSize(...DynamicTypeSize.large)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel("\(Brand.name) Pro")
-                    SerifTitle("Get unlimited words", accent: "unlimited", accentStyle: .italic, size: 40,
-                               color: Palette.ink)
-                        .padding(.top, 22)
-                    VStack(alignment: .leading, spacing: 14) {
+                    Text("Unlimited words")
+                        .font(.murmur(.display))
+                        .tracking(-0.8)
+                        .foregroundStyle(Theme.ink)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier(AccessibilityID.screen("paywall"))
+                        .padding(.top, 14)
+                    VStack(alignment: .leading, spacing: 12) {
                         ForEach(Self.features, id: \.self) { feature in
                             Label {
-                                Text(feature).font(.ui(17)).foregroundStyle(Palette.text)
+                                Text(feature)
+                                    .font(.murmur(.body))
+                                    .foregroundStyle(Theme.ink)
                             } icon: {
-                                Image(systemName: "checkmark").font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(Palette.ink)
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(Theme.ink)
                             }
                         }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 34)
-                    .padding(.top, 28)
+                    .padding(.top, 18)
                     if store.isSubscribed {
                         subscribed
                     } else {
                         plans(options, loading: store.isLoading)
+                        if !pinsFooter {
+                            footer(options)
+                                .padding(.horizontal, -24)
+                                .padding(.top, 12)
+                        }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24)
+                .padding(.top, 8)
                 .padding(.bottom, 16)
             }
-            if !store.isSubscribed {
+            if !store.isSubscribed, pinsFooter {
                 footer(options)
             }
         }
-        .background(Palette.paper.ignoresSafeArea())
+        .background(Theme.canvas.ignoresSafeArea())
         .task {
             guard !model.launchOptions.useFixtures else { return }
             unavailable = !(await store.loadProducts())
@@ -82,20 +101,22 @@ struct PaywallView: View {
     ]
 
     private func plans(_ options: [PlanOption], loading: Bool) -> some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 10) {
             if options.isEmpty {
                 if loading || !unavailable {
-                    ProgressView().padding(.vertical, 40)
+                    ProgressView()
+                        .tint(Theme.ink)
+                        .padding(.vertical, 40)
                 } else {
                     VStack(spacing: 12) {
-                        Text("The plans didn't load. Check your connection and try again.")
-                            .font(.ui(16))
-                            .foregroundStyle(Palette.textSecondary)
+                        Text("The plans didn’t load. Check your connection and try again.")
+                            .font(.murmur(.callout))
+                            .foregroundStyle(Theme.second)
                             .multilineTextAlignment(.center)
                         Button("Try again") {
                             Task { unavailable = !(await model.pro.loadProducts()) }
                         }
-                        .font(.ui(16, .medium))
+                        .buttonStyle(.murmur(.secondary, size: .compact))
                     }
                     .padding(.vertical, 24)
                 }
@@ -104,59 +125,56 @@ struct PaywallView: View {
                 PlanCard(option: option, isSelected: option.id == selection) { selection = option.id }
             }
             Text("Basic stays free, with 1,000 words a week.")
-                .font(.ui(14))
-                .foregroundStyle(Palette.textSecondary)
+                .font(.murmur(.footnote))
+                .foregroundStyle(Theme.third)
                 .padding(.top, 2)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 30)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 24)
     }
 
     private var subscribed: some View {
-        VStack(spacing: 14) {
-            Text("You're on \(Brand.name) Pro")
-                .font(.ui(20, .semibold))
-                .foregroundStyle(Palette.text)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("You’re on \(Brand.name) Pro")
+                .font(.murmur(.headline))
+                .foregroundStyle(Theme.ink)
             Text("Thanks for supporting \(Brand.name).")
-                .font(.ui(16))
-                .foregroundStyle(Palette.textSecondary)
+                .font(.murmur(.subhead))
+                .foregroundStyle(Theme.second)
             Button("Manage subscription") { managing = true }
-                .buttonStyle(.pill(.outline))
-                .padding(.top, 6)
+                .buttonStyle(.murmur(.secondary))
+                .padding(.top, 14)
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 36)
+        .padding(.top, 28)
     }
 
     private func footer(_ options: [PlanOption]) -> some View {
         let store = model.pro
         let busy = store.isPurchasing || restoring
-        return VStack(spacing: 10) {
-            if let message {
-                Text(message)
-                    .font(.ui(14))
-                    .foregroundStyle(Palette.danger)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+        return VStack(spacing: 6) {
+            FieldError(message: message)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 4)
             Button(action: purchase) {
                 HStack(spacing: 10) {
-                    if store.isPurchasing { ProgressView().tint(.white) }
+                    if store.isPurchasing { ProgressView().tint(Theme.ink) }
                     Text("Continue with \(Brand.name) Pro")
                 }
             }
-            .buttonStyle(.pill(.ink))
+            .buttonStyle(.murmur(.primary))
             .disabled(busy || !options.contains { $0.id == selection })
             Button(action: restore) {
                 Text(restoring ? "Restoring…" : "Restore purchase")
-                    .font(.ui(16, .medium))
-                    .foregroundStyle(Palette.textSecondary)
+                    .font(.murmur(.subhead, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
                     .frame(minHeight: 44)
+                    .contentShape(.rect)
             }
+            .buttonStyle(.plain)
             .disabled(busy)
             Text("Renews automatically until you cancel. Cancel anytime in Settings › Apple Account › Subscriptions.")
-                .font(.ui(12))
-                .foregroundStyle(Palette.muted)
+                .font(.murmur(.caption))
+                .foregroundStyle(Theme.third)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 18) {
@@ -165,13 +183,15 @@ struct PaywallView: View {
                     Link("Privacy Policy", destination: privacy)
                 }
             }
-            .font(.ui(12, .medium))
-            .tint(Palette.textSecondary)
+            .font(.murmur(.footnote))
+            .underline()
+            .tint(Theme.ink)
+            .padding(.top, 2)
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, 24)
         .padding(.top, 10)
         .padding(.bottom, 8)
-        .background(Palette.paper)
+        .background(Theme.canvas)
     }
 
     private func purchase() {
@@ -209,8 +229,8 @@ struct PaywallView: View {
     }
 }
 
-/// A plan's card: a radio, its name, the price per period, and for the annual plan the monthly
-/// price and the saving.
+/// A plan's card: its name with the saving, the price per period, for the annual plan the price
+/// a month, and the mark that shows which is chosen.
 private struct PlanCard: View {
     let option: PlanOption
     let isSelected: Bool
@@ -218,44 +238,43 @@ private struct PlanCard: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 14) {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 24))
-                    .foregroundStyle(isSelected ? Palette.tabSelectedLabel : Palette.cardBorder)
-                    .accessibilityHidden(true)
-                Text(option.title)
-                    .font(.ui(22, .semibold))
-                    .foregroundStyle(Palette.text)
-                Spacer(minLength: 8)
-                VStack(alignment: .trailing, spacing: 3) {
-                    Text(option.price)
-                        .font(.ui(19, .semibold))
-                        .foregroundStyle(Palette.text)
-                    if let perMonth = option.perMonth {
-                        Text(perMonth)
-                            .font(.ui(14))
-                            .foregroundStyle(Palette.textSecondary)
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 8) {
+                        Text(option.title)
+                            .font(.murmur(.headline))
+                            .foregroundStyle(Theme.ink)
+                            .fixedSize()
+                        if let saving = option.saving {
+                            Chip(saving, solid: true)
+                        }
                     }
+                    Text(option.price)
+                        .font(.murmur(.subhead))
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.second)
+                        .fixedSize()
                 }
+                .layoutPriority(1)
+                Spacer(minLength: 4)
+                if let perMonth = option.perMonth {
+                    // The one part that may shrink when the card is narrow.
+                    Text(perMonth)
+                        .font(.murmur(.subhead, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                SelectionMark(isOn: isSelected)
+                    .accessibilityHidden(true)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 18)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
             .frame(maxWidth: .infinity)
-            .background(Palette.paper, in: .rect(cornerRadius: 20))
             .overlay {
                 RoundedRectangle(cornerRadius: 20)
-                    .stroke(isSelected ? Palette.tabSelectedLabel : Palette.cardBorder, lineWidth: isSelected ? 2 : 1.5)
-            }
-            .overlay(alignment: .topTrailing) {
-                if let saving = option.saving {
-                    Text(saving)
-                        .font(.ui(14, .semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(Palette.proBadge, in: .capsule)
-                        .offset(x: -16, y: -14)
-                }
+                    .strokeBorder(isSelected ? Theme.ink : Theme.line, lineWidth: 1.5)
             }
             .contentShape(.rect(cornerRadius: 20))
         }

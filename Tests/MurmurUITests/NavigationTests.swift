@@ -1,7 +1,8 @@
 import XCTest
 
-/// The menu is the only way between the app's places: no screen shows a tab bar, and every row of
-/// the menu opens its screen. Runs on sample data (`-fixtures`), so nothing leaves the app.
+/// The menu is the only way between the app's places: no screen shows a tab bar, every row of the
+/// menu opens its screen, and every `-route` name still lands where it should. Runs on sample
+/// data (`-fixtures`), so nothing leaves the app.
 final class NavigationTests: XCTestCase {
     private var app: XCUIApplication!
 
@@ -39,9 +40,12 @@ final class NavigationTests: XCTestCase {
         XCTAssertFalse(app.tabBars.firstMatch.exists, "\(screen) shows a tab bar", file: file, line: line)
     }
 
-    private func expectTitle(_ title: String, file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 5), "not on “\(title)”", file: file, line: line)
-        expectNoTabBar(title, file: file, line: line)
+    /// The screen named `name` (`AccessibilityID.screen`) is showing, without a tab bar.
+    private func expectScreen(_ name: String, timeout: TimeInterval = 5, file: StaticString = #filePath,
+                              line: UInt = #line) {
+        XCTAssertTrue(element(AccessibilityID.screen(name)).waitForExistence(timeout: timeout), "not on “\(name)”",
+                      file: file, line: line)
+        expectNoTabBar(name, file: file, line: line)
     }
 
     private func back() {
@@ -52,15 +56,14 @@ final class NavigationTests: XCTestCase {
 
     func testTheMenuOpensEachPlaceAndNoneShowsATabBar() {
         launch()
-        XCTAssertTrue(element(AccessibilityID.sessionControl).waitForExistence(timeout: 10), "Home")
-        expectNoTabBar("Home")
+        expectScreen("home", timeout: 10)
 
-        // The places other than Home, by the title each shows in its top bar.
-        for (place, title) in [("scratchpad", "Scratchpad"), ("dictionary", "Dictionary"), ("snippets", "Snippets"),
-                               ("style", "Style")] {
+        // Each place other than Home, by the menu row's name and the screen's.
+        for (place, screen) in [("scratchpad", "notes"), ("dictionary", "dictionary"), ("snippets", "snippets"),
+                                ("style", "style")] {
             openMenu()
             tap(AccessibilityID.menuPlace(place))
-            expectTitle(title)
+            expectScreen(screen)
             // The menu marks the place on screen.
             openMenu()
             XCTAssertTrue(element(AccessibilityID.menuPlace(place)).isSelected, "\(place) isn't marked")
@@ -70,24 +73,24 @@ final class NavigationTests: XCTestCase {
 
         openMenu()
         tap(AccessibilityID.menuPlace("home"))
-        XCTAssertTrue(element(AccessibilityID.sessionControl).waitForExistence(timeout: 5), "back on Home")
+        expectScreen("home")
     }
 
     func testTheMenusOtherRowsOpenTheirScreens() {
         launch()
         openMenu()
         tap(AccessibilityID.menuSettings)
-        expectTitle("Settings")
+        expectScreen("settings")
         back()
 
         openMenu()
         tap(AccessibilityID.menuAccount)
-        expectTitle("Account")
+        expectScreen("account")
         back()
 
         openMenu()
         tap(AccessibilityID.menuInvite)
-        expectTitle("Referrals")
+        expectScreen("invite")
         back()
 
         openMenu()
@@ -97,13 +100,58 @@ final class NavigationTests: XCTestCase {
 
         openMenu()
         tap(AccessibilityID.menuUpgrade)
-        XCTAssertTrue(app.buttons["Restore purchase"].waitForExistence(timeout: 5), "the plans")
+        expectScreen("paywall")
+    }
+
+    /// Every `-route` name, old and new, opens its screen, and none of them shows a tab bar.
+    func testEveryRouteOpensItsScreen() {
+        let routes: [(route: String, screen: String, extra: [String])] = [
+            ("home", "home", []),
+            ("settings", "settings", []),
+            ("account", "account", []),
+            ("paywall", "paywall", []),
+            ("referral", "invite", []),
+            ("invite", "invite", []),
+            ("dictionary", "dictionary", []),
+            ("snippets", "snippets", []),
+            ("style", "style", []),
+            ("scratchpad", "notes", []),
+            ("notes", "notes", []),
+            ("swipeBack", "swipeBack", ["-session-fixture", "on"]),
+        ]
+        for (route, screen, extra) in routes {
+            launch(route: route, extra: extra)
+            expectScreen(screen, timeout: 10)
+            app.terminate()
+        }
+
+        // Screens named by their top bar.
+        for (route, title) in [("languages", "Languages"), ("debug", "Debug")] {
+            launch(route: route)
+            XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 10), "-route \(route)")
+            expectNoTabBar(route)
+            app.terminate()
+        }
+
+        launch(route: "menu")
+        XCTAssertTrue(element(AccessibilityID.menuClose).waitForExistence(timeout: 10), "-route menu")
+        app.terminate()
+
+        launch(route: "note")
+        let rename = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Rename")).firstMatch
+        XCTAssertTrue(rename.waitForExistence(timeout: 10), "-route note")
+        expectNoTabBar("note")
+        app.terminate()
+
+        // The transcript prepares its recording first, which takes a while on a simulator.
+        launch(route: "transcript")
+        expectScreen("transcript", timeout: 40)
     }
 
     /// A pushed screen has no menu button; Back and a swipe from the left edge both return.
     func testPushedScreensGoBackByButtonAndBySwipe() {
         launch(route: "settings")
-        expectTitle("Settings")
+        expectScreen("settings", timeout: 10)
         XCTAssertFalse(element(AccessibilityID.menuButton).exists)
         let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.0, dy: 0.5))
         edge.press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5)))
@@ -111,7 +159,7 @@ final class NavigationTests: XCTestCase {
 
         openMenu()
         tap(AccessibilityID.menuSettings)
-        expectTitle("Settings")
+        expectScreen("settings")
         back()
         XCTAssertTrue(element(AccessibilityID.sessionControl).waitForExistence(timeout: 5), "Back didn't go back")
     }

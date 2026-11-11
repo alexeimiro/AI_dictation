@@ -12,7 +12,6 @@ struct HomeView: View {
     @Query(sort: \TranscriptRecord.createdAt, order: .reverse) private var records: [TranscriptRecord]
     @State private var toast: String?
     @State private var tryingIt = false
-    @AppStorage("intro.home.dismissed") private var nudgeDismissed = false
     @Environment(\.requestReview) private var requestReview
 
     var body: some View {
@@ -22,7 +21,7 @@ struct HomeView: View {
                 EmptyState("Nothing dictated yet",
                            message: "What you dictate shows up here. Open a text field, switch to Murmur and tap the mic.")
                     .padding(.vertical, 56)
-                    .plainRow()
+                    .plainListRow()
             } else {
                 ForEach(DayBucketing.group(records.map(\.snapshot))) { group in
                     Text(Self.title(for: group.day))
@@ -31,16 +30,14 @@ struct HomeView: View {
                         .accessibilityAddTraits(.isHeader)
                         .padding(.top, 18)
                         .padding(.bottom, 8)
-                        .plainRow()
+                        .plainListRow()
                     ForEach(group.transcripts) { transcript in
                         row(transcript)
                     }
                 }
             }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .background(Theme.canvas)
+        .plainList()
         .toast($toast)
         .safeAreaBar(edge: .bottom) {
             SessionBar()
@@ -59,13 +56,9 @@ struct HomeView: View {
                 // The logo is a mark, not text to read: it keeps its size, so it fits the bar.
                 .dynamicTypeSize(...DynamicTypeSize.large)
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                BarIconButton(systemImage: "pencil.line", label: "New note") {
-                    model.openNewNote(dictating: false)
-                }
-                .accessibilityIdentifier(AccessibilityID.newNote)
+            BarActionItem(systemImage: "pencil.line", label: "New note", id: AccessibilityID.newNote) {
+                model.openNewNote(dictating: false)
             }
-            .sharedBackgroundVisibility(.hidden)
         }
         .sheet(isPresented: $tryingIt) { TryItSheet() }
         .task {
@@ -93,16 +86,13 @@ struct HomeView: View {
             }
             if !model.setup.isComplete, records.isEmpty {
                 SetupChecklistCard()
-            } else if !nudgeDismissed {
-                NoticeCard("Try Murmur where you write", message: "A to-do list, a message or an email. Pick one.",
-                           onDismiss: { withAnimation { nudgeDismissed = true } }) {
-                    Button("Try it") { tryingIt = true }
-                        .buttonStyle(.murmur(.secondary, size: .compact))
-                }
+            } else {
+                TipCard(title: "Try Murmur where you write", message: "A to-do list, a message or an email. Pick one.",
+                        action: "Try it", dismissedKey: "intro.home.dismissed") { tryingIt = true }
             }
         }
         .padding(.vertical, 5)
-        .plainRow()
+        .plainListRow()
     }
 
     private func row(_ transcript: Transcript) -> some View {
@@ -111,7 +101,7 @@ struct HomeView: View {
             .overlay(alignment: .top) { Hairline() }
             .contentShape(.rect)
             .onTapGesture { copy(transcript) }
-            .plainRow()
+            .plainListRow()
             .swipeActions(edge: .leading, allowsFullSwipe: false) {
                 Button { copy(transcript) } label: { Label("Copy", systemImage: "doc.on.doc") }
                     .tint(Theme.second)
@@ -187,16 +177,6 @@ struct HomeView: View {
         case .yesterday: "Yesterday"
         case .other: day.formatted(.dateTime.weekday(.wide).month(.wide).day())
         }
-    }
-}
-
-extension View {
-    /// A row of Home's list without the list's own chrome: the screen's margins, no separator,
-    /// the canvas behind it.
-    fileprivate func plainRow() -> some View {
-        listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Theme.canvas)
     }
 }
 

@@ -11,48 +11,44 @@ struct DictionaryView: View {
     var body: some View {
         let entries = model.library.entries
         List {
-            Section {
-                IntroCard(
-                    title: "Murmur speaks the way you speak",
-                    message: Text("Teach it your own words — **names, company jargon, industry terms**."),
-                    action: "Add new word",
-                    dismissedKey: "intro.dictionary.dismissed"
-                ) { editing = .new }
+            Group {
+                ScreenTitle(MainTab.dictionary.title)
+                    .padding(.top, 6)
+                    .padding(.bottom, 14)
+                    .accessibilityIdentifier(AccessibilityID.screen("dictionary"))
+                TipCard(title: "Teach Murmur your words",
+                        message: "Names, product terms, jargon. Add a word once and Murmur spells it right.",
+                        action: "Add a word", dismissedKey: "intro.dictionary.dismissed") { editing = .new }
+                if entries.isEmpty {
+                    EmptyState("No words yet",
+                               message: "Add a name Murmur keeps getting wrong, or a replacement like btw → by the way.")
+                        .padding(.vertical, 48)
+                } else {
+                    SectionLabel("Your words (\(entries.count))")
+                        .padding(.top, 26)
+                        .padding(.bottom, 6)
+                }
             }
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
+            .plainListRow()
 
-            if entries.isEmpty {
-                Section {
-                    EmptyTabMessage(systemImage: "character.book.closed", title: "No words yet",
-                                    detail: "Add a name Murmur keeps getting wrong, or a replacement like btw → by the way.")
-                }
-                .listRowBackground(Color.clear)
-            } else {
-                Section {
-                    ForEach(entries) { entry in
-                        Button { editing = .entry(entry) } label: { row(entry) }
-                            .swipeActions {
-                                Button(role: .destructive) { model.library.deleteEntry(entry.id) } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
+            ForEach(entries) { entry in
+                Button { editing = .entry(entry) } label: { row(entry) }
+                    .buttonStyle(.plain)
+                    .plainListRow()
+                    .swipeActions {
+                        // Ink, not red: red means the microphone is open.
+                        Button(role: .destructive) { model.library.deleteEntry(entry.id) } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        .tint(Theme.ink)
                     }
-                } header: {
-                    CountHeader(title: "Your words", count: entries.count)
-                }
             }
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background(Palette.canvas)
-        .navigationTitle("Dictionary")
+        .plainList()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             MenuToolbarItem()
-        }
-        .overlay(alignment: .bottomTrailing) {
-            AddButton(label: "Add word") { editing = .new }
+            BarActionItem(systemImage: "plus", label: "Add word") { editing = .new }
         }
         .sheet(item: $editing) { target in
             DictionaryEditor(target: target)
@@ -60,17 +56,24 @@ struct DictionaryView: View {
     }
 
     private func row(_ entry: DictionaryEntry) -> some View {
-        Group {
+        HStack(spacing: 8) {
             if let misspelling = entry.misspelling {
-                Text("\(misspelling) → \(entry.term)")
-            } else {
-                Text(entry.term)
+                Text(verbatim: misspelling)
+                    .foregroundStyle(Theme.second)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Theme.second)
+                    .accessibilityLabel("becomes")
             }
+            Text(verbatim: entry.term)
+                .foregroundStyle(Theme.ink)
         }
         .font(.transcript(.body))
-        .foregroundStyle(Palette.text)
-        .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+        .overlay(alignment: .top) { Hairline() }
         .contentShape(.rect)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -119,64 +122,53 @@ struct DictionaryEditor: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
+        VStack(spacing: 0) {
+            SheetHeader(title, canConfirm: !term.trimmingCharacters(in: .whitespaces).isEmpty,
+                        cancel: { dismiss() }, confirm: save)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
                     Toggle("Correct a misspelling", isOn: $correctsMisspelling.animation())
-                        .tint(Palette.toggleGreen)
-                }
-                if correctsMisspelling {
-                    Section("Misspelling") {
-                        TextField("What Murmur writes, e.g. btw", text: $misspelling)
-                            .focused($focused, equals: .misspelling)
+                        .font(.murmur(.body))
+                        .foregroundStyle(Theme.ink)
+                        .tint(Theme.ink)
+                        .frame(minHeight: 56)
+                        .overlay(alignment: .bottom) { Hairline() }
+                    if correctsMisspelling {
+                        LabeledField("Misspelling") {
+                            TextField("What Murmur writes, e.g. btw", text: $misspelling)
+                                .focused($focused, equals: .misspelling)
+                        }
+                        LabeledField("Correct spelling") {
+                            TextField("What it should write, e.g. by the way", text: $term)
+                                .focused($focused, equals: .term)
+                        }
+                    } else {
+                        LabeledField("Word") {
+                            TextField("Add a new word", text: $term)
+                                .focused($focused, equals: .term)
+                        }
                     }
-                    Section {
-                        TextField("What it should write, e.g. by the way", text: $term)
-                            .focused($focused, equals: .term)
-                    } header: {
-                        Text("Correct spelling")
-                    } footer: {
-                        FieldError(message: error)
-                    }
-                } else {
-                    Section {
-                        TextField("Add a new word", text: $term)
-                            .focused($focused, equals: .term)
-                    } header: {
-                        Text("Word")
-                    } footer: {
-                        FieldError(message: error)
-                    }
-                }
-                if let existing {
-                    Section {
-                        Button("Delete word", role: .destructive) {
+                    FieldError(message: error)
+                    if let existing {
+                        DeleteButton(title: "Delete word") {
                             model.library.deleteEntry(existing.id)
                             dismiss()
                         }
                     }
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
-            .textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .scrollContentBackground(.hidden)
-            .background(Palette.canvas)
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save)
-                        .disabled(term.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-            }
-            .onChange(of: term) { error = nil }
-            .onChange(of: misspelling) { error = nil }
-            .onAppear { focused = correctsMisspelling ? .misspelling : .term }
         }
-        .tint(Palette.ink)
+        .textInputAutocapitalization(.never)
+        .autocorrectionDisabled()
+        .background(Theme.canvas)
+        .presentationBackground(Theme.canvas)
+        .tint(Theme.ink)
+        .onChange(of: term) { error = nil }
+        .onChange(of: misspelling) { error = nil }
+        .onAppear { focused = correctsMisspelling ? .misspelling : .term }
     }
 
     private var title: String {

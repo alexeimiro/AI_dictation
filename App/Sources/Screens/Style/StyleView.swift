@@ -14,19 +14,22 @@ struct StyleView: View {
     var body: some View {
         @Bindable var settings = model.settings
         ScrollView {
-            VStack(spacing: 0) {
-                SerifTitle("Your default style", accent: "default style", accentStyle: .purple, size: 32.5,
-                           color: Palette.ink, tracking: -0.3)
-                    .padding(.top, 20)
-                Text("\(Brand.name) uses this style for all your dictations. You can change it anytime from the keyboard.")
-                    .font(.ui(16))
-                    .foregroundStyle(Palette.ink)
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 12)
-                    .padding(.horizontal, 12)
-                YouSayRow(text: Self.spoken)
-                    .padding(.top, 24)
-                VStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 0) {
+                ScreenTitle("How Murmur writes")
+                    .padding(.top, 6)
+                    .accessibilityIdentifier(AccessibilityID.screen("style"))
+                Text("Used for every dictation. You can switch from the keyboard any time.")
+                    .font(.murmur(.subhead))
+                    .foregroundStyle(Theme.second)
+                    .padding(.top, 8)
+                SectionLabel("You say")
+                    .padding(.top, 22)
+                Text(verbatim: "“\(Self.spoken)”")
+                    .font(.transcript(.body))
+                    .lineSpacing(2)
+                    .foregroundStyle(Theme.ink)
+                    .padding(.top, 4)
+                VStack(spacing: 12) {
                     ForEach(StylePreset.allCases) { style in
                         StyleCard(style: style, isSelected: settings.defaultStyle == style) {
                             settings.defaultStyle = style
@@ -34,13 +37,12 @@ struct StyleView: View {
                         }
                     }
                 }
-                .padding(.top, 12)
+                .padding(.top, 22)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 20)
             .padding(.bottom, 32)
         }
-        .background(Palette.canvas)
-        .navigationTitle("Style")
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             MenuToolbarItem()
@@ -57,40 +59,30 @@ private struct StyleCard: View {
 
     var body: some View {
         Button(action: select) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(style.title)
-                            .font(.ui(20, .semibold, relativeTo: .title3))
-                            .foregroundStyle(Palette.text)
-                        Text(style.subtitle)
-                            .font(.ui(15))
-                            .foregroundStyle(Palette.textSecondary)
-                    }
-                    Spacer()
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 24))
-                        .foregroundStyle(isSelected ? Palette.proBadge : Palette.cardBorder)
-                }
-                HStack(alignment: .top, spacing: 12) {
-                    Text("M")
-                        .font(.ui(14, .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 32, height: 32)
-                        .background(isSelected ? Palette.proBadge : Palette.lockGray, in: .circle)
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(style.title)
+                        .font(.murmur(.headline))
+                        .foregroundStyle(Theme.ink)
+                    Text(style.subtitle)
+                        .font(.murmur(.subhead))
+                        .foregroundStyle(Theme.second)
+                    Text("Murmur writes")
+                        .font(.murmur(.footnote, weight: .semibold))
+                        .foregroundStyle(Theme.third)
+                        .padding(.top, 10)
                     Text(example)
                         .font(.transcript(.callout))
-                        .foregroundStyle(Palette.text)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineSpacing(2)
+                        .foregroundStyle(Theme.ink)
                 }
-                .padding(12)
-                .background(Palette.canvas, in: .rect(cornerRadius: 14))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                SelectionMark(isOn: isSelected)
             }
-            .padding(18)
-            .background(Palette.paper, in: .rect(cornerRadius: 20))
+            .padding(16)
             .overlay {
                 RoundedRectangle(cornerRadius: 20)
-                    .stroke(isSelected ? Palette.proBadge : .clear, lineWidth: 2)
+                    .strokeBorder(isSelected ? Theme.ink : Theme.line, lineWidth: 1.5)
             }
             .contentShape(.rect(cornerRadius: 20))
         }
@@ -104,22 +96,5 @@ private struct StyleCard: View {
         case .verbatim: "Me and him was thinking we could meet Friday at 4."
         case .grammar: "He and I were thinking we could meet Friday at 4."
         }
-    }
-}
-
-/// The sentence both examples start from.
-private struct YouSayRow: View {
-    let text: String
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "waveform")
-                .foregroundStyle(Palette.muted)
-            Text("You say: “\(text)”")
-                .font(.transcript(.footnote))
-                .foregroundStyle(Palette.textSecondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 4)
     }
 }

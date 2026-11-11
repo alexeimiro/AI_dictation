@@ -43,22 +43,27 @@ public struct ActionRow<Content: View>: View {
     }
 }
 
-/// A small outlined label: the plan chip, a transcript count.
+/// A small label in a capsule: outlined for the plan chip, solid ink for "Pro" and "Save 33%".
 public struct Chip: View {
     let text: String
+    let isSolid: Bool
 
-    public init(_ text: String) {
+    public init(_ text: String, solid: Bool = false) {
         self.text = text
+        self.isSolid = solid
     }
 
     public var body: some View {
         Text(verbatim: text)
-            .font(.murmur(.caption, weight: .semibold))
-            .foregroundStyle(Theme.ink)
+            .font(.murmur(.caption, weight: isSolid ? .bold : .semibold))
+            .foregroundStyle(isSolid ? Theme.onInk : Theme.ink)
             .padding(.horizontal, 8)
-            .padding(.vertical, 2)
+            .padding(.vertical, isSolid ? 3 : 2)
+            .background(isSolid ? Theme.ink : .clear, in: .roundCapsule)
             .overlay {
-                Capsule(style: .circular).strokeBorder(Theme.ink, lineWidth: 1.5)
+                if !isSolid {
+                    Capsule(style: .circular).strokeBorder(Theme.ink, lineWidth: 1.5)
+                }
             }
             .fixedSize()
     }
@@ -75,6 +80,27 @@ public struct SelectionMark: View {
     public var body: some View {
         BrandMark(ring: isOn ? Theme.ink : Theme.graphic, dot: isOn ? Theme.ink : .clear)
             .frame(width: 24, height: 24)
+    }
+}
+
+/// A step's number in an outlined circle.
+public struct StepNumber: View {
+    let number: Int
+    /// The circle grows with the text size, so the number stays inside it.
+    @ScaledMetric(relativeTo: .footnote) private var size: CGFloat = 24
+
+    public init(_ number: Int) {
+        self.number = number
+    }
+
+    public var body: some View {
+        Text(verbatim: "\(number)")
+            .font(.murmur(.footnote, weight: .semibold))
+            .monospacedDigit()
+            .foregroundStyle(Theme.ink)
+            .frame(width: size, height: size)
+            .overlay { Circle().strokeBorder(Theme.ink, lineWidth: 1.5) }
+            .accessibilityHidden(true)
     }
 }
 

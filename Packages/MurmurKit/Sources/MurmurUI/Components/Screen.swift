@@ -39,6 +39,15 @@ public struct SectionLabel: View {
 }
 
 extension View {
+    /// A list drawn as plain content: none of the list's chrome, the canvas behind it, and rows
+    /// as tall as what they hold.
+    public func plainList() -> some View {
+        listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas)
+            .environment(\.defaultMinListRowHeight, 1)
+    }
+
     /// A list row without the list's own chrome: the screen's 20 pt margins, no separator and the
     /// canvas behind it. Rows draw their own `Hairline` where they want one.
     public func plainListRow() -> some View {
@@ -129,17 +138,17 @@ public struct LabeledField<Field: View>: View {
     }
 }
 
-/// The bar at the top of an editor sheet: Cancel on the left, the sheet's name, and the button
-/// that confirms on the right, in bold.
+/// The bar at the top of a sheet: Cancel on the left when there is something to cancel, the
+/// sheet's name, and the button that confirms on the right, in bold.
 public struct SheetHeader: View {
     let title: String
     let confirmTitle: String
     let canConfirm: Bool
-    let cancel: () -> Void
+    let cancel: (() -> Void)?
     let confirm: () -> Void
 
     public init(_ title: String, confirmTitle: String = "Save", canConfirm: Bool = true,
-                cancel: @escaping () -> Void, confirm: @escaping () -> Void) {
+                cancel: (() -> Void)? = nil, confirm: @escaping () -> Void) {
         self.title = title
         self.confirmTitle = confirmTitle
         self.canConfirm = canConfirm
@@ -156,12 +165,14 @@ public struct SheetHeader: View {
                 .padding(.horizontal, 84)
                 .accessibilityAddTraits(.isHeader)
             HStack {
-                Button(action: cancel) {
-                    Text("Cancel")
-                        .font(.murmur(.body))
-                        .foregroundStyle(Theme.ink)
-                        .frame(minHeight: 44)
-                        .contentShape(.rect)
+                if let cancel {
+                    Button(action: cancel) {
+                        Text("Cancel")
+                            .font(.murmur(.body))
+                            .foregroundStyle(Theme.ink)
+                            .frame(minHeight: 44)
+                            .contentShape(.rect)
+                    }
                 }
                 Spacer()
                 Button(action: confirm) {

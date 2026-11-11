@@ -2,9 +2,9 @@ import MurmurCore
 import MurmurUI
 import SwiftUI
 
-/// Settings › Languages, as in Wispr Flow: a searchable list of the languages Murmur recognizes,
-/// the ones picked on top, Auto-detect above the rest. Murmur detects which of the picked
-/// languages each dictation is in; with none picked, any language. Taps apply at once.
+/// Settings › Languages: a searchable list of the languages Murmur recognizes, the ones picked on
+/// top, Auto-detect above the rest. Murmur detects which of the picked languages each dictation
+/// is in; with none picked, any language. Taps apply at once.
 struct LanguagePickerSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -13,59 +13,63 @@ struct LanguagePickerSheet: View {
     var body: some View {
         let settings = model.settings
         let picked = settings.dictationLanguages.map(DictationLanguage.init(tag:))
-        NavigationStack {
+        VStack(spacing: 0) {
+            SheetHeader("Languages", confirmTitle: "Done") { dismiss() }
             List {
-                if search.isEmpty {
-                    if !picked.isEmpty {
-                        Section {
+                Group {
+                    SearchField(text: $search, prompt: "Search")
+                    if search.isEmpty {
+                        if !picked.isEmpty {
+                            header("Your languages")
                             ForEach(picked) { row($0, isOn: true) }
                         }
-                    }
-                    Section {
+                        header("All languages")
                         autoDetectRow(isOn: picked.isEmpty)
                         ForEach(Self.unpicked(picked)) { row($0, isOn: false) }
-                    } footer: {
                         Text(picked.isEmpty
                              ? "\(Brand.name) detects the language you speak. Pick yours so it only chooses among them."
                              : "\(Brand.name) detects which of these you speak. Pick one language to always dictate in it.")
-                    }
-                } else {
-                    let matches = Self.matching(search)
-                    ForEach(matches) { language in
-                        row(language, isOn: picked.contains { $0.languageCode == language.languageCode })
-                    }
-                    if matches.isEmpty {
-                        ContentUnavailableView.search(text: search)
-                            .listRowBackground(Color.clear)
+                            .font(.murmur(.footnote))
+                            .foregroundStyle(Theme.third)
+                            .padding(.vertical, 12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .overlay(alignment: .top) { Hairline() }
+                    } else {
+                        let matches = Self.matching(search)
+                        ForEach(matches) { language in
+                            row(language, isOn: picked.contains { $0.languageCode == language.languageCode })
+                                .padding(.top, language.id == matches.first?.id ? 12 : 0)
+                        }
+                        if matches.isEmpty {
+                            EmptyState("No languages found", message: "Nothing matches “\(search)”.")
+                                .padding(.vertical, 48)
+                        }
                     }
                 }
+                .plainListRow()
             }
-            .listStyle(.insetGrouped)
-            .scrollContentBackground(.hidden)
-            .background(Palette.canvas)
-            .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
-            .navigationTitle("Languages")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
-            }
+            .plainList()
         }
+        .background(Theme.canvas)
+        .presentationBackground(Theme.canvas)
+    }
+
+    private func header(_ title: String) -> some View {
+        SectionLabel(title)
+            .padding(.top, 22)
+            .padding(.bottom, 6)
     }
 
     private func row(_ language: DictationLanguage, isOn: Bool) -> some View {
         Button {
             model.settings.toggleDictationLanguage(language.tag)
         } label: {
-            HStack {
+            choice(isOn: isOn) {
                 Text(language.pickerName)
-                    .font(.transcript())
-                    .foregroundStyle(Palette.text)
-                Spacer(minLength: 12)
-                check(isOn)
+                    .font(.transcript().weight(isOn ? .semibold : .regular))
             }
-            .contentShape(.rect)
         }
-        .listRowBackground(isOn ? Palette.lavender.opacity(0.55) : Palette.paper)
+        .buttonStyle(.plain)
         .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 
@@ -73,30 +77,28 @@ struct LanguagePickerSheet: View {
         Button {
             model.settings.dictationLanguages = []
         } label: {
-            HStack(spacing: 12) {
-                Image(systemName: "sparkle.magnifyingglass")
-                    .font(.system(size: 17))
-                    .foregroundStyle(Palette.ink)
-                    .frame(width: 24)
-                    .accessibilityHidden(true)
+            choice(isOn: isOn) {
                 Text("Auto-detect")
-                    .font(.ui(17))
-                    .foregroundStyle(Palette.text)
-                Spacer(minLength: 12)
-                check(isOn)
+                    .font(.murmur(.body, weight: isOn ? .semibold : .regular))
             }
-            .contentShape(.rect)
         }
-        .listRowBackground(isOn ? Palette.lavender.opacity(0.55) : Palette.paper)
+        .buttonStyle(.plain)
         .accessibilityHint("Detects any language")
         .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 
-    private func check(_ isOn: Bool) -> some View {
-        Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-            .font(.system(size: 21))
-            .foregroundStyle(isOn ? Palette.tabSelectedLabel : Palette.cardBorder)
-            .accessibilityHidden(true)
+    /// A row that can be chosen: its name, then the mark, with a line above.
+    private func choice<Name: View>(isOn: Bool, @ViewBuilder name: () -> Name) -> some View {
+        HStack {
+            name()
+                .foregroundStyle(Theme.ink)
+            Spacer(minLength: 12)
+            SelectionMark(isOn: isOn)
+                .accessibilityHidden(true)
+        }
+        .frame(minHeight: 52)
+        .overlay(alignment: .top) { Hairline() }
+        .contentShape(.rect)
     }
 
     /// Every language not picked, by name.

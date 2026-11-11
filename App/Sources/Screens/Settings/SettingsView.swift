@@ -2,8 +2,8 @@ import MurmurCore
 import MurmurUI
 import SwiftUI
 
-/// Settings as in Wispr Flow: every row says in a line what it does. General, the keyboard, audio,
-/// formatting, then data and privacy, with the version and plan at the bottom.
+/// Settings: every row says in a line what it does. General, the keyboard, audio, formatting,
+/// then data and privacy, with the version and plan at the bottom.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var choosingLanguages = false
@@ -12,103 +12,130 @@ struct SettingsView: View {
 
     var body: some View {
         @Bindable var settings = model.settings
-        Form {
-            // Also while signed out: the keyboard's button for opening Murmur lands here.
-            if let account = model.account, account.isSignedOut || account.isGuest {
-                Section {
-                    Button("Sign in…") { model.signInSheet = .options }
-                } header: {
-                    Text("Account")
-                } footer: {
-                    Text(Self.accountFooter(phrase: account.phrase, guest: account.isGuest))
+        List {
+            Group {
+                // Also while signed out: the keyboard's button for opening Murmur lands here.
+                if let account = model.account, account.isSignedOut || account.isGuest {
+                    header("Account")
+                    Button { model.signInSheet = .options } label: {
+                        SettingLabel("Sign in…", detail: Self.accountFooter(phrase: account.phrase, guest: account.isGuest)) {
+                            chevron
+                        }
+                    }
+                    .settingRow()
                 }
-            }
-            Section("General") {
+                header("General")
+                    .accessibilityIdentifier(AccessibilityID.screen("settings"))
                 Button { choosingLanguages = true } label: {
                     SettingLabel("Set language", detail: "Choose your dictation languages") {
                         Text(LanguagePickerSheet.summary(settings.dictationLanguages))
-                        Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).accessibilityHidden(true)
+                        chevron
                     }
                 }
-                SettingPicker("Disable \(Brand.name) after", detail: "When the microphone turns off while unused",
+                .settingRow()
+                SettingPicker("Turn off after", detail: "When the microphone turns off while unused",
                               selection: $settings.disableAfter, value: settings.disableAfter.title) {
                     ForEach(DisableAfter.allCases) { Text($0.title).tag($0) }
                 }
+                .settingRow()
                 Button { showsActionButtonGuide = true } label: {
                     SettingLabel("Action Button shortcut", detail: "Dictate faster with the Action Button") {
-                        Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold)).accessibilityHidden(true)
+                        chevron
                     }
                 }
+                .settingRow()
                 Toggle(isOn: $settings.autoOpenNote) {
                     SettingLabel("Auto open note", detail: "Start a new note when you open the app")
                 }
+                .settingRow()
                 Toggle(isOn: $settings.lowDataMode) {
-                    SettingLabel("Low data mode", detail: "Upload smaller audio, for slow or limited networks. On while iOS's Low Data Mode is.")
+                    SettingLabel("Low data mode", detail: "Upload smaller audio, for slow or limited networks. On while iOS’s Low Data Mode is.")
                 }
+                .settingRow()
                 Toggle(isOn: $settings.liveActivities) {
-                    SettingLabel("Allow Live Activities", detail: "Show \(Brand.name) on the Lock Screen and in the Dynamic Island while it's on")
+                    SettingLabel("Allow Live Activities", detail: "Show \(Brand.name) on the Lock Screen and in the Dynamic Island while it’s on")
                 }
+                .settingRow()
                 if !model.pro.isSubscribed {
                     Button { model.showsPaywall = true } label: {
                         SettingLabel("Upgrade to Pro", detail: "Unlimited words, every week") {
-                            Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
-                                .accessibilityHidden(true)
+                            chevron
                         }
                     }
+                    .settingRow()
                 }
             }
-            Section("Keyboard") {
+            .buttonStyle(.plain)
+            .plainListRow()
+
+            Group {
+                header("Keyboard")
                 SettingPicker("Layout", detail: "What the \(Brand.name) keyboard shows first",
                               selection: $settings.keyboardLayout, value: Self.layoutTitle(settings.keyboardLayout)) {
                     ForEach([KeyboardLayoutPreference.voice, .numbers, .qwerty], id: \.self) {
                         Text(Self.layoutTitle($0)).tag($0)
                     }
                 }
+                .settingRow()
                 Toggle(isOn: $settings.keyboardFullQwerty) {
                     SettingLabel("Show full QWERTY keyboard",
                                  detail: "Show letters on the \(Brand.name) keyboard instead of switching to your default keyboard for letters")
                 }
-                SettingPicker("Appearance", detail: "Light, dark, or like the app you're writing in",
+                .settingRow()
+                SettingPicker("Appearance", detail: "Light, dark, or like the app you’re writing in",
                               selection: $settings.keyboardAppearance, value: settings.keyboardAppearance.title) {
                     ForEach(KeyboardAppearancePreference.allCases) { Text($0.title).tag($0) }
                 }
+                .settingRow()
                 Toggle(isOn: $settings.keyboardFeedback) {
                     SettingLabel("Keyboard feedback", detail: "A light tap as you press keys")
                 }
+                .settingRow()
                 Toggle(isOn: $settings.readyHaptic) {
-                    SettingLabel("Vibrate when text is ready", detail: "So you don't have to watch the screen")
+                    SettingLabel("Vibrate when text is ready", detail: "So you don’t have to watch the screen")
                 }
-            }
-            Section("Audio") {
+                .settingRow()
+
+                header("Audio")
                 Toggle(isOn: $settings.interactionSounds) {
                     SettingLabel("Interaction sounds", detail: "Play sounds when a dictation starts and stops")
                 }
+                .settingRow()
                 Toggle(isOn: $settings.useBuiltInMic) {
-                    SettingLabel("Built-in mic", detail: "Use your iPhone's mic for all dictations, even with headphones connected")
+                    SettingLabel("Built-in mic", detail: "Use your iPhone’s mic for all dictations, even with headphones connected")
                 }
-            }
-            Section("Personalization") {
+                .settingRow()
+
+                header("Personalization")
                 Toggle(isOn: $settings.smartFormatting) {
                     SettingLabel("Smart formatting",
-                                 detail: "Drop \u{201C}um\u{201D} and \u{201C}uh\u{201D}, and turn \u{201C}new line\u{201D} or \u{201C}comma\u{201D} into what they say. Improve my grammar always does.")
+                                 detail: "Drop “um” and “uh”, and turn “new line” or “comma” into what they say. Improve my grammar always does.")
                 }
+                .settingRow()
             }
-            Section {
+            .buttonStyle(.plain)
+            .plainListRow()
+
+            Group {
+                header("Data and privacy")
                 if model.account != nil {
                     Toggle(isOn: Binding(get: { model.dataSharing },
                                          set: { on in Task { toast = await model.setDataSharing(on) } })) {
                         SettingLabel("Improve \(Brand.name) for everyone",
                                      detail: "Let us review your transcripts and edits to improve transcription and cleanup")
                     }
+                    .settingRow()
                 }
                 Toggle(isOn: $settings.keepRecordings) {
-                    SettingLabel("Keep recordings", detail: "Save each dictation's audio on this iPhone to play it back")
+                    SettingLabel("Keep recordings", detail: "Save each dictation’s audio on this iPhone to play it back")
                 }
+                .settingRow()
                 SettingPicker("Local data storage", detail: "When transcripts and recordings are deleted",
                               selection: $settings.transcriptRetention,
                               value: Self.retentionTitle(settings.transcriptRetention)) {
                     ForEach(TranscriptRetention.allCases) { Text(Self.retentionTitle($0)).tag($0) }
                 }
+                .settingRow()
                 if let sync = model.librarySync, model.account?.isSignedIn == true {
                     Button {
                         Task {
@@ -121,30 +148,41 @@ struct SettingsView: View {
                         }
                     }
                     .disabled(sync.isSyncing)
+                    .settingRow()
                 }
-            } header: {
-                Text("Data and privacy")
-            } footer: {
                 Text(model.account?.isSignedIn == true
-                     ? "Your dictionary, snippets and notes are saved to your account, so they're on every device you sign in on. Transcripts and recordings stay on this iPhone. To write your text, the recording and its transcript go to OpenAI, which doesn't train on them; Murmur's servers don't keep either."
-                     : "Transcripts, recordings, your dictionary, snippets and notes stay on this iPhone; sign in to have the dictionary, snippets and notes on your other devices too. To write your text, the recording and its transcript go to OpenAI, which doesn't train on them; Murmur's servers don't keep either.")
-            }
-            Section {
-                NavigationLink("Debug", value: Route.debug)
-            }
-            Section {
-            } footer: {
-                Text(Self.versionLine(plan: model.quota?.badge))
+                     ? "Your dictionary, snippets and notes are saved to your account, so they’re on every device you sign in on. Transcripts and recordings stay on this iPhone. To write your text, the recording and its transcript go to OpenAI, which doesn’t train on them; Murmur’s servers don’t keep either."
+                     : "Transcripts, recordings, your dictionary, snippets and notes stay on this iPhone; sign in to have the dictionary, snippets and notes on your other devices too. To write your text, the recording and its transcript go to OpenAI, which doesn’t train on them; Murmur’s servers don’t keep either.")
+                    .font(.murmur(.footnote))
+                    .foregroundStyle(Theme.third)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay(alignment: .top) { Hairline() }
+
+                Button { model.router.open(.debug) } label: {
+                    SettingLabel("Debug", detail: "The speech engine, timings and a field to test the keyboard in") {
+                        chevron
+                    }
+                }
+                .settingRow()
+                .padding(.top, 12)
+
+                Text(Self.versionLine(plan: model.quota?.planName))
+                    .font(.murmur(.footnote))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.third)
                     .frame(maxWidth: .infinity)
                     .multilineTextAlignment(.center)
+                    .padding(.top, 28)
+                    .padding(.bottom, 24)
             }
+            .buttonStyle(.plain)
+            .plainListRow()
         }
-        .tint(Palette.toggleGreen)
-        .scrollContentBackground(.hidden)
-        .background(Palette.canvas)
+        .plainList()
+        .tint(Theme.ink)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
         .toast($toast)
         .sheet(isPresented: $choosingLanguages) {
             LanguagePickerSheet()
@@ -152,6 +190,19 @@ struct SettingsView: View {
         .fullScreenCover(isPresented: $showsActionButtonGuide) {
             ActionButtonGuide()
         }
+    }
+
+    private func header(_ title: String) -> some View {
+        SectionLabel(title)
+            .padding(.top, 24)
+            .padding(.bottom, 6)
+    }
+
+    private var chevron: some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(Theme.third)
+            .accessibilityHidden(true)
     }
 
     /// What signing in brings back, after a sign-out or "Continue without an account". No word on
@@ -225,7 +276,9 @@ struct SettingPicker<Value: Hashable, Options: View>: View {
         } label: {
             SettingLabel(title, detail: detail) {
                 Text(value)
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 12, weight: .semibold))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.third)
                     .accessibilityHidden(true)
             }
         }
@@ -253,24 +306,32 @@ struct SettingLabel<Trailing: View>: View {
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(spacing: 12))
         layout {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
-                    .font(.ui(17, .medium))
-                    .foregroundStyle(Palette.text)
+                    .font(.murmur(.body))
+                    .foregroundStyle(Theme.ink)
                 Text(detail)
-                    .font(.ui(14))
-                    .foregroundStyle(Palette.textSecondary)
+                    .font(.murmur(.footnote))
+                    .foregroundStyle(Theme.third)
                     .fixedSize(horizontal: false, vertical: true)
             }
             // A menu's label centers its lines otherwise.
             .multilineTextAlignment(.leading)
             if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
             HStack(spacing: 6) { trailing }
-                .font(.ui(15))
-                .foregroundStyle(Palette.textSecondary)
+                .font(.murmur(.subhead))
+                .foregroundStyle(Theme.second)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 4)
         .contentShape(.rect)
+    }
+}
+
+extension View {
+    /// A settings row: at least 60 pt tall, with a line above it.
+    func settingRow() -> some View {
+        padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+            .overlay(alignment: .top) { Hairline() }
     }
 }

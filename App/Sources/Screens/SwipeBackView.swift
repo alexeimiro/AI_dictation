@@ -9,32 +9,47 @@ struct SwipeBackView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
+        // Only once the mic is on (recording can't start after leaving the app), and not while
+        // Murmur is about to take the user back itself.
+        let teachesSwipe = model.session.isLive && !model.hostReturn.isPending
         VStack(spacing: 0) {
-            Wordmark(height: 30)
-                .padding(.top, 36)
-                .frame(maxWidth: .infinity)
-                .overlay(alignment: .topTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Palette.textSecondary)
-                            .frame(width: 44, height: 44)
-                    }
-                    .accessibilityLabel("Close")
-                    .padding(.trailing, 12)
-                    .padding(.top, 26)
+            HStack {
+                Spacer()
+                Button { dismiss() } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(Theme.ink)
+                        .frame(width: 44, height: 44)
+                        .contentShape(.rect)
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close")
+            }
+            .padding(.horizontal, 8)
             Spacer()
             content
-                .padding(.horizontal, Metrics.screenMargin)
+                .padding(.horizontal, 24)
             Spacer()
+            if teachesSwipe {
+                VStack(spacing: 10) {
+                    Text("Swipe right along the bottom edge to go back to your app")
+                        .font(.murmur(.callout, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                    Text(isListening
+                         ? "Murmur is already listening, so you can start talking. Your words will appear in your app."
+                         : "Keyboards can’t use the microphone, so Murmur keeps it on for your next dictations.")
+                        .font(.murmur(.footnote))
+                        .foregroundStyle(Theme.third)
+                }
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 36)
+                .padding(.bottom, 56)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Palette.paper)
+        .background(Theme.canvas)
         .overlay(alignment: .bottom) {
-            // Only once the mic is on (recording can't start after leaving the app), and not
-            // while Murmur is about to take the user back itself.
-            if model.session.isLive, !model.hostReturn.isPending {
+            if teachesSwipe {
                 SwipeHint()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                     .ignoresSafeArea(edges: .bottom)
@@ -46,47 +61,57 @@ struct SwipeBackView: View {
     private var content: some View {
         switch model.session.phase {
         case .failed(let message):
-            VStack(spacing: 24) {
-                SerifTitle("Couldn't start Murmur", size: 38)
+            VStack(spacing: 12) {
+                Text("Couldn’t start Murmur")
+                    .font(.murmur(.title))
+                    .tracking(-0.6)
+                    .foregroundStyle(Theme.ink)
+                    .accessibilityAddTraits(.isHeader)
                 Text(message)
-                    .font(.ui(17))
-                    .foregroundStyle(Palette.textSecondary)
-                    .multilineTextAlignment(.center)
+                    .font(.murmur(.body))
+                    .foregroundStyle(Theme.second)
                 Button("Try again") { Task { await model.session.start() } }
-                    .buttonStyle(.pill(.ink))
-                Button("Close") { dismiss() }
-                    .font(.ui(17, .medium))
-                    .foregroundStyle(Palette.ink)
+                    .buttonStyle(.murmur(.primary))
+                    .padding(.top, 12)
+                Button { dismiss() } label: {
+                    Text("Close")
+                        .font(.murmur(.subhead, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
             }
+            .multilineTextAlignment(.center)
         case .starting, .off:
             VStack(spacing: 20) {
-                ProgressView().controlSize(.large)
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(Theme.ink)
                 Text(model.session.startDetail ?? "Turning on the microphone…")
-                    .font(.ui(17))
-                    .foregroundStyle(Palette.textSecondary)
+                    .font(.murmur(.body))
+                    .foregroundStyle(Theme.second)
                     .multilineTextAlignment(.center)
             }
         default:
-            VStack(spacing: 18) {
-                SerifTitle("Murmur is on", accent: "on", size: 52)
+            VStack(spacing: 0) {
+                // The microphone is open: the one place red belongs.
+                LiveDot(size: 28, rings: 2)
+                    .padding(.bottom, 44)
+                Text("Murmur is on")
+                    .font(.murmur(.display))
+                    .tracking(-0.8)
+                    .foregroundStyle(Theme.ink)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier(AccessibilityID.screen("swipeBack"))
                 if model.hostReturn.isPending {
                     Text("Taking you back to your app…")
-                        .font(.ui(19))
-                        .foregroundStyle(Palette.text)
-                        .multilineTextAlignment(.center)
-                } else {
-                    Text("Swipe right along the bottom edge of the screen to go back to your app")
-                        .font(.ui(19))
-                        .foregroundStyle(Palette.text)
-                        .multilineTextAlignment(.center)
-                    Text(isListening
-                         ? "Murmur is already listening, so you can start talking. Your words will appear in your app."
-                         : "Keyboards can't use the microphone, so Murmur keeps it on for your next dictations.")
-                        .font(.ui(15))
-                        .foregroundStyle(Palette.textSecondary)
-                        .multilineTextAlignment(.center)
+                        .font(.murmur(.body))
+                        .foregroundStyle(Theme.second)
+                        .padding(.top, 10)
                 }
             }
+            .multilineTextAlignment(.center)
         }
     }
 
@@ -95,21 +120,22 @@ struct SwipeBackView: View {
     }
 }
 
-/// A finger sliding along the system home indicator, which is where the swipe has to start.
-/// No bar of our own: one drawn above the real edge looks like the thing to swipe and does
-/// nothing. The ◀︎ breadcrumb isn't mentioned either; iOS doesn't show it reliably when a
-/// keyboard opened the app.
+/// An arrow sliding along the system home indicator, which is where the swipe has to start. No
+/// bar of our own: one drawn above the real edge looks like the thing to swipe and does nothing.
+/// The ◀︎ breadcrumb isn't mentioned either; iOS doesn't show it reliably when a keyboard opened
+/// the app. The arrow rests under Reduce Motion.
 private struct SwipeHint: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animate = false
 
     var body: some View {
-        Image(systemName: "hand.point.down.fill")
-            .font(.system(size: 30))
-            .foregroundStyle(Palette.ink)
-            .offset(x: animate ? 55 : -55)
-            .opacity(animate ? 0 : 1)
-            .animation(.easeInOut(duration: 1.3).repeatForever(autoreverses: false), value: animate)
-            .padding(.bottom, 12)
+        Image(systemName: "arrow.right")
+            .font(.system(size: 22, weight: .semibold))
+            .foregroundStyle(Theme.ink)
+            .offset(x: reduceMotion ? 0 : (animate ? 55 : -55))
+            .opacity(!reduceMotion && animate ? 0 : 1)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 1.3).repeatForever(autoreverses: false), value: animate)
+            .padding(.bottom, 22)
             .accessibilityHidden(true)
             .onAppear { animate = true }
     }

@@ -15,73 +15,103 @@ struct AccountView: View {
     var body: some View {
         let stats = model.history.lifetimeStats()
         let account = model.account
-        List {
-            Section {
-                VStack(spacing: 12) {
-                    AccountHeader()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    HStack(spacing: 18) {
-                        Label("\(stats.words.formatted()) words", systemImage: "text.word.spacing")
-                        if let wpm = stats.wordsPerMinute {
-                            Label("\(wpm) WPM", systemImage: "speedometer")
+        let identity = AccountIdentity(account)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 14) {
+                    Avatar(initial: identity.initial, size: 56)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text(verbatim: identity.name)
+                                .font(.murmur(.title2))
+                                .tracking(-0.4)
+                                .foregroundStyle(Theme.ink)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                            if let quota = model.quota { Chip(quota.chip()) }
                         }
+                        Text(verbatim: identity.detail)
+                            .font(.murmur(.subhead))
+                            .foregroundStyle(Theme.second)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                     }
-                    .font(.ui(15))
-                    .foregroundStyle(Palette.textSecondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    PlanUsage(quota: model.quota)
                 }
-                .padding(.vertical, 8)
-                if account?.isSignedIn != true {
-                    Button("Sign in…") { model.signInSheet = .options }
-                        .font(.ui(17, .medium))
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier(AccessibilityID.screen("account"))
+
+                HStack(spacing: 12) {
+                    stat(stats.words.formatted(), "words dictated")
+                    if let wpm = stats.wordsPerMinute {
+                        stat("\(wpm)", "words a minute")
+                    }
                 }
-            } footer: {
+                .padding(.top, 22)
+
+                if let usage = model.quota?.usage() {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Meter(total: usage.total, filled: usage.filled)
+                            .accessibilityHidden(true)
+                        Text(verbatim: "\(usage.title): \(usage.detail)")
+                            .font(.murmur(.footnote))
+                            .monospacedDigit()
+                            .foregroundStyle(Theme.third)
+                    }
+                    .padding(.top, 18)
+                }
+
                 if account?.isSignedIn != true {
+                    header("Account")
+                    Button { model.signInSheet = .options } label: { LinkRow(title: "Sign in…") }
                     Text("Sign in to keep your plan when you change iPhones.")
+                        .font(.murmur(.footnote))
+                        .foregroundStyle(Theme.third)
                 }
-            }
 
-            Section("Plan") {
+                header("Plan")
                 if model.pro.isSubscribed {
-                    Button("Manage subscription") { managing = true }
+                    Button { managing = true } label: { LinkRow(title: "Manage subscription") }
                 } else {
-                    Button("Get unlimited words") { model.showsPaywall = true }
+                    Button { model.showsPaywall = true } label: { LinkRow(title: "Upgrade to Pro") }
                 }
-            }
 
-            Section("Get in touch") {
-                Button("Report an issue") { support = .issue }
-                Button("Leave feedback") { support = .feedback }
-            }
+                header("Get in touch")
+                Button { support = .issue } label: { LinkRow(title: "Report an issue") }
+                Button { support = .feedback } label: { LinkRow(title: "Leave feedback") }
 
-            if let privacy = Self.privacyURL {
-                Section("Data and privacy") {
-                    Link(destination: privacy) {
-                        Label("View privacy policy", systemImage: "arrow.up.right")
-                            .labelStyle(TrailingIconLabelStyle())
+                if let privacy = Self.privacyURL {
+                    header("Data and privacy")
+                    Link(destination: privacy) { LinkRow(title: "View privacy policy", isExternal: true) }
+                }
+
+                if account?.isSignedIn == true {
+                    VStack(spacing: 4) {
+                        Button { confirmSignOut = true } label: {
+                            Text("Sign out").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.murmur(.secondary, size: .compact))
+                        // Ink, not red: red means the microphone is open.
+                        Button { confirmDelete = true } label: {
+                            Text("Delete account")
+                                .font(.murmur(.subhead, weight: .semibold))
+                                .foregroundStyle(Theme.ink)
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                                .contentShape(.rect)
+                        }
+                        FieldError(message: error)
                     }
+                    .padding(.top, 36)
                 }
             }
-
-            if account?.isSignedIn == true {
-                Section {
-                    Button("Sign out") { confirmSignOut = true }
-                        .frame(maxWidth: .infinity)
-                    Button("Delete account", role: .destructive) { confirmDelete = true }
-                        .frame(maxWidth: .infinity)
-                } footer: {
-                    FieldError(message: error)
-                }
-            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 24)
         }
-        .font(.ui(17))
-        .tint(Palette.ink)
-        .scrollContentBackground(.hidden)
-        .background(Palette.canvas)
+        .background(Theme.canvas)
+        .tint(Theme.ink)
         .navigationTitle("Account")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
         .disabled(working)
         .overlay { if working { ProgressView() } }
         .onAppear { model.refreshQuota() }
@@ -114,19 +144,33 @@ struct AccountView: View {
         }
     }
 
+    private func header(_ title: String) -> some View {
+        SectionLabel(title)
+            .padding(.top, 24)
+            .padding(.bottom, 6)
+    }
+
+    /// A number with what it counts, on a soft card.
+    private func stat(_ value: String, _ caption: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(verbatim: value)
+                .font(.murmur(.title2))
+                .tracking(-0.4)
+                .monospacedDigit()
+                .foregroundStyle(Theme.ink)
+            Text(caption)
+                .font(.murmur(.footnote))
+                .foregroundStyle(Theme.second)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.fill, in: .rect(cornerRadius: 16))
+        .accessibilityElement(children: .combine)
+    }
+
     static var privacyURL: URL? {
         (Bundle.main.object(forInfoDictionaryKey: "MurmurPrivacyURL") as? String)
             .flatMap { $0.isEmpty ? nil : URL(string: $0) }
-    }
-}
-
-/// The title first, the icon after it ("View privacy policy ↗").
-struct TrailingIconLabelStyle: LabelStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        HStack(spacing: 6) {
-            configuration.title
-            configuration.icon
-                .font(.system(size: 13))
-        }
     }
 }

@@ -2,9 +2,8 @@ import MurmurCore
 import MurmurUI
 import SwiftUI
 
-/// "Refer a friend", after Wispr Flow's "Gift Flow to a friend": the gift card, how invites work,
-/// the invite link with Copy and Share, what invites have earned, and, while the account is new,
-/// a field for a friend's code.
+/// Invite a friend: what an invite gives, how invites work, the invite link with Copy and Share,
+/// what invites have earned, and, while the account is new, a field for a friend's code.
 struct ReferralView: View {
     @Environment(AppModel.self) private var model
     @State private var referrals: AccountService.Referrals?
@@ -16,163 +15,166 @@ struct ReferralView: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 0) {
-                SerifTitle("Gift \(Brand.name) to a friend", size: 38, color: Palette.ink)
-                    .padding(.horizontal, 24)
-                    .padding(.top, 12)
+            VStack(alignment: .leading, spacing: 0) {
+                ScreenTitle("Give a friend a month of Pro")
+                    .accessibilityIdentifier(AccessibilityID.screen("invite"))
                 GiftCard()
-                    .padding(.horizontal, 24)
-                    .padding(.top, 26)
+                    .padding(.top, 18)
                 steps
-                    .padding(.horizontal, 28)
-                    .padding(.top, 30)
+                    .padding(.top, 24)
                 invite
-                    .padding(.horizontal, 24)
-                    .padding(.top, 26)
+                    .padding(.top, 20)
                 if referrals?.canRedeem == true {
+                    Hairline()
+                        .padding(.top, 24)
                     redeem
-                        .padding(.horizontal, 24)
-                        .padding(.top, 34)
+                        .padding(.top, 20)
                 }
             }
+            .padding(.horizontal, 20)
+            .padding(.top, 10)
             .padding(.bottom, 32)
         }
-        .background(Palette.paper.ignoresSafeArea())
-        .navigationTitle("Referrals")
+        .background(Theme.canvas.ignoresSafeArea())
+        .tint(Theme.ink)
+        .navigationTitle("Invite a friend")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
         .task { await load() }
     }
 
     private var steps: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("How it works")
-                .font(.ui(16))
-                .foregroundStyle(Palette.textSecondary)
-            step("arrowshape.turn.up.right", "Share your invite")
-            step("link", "They enter your code in \(Brand.name)")
-            step("gift", "They get a month of Pro, and you get one when they first dictate")
+                .font(.murmur(.headline))
+                .foregroundStyle(Theme.ink)
+                .accessibilityAddTraits(.isHeader)
+            step(1, "Share your invite")
+            step(2, "They enter your code in \(Brand.name)")
+            step(3, "They get a month of Pro, and you get one when they first dictate")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func step(_ symbol: String, _ text: String) -> some View {
-        Label {
+    private func step(_ number: Int, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            StepNumber(number)
             Text(text)
-                .font(.ui(17))
-                .foregroundStyle(Palette.text)
+                .font(.murmur(.callout))
+                .foregroundStyle(Theme.ink)
                 .fixedSize(horizontal: false, vertical: true)
-        } icon: {
-            Image(systemName: symbol)
-                .font(.system(size: 19))
-                .foregroundStyle(Palette.ink)
-                .frame(width: 28)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(number). \(text)")
     }
 
     @ViewBuilder
     private var invite: some View {
         if model.account?.isSignedIn != true && !model.launchOptions.useFixtures {
-            VStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
                 Text("Sign in to get your invite.")
-                    .font(.ui(16))
-                    .foregroundStyle(Palette.textSecondary)
+                    .font(.murmur(.callout))
+                    .foregroundStyle(Theme.second)
                 Button("Sign in") { model.signInSheet = .options }
-                    .buttonStyle(.pill(.ink))
+                    .buttonStyle(.murmur(.primary))
             }
         } else if let referrals, let url = Brand.inviteURL(code: referrals.code) {
-            VStack(spacing: 14) {
+            VStack(spacing: 12) {
                 HStack(spacing: 10) {
-                    Label {
-                        Text(url.absoluteString)
-                            .font(.ui(16))
-                            .foregroundStyle(Palette.textSecondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    } icon: {
-                        Image(systemName: "link").foregroundStyle(Palette.muted)
-                    }
-                    .padding(.horizontal, 14)
-                    .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.cardBorder))
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Your invite link")
+                    Text(Self.display(url))
+                        .font(.murmur(.subhead))
+                        .foregroundStyle(Theme.ink)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityLabel("Your invite link")
                     Button(copied ? "Copied" : "Copy") {
                         UIPasteboard.general.url = url
                         copied = true
                     }
-                    .font(.ui(16, .medium))
-                    .foregroundStyle(Palette.text)
-                    .padding(.horizontal, 16)
-                    .frame(minHeight: 50)
-                    .background(Palette.canvas, in: .rect(cornerRadius: 12))
+                    .buttonStyle(.murmur(.primary, size: .compact))
                 }
+                .padding(.leading, 18)
+                .padding(.trailing, 4)
+                .frame(minHeight: 52)
+                .background(Theme.fill, in: .roundCapsule)
                 ShareLink(item: url, message: Text(Self.shareMessage(code: referrals.code))) {
                     Text("Share invite")
                 }
-                .buttonStyle(.pill(.ink))
+                .buttonStyle(.murmur(.primary))
                 if let summary = referrals.summary {
                     Text(summary)
-                        .font(.ui(15))
-                        .foregroundStyle(Palette.textSecondary)
+                        .font(.murmur(.subhead))
+                        .foregroundStyle(Theme.second)
+                        .padding(.top, 2)
                     if referrals.monthsEarned >= AccountService.Referrals.maxMonths {
-                        Text("That's the most invites can earn. Thank you for spreading the word.")
-                            .font(.ui(14))
-                            .foregroundStyle(Palette.muted)
+                        Text("That’s the most invites can earn. Thank you for spreading the word.")
+                            .font(.murmur(.footnote))
+                            .foregroundStyle(Theme.third)
                             .multilineTextAlignment(.center)
                     }
                 }
             }
         } else if failed {
-            VStack(spacing: 10) {
-                Text("Your invite didn't load. Check your connection and try again.")
-                    .font(.ui(16))
-                    .foregroundStyle(Palette.textSecondary)
-                    .multilineTextAlignment(.center)
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Your invite didn’t load. Check your connection and try again.")
+                    .font(.murmur(.callout))
+                    .foregroundStyle(Theme.second)
                 Button("Try again") { Task { await load() } }
-                    .font(.ui(16, .medium))
+                    .buttonStyle(.murmur(.secondary, size: .compact))
             }
         } else {
-            ProgressView().padding(.vertical, 20)
+            ProgressView()
+                .tint(Theme.ink)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
         }
     }
 
     private var redeem: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("Got a code from a friend?")
-                .font(.ui(18, .semibold))
-                .foregroundStyle(Palette.text)
+                .font(.murmur(.headline))
+                .foregroundStyle(Theme.ink)
+                .accessibilityAddTraits(.isHeader)
             Text("Enter it within 14 days of creating your account for a month of \(Brand.name) Pro.")
-                .font(.ui(15))
-                .foregroundStyle(Palette.textSecondary)
+                .font(.murmur(.subhead))
+                .foregroundStyle(Theme.second)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 10) {
-                TextField("Invite code", text: $friendCode)
-                    .font(.ui(17))
+                TextField("Invite code", text: $friendCode, prompt: Text("Invite code").foregroundStyle(Theme.third))
+                    .font(.murmur(.body))
+                    .foregroundStyle(Theme.ink)
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
                     .submitLabel(.done)
                     .onSubmit(redeemCode)
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: 50)
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Palette.cardBorder))
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 52)
+                    .background(Theme.fill, in: .rect(cornerRadius: 16))
                 Button(action: redeemCode) {
-                    if redeeming { ProgressView() } else { Text("Use code") }
+                    if redeeming { ProgressView().tint(Theme.ink) } else { Text("Use code") }
                 }
-                .font(.ui(16, .medium))
-                .foregroundStyle(Palette.text)
-                .padding(.horizontal, 16)
-                .frame(minHeight: 50)
-                .background(Palette.canvas, in: .rect(cornerRadius: 12))
+                .buttonStyle(.murmur(.secondary, size: .compact))
                 .disabled(redeeming || AccountService.normalizedCode(friendCode) == nil)
             }
+            .padding(.top, 6)
             if let redeemMessage {
                 Text(redeemMessage)
-                    .font(.ui(15))
-                    .foregroundStyle(Palette.textSecondary)
+                    .font(.murmur(.subhead))
+                    .foregroundStyle(Theme.second)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
             }
         }
+    }
+
+    /// The link as the field shows it: without the scheme.
+    static func display(_ url: URL) -> String {
+        let text = url.absoluteString
+        for scheme in ["https://", "http://"] where text.hasPrefix(scheme) {
+            return String(text.dropFirst(scheme.count))
+        }
+        return text
     }
 
     /// What Share invite sends along with the link.
@@ -216,23 +218,26 @@ struct ReferralView: View {
     }
 }
 
-/// The ink card on Refer a friend: the wordmark with a Pro badge and what an invite gives.
+/// The ink card on Invite a friend: the wordmark and what an invite gives.
 private struct GiftCard: View {
     var body: some View {
-        VStack(spacing: 14) {
-            HStack(spacing: 10) {
-                Wordmark(height: 30, color: Palette.cream)
-                PlanBadge(text: "Pro")
-            }
-            Text("UNLIMITED WORDS FOR A MONTH")
-                .font(.ui(13, .medium))
-                .tracking(1.6)
-                .foregroundStyle(Palette.cream.opacity(0.85))
+        VStack(alignment: .leading, spacing: 0) {
+            Wordmark(height: 22, color: Theme.onInk)
+            Spacer(minLength: 28)
+            Text("One month of Pro")
+                .font(.murmur(.title2))
+                .tracking(-0.5)
+                .foregroundStyle(Theme.onInk)
+            Text("Unlimited words")
+                .font(.murmur(.subhead))
+                .foregroundStyle(Theme.onInk.opacity(0.8))
+                .padding(.top, 2)
         }
         .dynamicTypeSize(...DynamicTypeSize.xxLarge)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 38)
-        .background(Palette.ink, in: .rect(cornerRadius: 22))
+        .padding(.horizontal, 22)
+        .padding(.vertical, 20)
+        .frame(maxWidth: .infinity, minHeight: 150, alignment: .leading)
+        .background(Theme.ink, in: .rect(cornerRadius: 24))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(Brand.name) Pro: unlimited words for a month")
     }

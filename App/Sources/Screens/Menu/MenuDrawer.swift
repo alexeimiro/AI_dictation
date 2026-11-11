@@ -178,33 +178,18 @@ struct MenuDrawer: View {
 
     /// Who is signed in, at the bottom: opens Account.
     private var profile: some View {
-        let account = model.account
-        let name = AccountHeader.name(for: account)
-        let signedIn = account?.isSignedIn == true
-        // The email names the account, unless it's one of Apple's relay addresses.
-        let isNamed = signedIn && name != AccountHeader.unnamed
+        let identity = AccountIdentity(model.account)
         return Button {
             model.router.openFromMenu(.account)
         } label: {
             HStack(spacing: 12) {
-                Group {
-                    if isNamed, let initial = name.first {
-                        Text(String(initial).uppercased())
-                            .font(.murmur(.subhead, weight: .semibold))
-                    } else {
-                        Image(systemName: "person")
-                            .font(.system(size: 15, weight: .medium))
-                    }
-                }
-                .foregroundStyle(Theme.ink)
-                .frame(width: 36, height: 36)
-                .overlay { Circle().strokeBorder(Theme.ink, lineWidth: 1.5) }
+                Avatar(initial: identity.initial, size: 36)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(verbatim: name)
+                    Text(verbatim: identity.name)
                         .font(.murmur(.subhead, weight: .semibold))
                         .foregroundStyle(Theme.ink)
                         .lineLimit(1)
-                    Text(verbatim: isNamed ? (account?.email ?? "Signed in") : signedIn ? "Signed in" : "Not signed in")
+                    Text(verbatim: identity.detail)
                         .font(.murmur(.footnote))
                         .foregroundStyle(Theme.third)
                         .lineLimit(1)
@@ -222,7 +207,7 @@ struct MenuDrawer: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Account")
-        .accessibilityValue(name)
+        .accessibilityValue(identity.name)
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier(AccessibilityID.menuAccount)
     }
@@ -266,80 +251,5 @@ private struct MenuRow: View {
         .padding(.horizontal, 12)
         .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
         .contentShape(.rect)
-    }
-}
-
-/// The person icon, email (or "Guest") and the plan badge.
-struct AccountHeader: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Image(systemName: "person.circle")
-                .font(.system(size: 48, weight: .light))
-                .foregroundStyle(Palette.ink)
-            HStack(spacing: 8) {
-                Text(Self.name(for: model.account))
-                    .font(.ui(24, .semibold, relativeTo: .title2))
-                    .foregroundStyle(Palette.text)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                if let quota = model.quota {
-                    PlanBadge(text: quota.badge)
-                }
-            }
-            if let email = model.account?.email {
-                Text(email)
-                    .font(.ui(15))
-                    .foregroundStyle(Palette.textSecondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-            }
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    /// The name of a signed-in account whose email shouldn't be shown (Apple's private relay).
-    static let unnamed = "Your account"
-
-    /// The part of the email before the @, else "Guest".
-    static func name(for account: AccountModel?) -> String {
-        guard let account, account.isSignedIn, let email = account.email,
-              let local = email.split(separator: "@").first, !email.hasSuffix("privaterelay.appleid.com") else {
-            return account?.isSignedIn == true ? unnamed : "Guest"
-        }
-        return String(local)
-    }
-}
-
-/// "7 of 14 days used in trial" (or this week's words on Basic) with its bar.
-struct PlanUsage: View {
-    let quota: AccountService.Quota?
-
-    var body: some View {
-        if let quota, let line = quota.usageLine() {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(line)
-                    .font(.ui(15))
-                    .foregroundStyle(Palette.textSecondary)
-                ProgressView(value: quota.usageFraction() ?? 0)
-                    .tint(Palette.proBadge)
-            }
-        }
-    }
-}
-
-/// The capsule beside the name: "Pro Trial", "Pro", "Basic".
-struct PlanBadge: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(.ui(13, .medium, relativeTo: .caption))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(Palette.proBadge, in: .rect(cornerRadius: 5))
-            .fixedSize()
     }
 }

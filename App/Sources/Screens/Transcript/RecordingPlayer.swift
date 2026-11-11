@@ -87,41 +87,40 @@ final class RecordingPlayer {
     }
 }
 
-/// ▶︎ with a progress bar and the time, Wispr Flow's audio row on a transcript.
+/// A transcript's recording: ▶︎, how far it has played, and the time.
 struct RecordingPlayerRow: View {
     let url: URL
     @Environment(AppModel.self) private var model
     @State private var player = RecordingPlayer()
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 12) {
             Button {
                 player.toggle(sessionIsLive: model.session.isLive)
             } label: {
                 Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(Theme.onInk)
                     .frame(width: 44, height: 44)
-                    .background(Palette.ink, in: .circle)
+                    .background(Theme.ink, in: .circle)
             }
+            .buttonStyle(.bare)
             .accessibilityLabel(player.isPlaying ? "Pause recording" : "Play recording")
-            VStack(alignment: .leading, spacing: 6) {
-                GeometryReader { proxy in
-                    let fraction = player.duration > 0 ? min(1, player.currentTime / player.duration) : 0
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Palette.canvas)
-                        Capsule().fill(Palette.ink).frame(width: max(4, proxy.size.width * fraction))
-                    }
+            GeometryReader { proxy in
+                let fraction = player.duration > 0 ? min(1, player.currentTime / player.duration) : 0
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.track)
+                    Capsule().fill(Theme.ink).frame(width: proxy.size.width * fraction)
                 }
-                .frame(height: 4)
-                .accessibilityHidden(true)
-                Text("\(Self.time(player.currentTime)) / \(Self.time(player.duration))")
-                    .font(.ui(13).monospacedDigit())
-                    .foregroundStyle(Palette.textSecondary)
             }
+            .frame(height: 4)
+            .accessibilityHidden(true)
+            Text("\(Self.time(player.currentTime)) / \(Self.time(player.duration))")
+                .font(.murmur(.footnote))
+                .monospacedDigit()
+                .foregroundStyle(Theme.second)
         }
-        .padding(14)
-        .background(Palette.paper, in: .rect(cornerRadius: Metrics.cardRadius))
+        .frame(minHeight: 44)
         .onAppear { player.load(url) }
         .onDisappear { player.stop() }
         .accessibilityElement(children: .contain)

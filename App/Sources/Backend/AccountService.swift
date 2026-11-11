@@ -76,13 +76,18 @@ final class AccountService: StyleRemote {
             return min(1, Double(wordsThisWeek) / Double(weeklyLimit))
         }
 
+        /// "Trial", "Pro" or "Basic": the plan in a word.
+        var planName: String {
+            onTrial ? "Trial" : isPro ? "Pro" : "Basic"
+        }
+
         /// The chip beside the wordmark: "Trial · 6 days", "Pro" or "Basic".
         func chip(now: Date = Date()) -> String {
-            guard let left = trialDaysLeft(now: now) else { return isPro ? "Pro" : "Basic" }
+            guard let left = trialDaysLeft(now: now) else { return planName }
             return switch left {
-            case ...0: "Trial"
-            case 1: "Trial · 1 day"
-            default: "Trial · \(left) days"
+            case ...0: planName
+            case 1: "\(planName) · 1 day"
+            default: "\(planName) · \(left) days"
             }
         }
 
@@ -187,7 +192,7 @@ final class AccountService: StyleRemote {
             var title: String {
                 switch self {
                 case .issue: "Report an issue"
-                case .feedback: "Share feedback"
+                case .feedback: "Leave feedback"
                 }
             }
         }

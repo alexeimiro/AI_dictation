@@ -34,8 +34,8 @@ enum TranscriptRatings {
     }
 }
 
-/// "How was this dictation?" with 👍 and 👎 (which asks what went wrong), as on Wispr Flow's
-/// transcripts. Ratings go to the `feedback` table.
+/// "How was this dictation?" with 👍 and 👎 (which asks what went wrong). Ratings go to the
+/// `feedback` table.
 struct TranscriptFeedbackRow: View {
     let transcript: Transcript
     @Binding var toast: String?
@@ -44,18 +44,15 @@ struct TranscriptFeedbackRow: View {
     @State private var explaining = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Text("How was this dictation?")
-                .font(.ui(15, .medium))
-                .foregroundStyle(Palette.text)
+                .font(.murmur(.subhead))
+                .foregroundStyle(Theme.ink)
             Spacer(minLength: 8)
             thumb(1, symbol: "hand.thumbsup", label: "Good")
             thumb(-1, symbol: "hand.thumbsdown", label: "Not good")
         }
-        .padding(.leading, 16)
-        .padding(.trailing, 8)
-        .padding(.vertical, 6)
-        .background(Palette.paper, in: .rect(cornerRadius: Metrics.cardRadius))
+        .frame(minHeight: 44)
         .onAppear { rating = TranscriptRatings.rating(for: transcript.id) }
         .sheet(isPresented: $explaining) {
             FeedbackSheet(transcript: transcript) { sent in
@@ -67,16 +64,22 @@ struct TranscriptFeedbackRow: View {
         }
     }
 
+    /// An outlined round button; the one that was chosen fills with ink, the other fades.
     private func thumb(_ value: Int, symbol: String, label: String) -> some View {
         let chosen = rating == value
+        let faded = rating != nil && !chosen
         return Button {
             if value > 0 { send(value) } else { explaining = true }
         } label: {
             Image(systemName: chosen ? symbol + ".fill" : symbol)
-                .font(.system(size: 19))
-                .foregroundStyle(chosen ? Palette.tabSelectedLabel : Palette.textSecondary)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(chosen ? Theme.onInk : faded ? Theme.third : Theme.ink)
                 .frame(width: 44, height: 44)
+                .background(chosen ? Theme.ink : .clear, in: .circle)
+                .overlay { Circle().strokeBorder(faded ? Theme.graphic : Theme.ink, lineWidth: 1.5) }
+                .contentShape(.circle)
         }
+        .buttonStyle(.bare)
         .disabled(rating != nil)
         .accessibilityLabel(label)
         .accessibilityAddTraits(chosen ? .isSelected : [])
@@ -121,58 +124,68 @@ private struct FeedbackSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("What went wrong?") {
+        VStack(spacing: 0) {
+            SheetHeader("Feedback", confirmTitle: "Send",
+                        canConfirm: !(sending || (reasons.isEmpty && note.trimmingCharacters(in: .whitespaces).isEmpty)),
+                        cancel: {
+                            onDone(false)
+                            dismiss()
+                        }, confirm: send)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    SectionLabel("What went wrong?")
+                        .padding(.bottom, 6)
                     ForEach(Reason.allCases) { reason in
+                        let isOn = reasons.contains(reason)
                         Button {
-                            if reasons.contains(reason) { reasons.remove(reason) } else { reasons.insert(reason) }
+                            if isOn { reasons.remove(reason) } else { reasons.insert(reason) }
                         } label: {
                             HStack {
-                                Text(reason.rawValue).font(.ui(17)).foregroundStyle(Palette.text)
-                                Spacer()
-                                if reasons.contains(reason) {
-                                    Image(systemName: "checkmark").foregroundStyle(Palette.tabSelectedLabel)
-                                }
+                                Text(reason.rawValue)
+                                    .font(.murmur(.body, weight: isOn ? .semibold : .regular))
+                                    .foregroundStyle(Theme.ink)
+                                Spacer(minLength: 8)
+                                SelectionMark(isOn: isOn)
+                                    .accessibilityHidden(true)
                             }
+                            .frame(minHeight: 50)
+                            .overlay(alignment: .top) { Hairline() }
+                            .contentShape(.rect)
                         }
-                        .accessibilityAddTraits(reasons.contains(reason) ? .isSelected : [])
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(isOn ? .isSelected : [])
                     }
-                }
-                Section {
-                    TextField("Tell us more (optional)", text: $note, axis: .vertical)
+                    TextField("Tell us more (optional)", text: $note,
+                              prompt: Text("Tell us more (optional)").foregroundStyle(Theme.third), axis: .vertical)
                         .lineLimit(3...6)
-                        .font(.ui(17))
-                }
-                if model.dataSharing {
-                    Section {
-                        Toggle("Include this dictation's text", isOn: $includeText)
-                            .tint(Palette.toggleGreen)
-                    } footer: {
+                        .font(.murmur(.body))
+                        .foregroundStyle(Theme.ink)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .frame(maxWidth: .infinity, minHeight: 96, alignment: .topLeading)
+                        .background(Theme.fill, in: .rect(cornerRadius: 16))
+                        .padding(.top, 16)
+                    if model.dataSharing {
+                        Toggle("Include this dictation’s text", isOn: $includeText)
+                            .font(.murmur(.body))
+                            .foregroundStyle(Theme.ink)
+                            .tint(Theme.ink)
+                            .frame(minHeight: 56)
+                            .padding(.top, 14)
                         Text("You chose to help improve \(Brand.name), so we can look at what you said and what we wrote.")
+                            .font(.murmur(.footnote))
+                            .foregroundStyle(Theme.third)
                     }
+                    FieldError(message: error)
+                        .padding(.top, 14)
                 }
-                if let error {
-                    Section { FieldError(message: error) }
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(Palette.canvas)
-            .navigationTitle("Feedback")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        onDone(false)
-                        dismiss()
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Send", action: send)
-                        .disabled(sending || (reasons.isEmpty && note.trimmingCharacters(in: .whitespaces).isEmpty))
-                }
+                .padding(.horizontal, 20)
+                .padding(.top, 4)
+                .padding(.bottom, 24)
             }
         }
+        .background(Theme.canvas)
+        .presentationBackground(Theme.canvas)
         .presentationDetents([.large])
     }
 

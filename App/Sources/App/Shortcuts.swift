@@ -1,10 +1,10 @@
 import AppIntents
 import Foundation
 
-/// "New Murmur Note": Scratchpad on a new note, optionally dictating into it.
+/// "New Murmur Note": Notes on a new note, optionally dictating into it.
 struct NewNoteIntent: AppIntent {
     static let title: LocalizedStringResource = "New Murmur Note"
-    static let description = IntentDescription("Opens Murmur on a new Scratchpad note.")
+    static let description = IntentDescription("Opens Murmur on a new note.")
     static let supportedModes: IntentModes = .foreground(.immediate)
 
     @Parameter(title: "Start Dictating", default: false)

@@ -44,6 +44,20 @@ final class NoteDictation {
         }
     }
 
+    #if DEBUG
+    /// Screenshot runs (`-route note -session-fixture listening|writing`): `note` is the one being
+    /// dictated into, in the session's pinned phase.
+    func pinForScreenshots(note: UUID, phase: SessionController.Phase) {
+        switch phase {
+        case .recording(let id), .processing(let id):
+            noteID = note
+            requestID = id
+        default:
+            break
+        }
+    }
+    #endif
+
     /// The mic button: starts dictating into `note`, or stops the dictation running.
     func toggle(for note: UUID) async {
         switch phase(for: note) {

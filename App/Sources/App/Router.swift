@@ -55,7 +55,8 @@ final class Router {
         case .debug: [.settings, .debug]
         case .account: [.account]
         case .referral: [.referral]
-        case .home, .transcript, .swipeBack, .dictionary, .snippets, .style, .scratchpad, .menu, .paywall, nil: []
+        case .home, .transcript, .swipeBack, .dictionary, .snippets, .style, .scratchpad, .menu, .paywall, .note,
+             nil: []
         }
     }
 
@@ -65,7 +66,7 @@ final class Router {
         case .dictionary: .dictionary
         case .snippets: .snippets
         case .style: .style
-        case .scratchpad: .scratchpad
+        case .scratchpad, .note: .scratchpad
         default: .home
         }
     }

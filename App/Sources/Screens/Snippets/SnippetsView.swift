@@ -11,48 +11,43 @@ struct SnippetsView: View {
     var body: some View {
         let snippets = model.library.snippets
         List {
-            Section {
-                IntroCard(
-                    title: "The stuff you shouldn't have to re-type",
-                    message: Text("Save text you type often — **emails, links, addresses, bios**. Say the snippet, and Murmur types the rest."),
-                    action: "Add new snippet",
-                    dismissedKey: "intro.snippets.dismissed"
-                ) { editing = .new }
+            Group {
+                ScreenTitle(MainTab.snippets.title)
+                    .padding(.top, 6)
+                    .padding(.bottom, 14)
+                    .accessibilityIdentifier(AccessibilityID.screen("snippets"))
+                TipCard(title: "Shortcuts for text you repeat",
+                        message: "Your email, an address, a link. Say the snippet’s name and Murmur types the whole thing.",
+                        action: "Add a snippet", dismissedKey: "intro.snippets.dismissed") { editing = .new }
+                if snippets.isEmpty {
+                    EmptyState("No snippets yet", message: "Try “my email address” → your email.")
+                        .padding(.vertical, 48)
+                } else {
+                    SectionLabel("Your snippets (\(snippets.count))")
+                        .padding(.top, 26)
+                        .padding(.bottom, 6)
+                }
             }
-            .listRowInsets(EdgeInsets())
-            .listRowBackground(Color.clear)
+            .plainListRow()
 
-            if snippets.isEmpty {
-                Section {
-                    EmptyTabMessage(systemImage: "scissors", title: "No snippets yet",
-                                    detail: "Try “my email address” → your email.")
-                }
-                .listRowBackground(Color.clear)
-            } else {
-                Section {
-                    ForEach(snippets) { snippet in
-                        Button { editing = .snippet(snippet) } label: { row(snippet) }
-                            .swipeActions {
-                                Button(role: .destructive) { model.library.deleteSnippet(snippet.id) } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
+            ForEach(snippets) { snippet in
+                Button { editing = .snippet(snippet) } label: { row(snippet) }
+                    .buttonStyle(.plain)
+                    .plainListRow()
+                    .swipeActions {
+                        // Ink, not red: red means the microphone is open.
+                        Button(role: .destructive) { model.library.deleteSnippet(snippet.id) } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                        .tint(Theme.ink)
                     }
-                } header: {
-                    CountHeader(title: "Your snippets", count: snippets.count)
-                }
             }
         }
-        .listStyle(.insetGrouped)
-        .scrollContentBackground(.hidden)
-        .background(Palette.canvas)
-        .navigationTitle("Snippets")
+        .plainList()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             MenuToolbarItem()
-        }
-        .overlay(alignment: .bottomTrailing) {
-            AddButton(label: "Add snippet") { editing = .new }
+            BarActionItem(systemImage: "plus", label: "Add snippet") { editing = .new }
         }
         .sheet(item: $editing) { target in
             SnippetEditor(target: target)
@@ -60,18 +55,20 @@ struct SnippetsView: View {
     }
 
     private func row(_ snippet: SnippetDefinition) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(snippet.trigger)
-                .font(.transcript(.body).weight(.medium))
-                .foregroundStyle(Palette.text)
-            Text(snippet.expansion)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(verbatim: snippet.trigger)
+                .font(.transcript(.body).weight(.semibold))
+                .foregroundStyle(Theme.ink)
+            Text(verbatim: snippet.expansion)
                 .font(.transcript(.subheadline))
-                .foregroundStyle(Palette.textSecondary)
+                .foregroundStyle(Theme.third)
                 .lineLimit(3)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) { Hairline() }
         .contentShape(.rect)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -113,57 +110,55 @@ struct SnippetEditor: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    TextField("What you'll say, e.g. my email address", text: $trigger)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .focused($triggerFocused)
-                } header: {
-                    Text("Snippet")
-                } footer: {
-                    Text("\(trigger.trimmingCharacters(in: .whitespaces).count)/\(LibraryRules.maxTrigger)")
-                        .monospacedDigit()
-                }
-                Section {
-                    TextEditor(text: $expansion)
-                        .font(.transcript(.body))
-                        .frame(minHeight: 160)
-                } header: {
-                    Text("Expansion")
-                } footer: {
+        VStack(spacing: 0) {
+            SheetHeader(existing == nil ? "Add snippet" : "Edit snippet", cancel: { dismiss() }, confirm: save)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
                     VStack(alignment: .leading, spacing: 6) {
-                        FieldError(message: error)
-                        Text("Say the snippet while dictating, and Murmur types this text in its place.")
+                        LabeledField("Snippet") {
+                            TextField("What you’ll say, e.g. my email address", text: $trigger)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .focused($triggerFocused)
+                        }
+                        Text("\(trigger.trimmingCharacters(in: .whitespaces).count)/\(LibraryRules.maxTrigger)")
+                            .font(.murmur(.footnote))
+                            .monospacedDigit()
+                            .foregroundStyle(Theme.third)
                     }
-                }
-                if let existing {
-                    Section {
-                        Button("Delete snippet", role: .destructive) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        LabeledField("Expansion", minHeight: 160) {
+                            TextEditor(text: $expansion)
+                                .font(.transcript(.body))
+                                .scrollContentBackground(.hidden)
+                                // The editor insets its text by 5 pt itself.
+                                .padding(.horizontal, -5)
+                                .padding(.vertical, 6)
+                                .frame(minHeight: 160)
+                        }
+                        Text("Say the snippet while dictating, and Murmur types this text in its place.")
+                            .font(.murmur(.footnote))
+                            .foregroundStyle(Theme.third)
+                    }
+                    FieldError(message: error)
+                    if let existing {
+                        DeleteButton(title: "Delete snippet") {
                             model.library.deleteSnippet(existing.id)
                             dismiss()
                         }
                     }
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
-            .scrollContentBackground(.hidden)
-            .background(Palette.canvas)
-            .navigationTitle(existing == nil ? "Add snippet" : "Edit snippet")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save)
-                }
-            }
-            .onChange(of: trigger) { error = nil }
-            .onChange(of: expansion) { error = nil }
-            .onAppear { if existing == nil { triggerFocused = true } }
         }
-        .tint(Palette.ink)
+        .background(Theme.canvas)
+        .presentationBackground(Theme.canvas)
+        .tint(Theme.ink)
+        .onChange(of: trigger) { error = nil }
+        .onChange(of: expansion) { error = nil }
+        .onAppear { if existing == nil { triggerFocused = true } }
     }
 
     private func save() {

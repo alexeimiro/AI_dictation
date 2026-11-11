@@ -20,132 +20,138 @@ struct DebugView: View {
         let summary = model.history.metricsSummary()
         let cloud = model.timingsLog.summary(latencyKind)
         Form {
-            Section {
-                Picker("Recognizer", selection: $settings.transcriberEngine) {
-                    ForEach(TranscriberEngine.allCases) { Text($0.title).tag($0) }
+            // Every group is a soft grey card on the canvas.
+            Group {
+                Section {
+                    Picker("Recognizer", selection: $settings.transcriberEngine) {
+                        ForEach(TranscriberEngine.allCases) { Text($0.title).tag($0) }
+                    }
+                    LabeledContent("Running", value: model.session.engineName.isEmpty ? "—" : model.session.engineName)
+                    LabeledContent("Memory", value: memory)
+                    NavigationLink("On-device languages", value: Route.languages)
+                } header: {
+                    Text("Engine")
+                } footer: {
+                    Text("Recognizer changes apply the next time the session starts. On-device languages are the primary and secondary models the fallback uses.")
                 }
-                LabeledContent("Running", value: model.session.engineName.isEmpty ? "—" : model.session.engineName)
-                LabeledContent("Memory", value: memory)
-                NavigationLink("On-device languages", value: Route.languages)
-            } header: {
-                Text("Engine")
-            } footer: {
-                Text("Recognizer changes apply the next time the session starts. On-device languages are the primary and secondary models the fallback uses.")
-            }
-            Section {
-                Toggle("Return to the app automatically", isOn: $settings.autoReturn)
-                Toggle("Keep the screen on while dictating", isOn: $settings.keepScreenAwake)
-                    .tint(Palette.toggleGreen)
-                LabeledContent("Last time", value: model.hostReturn.lastOutcome
-                    ?? (model.hostReturn.isAvailable ? "—" : "Not available on this iOS"))
-            } header: {
-                Text("After the keyboard opens Murmur")
-            } footer: {
-                Text("Murmur learns which app you were typing in from a part of iOS that isn't public, and reopens it. Turn this off to always swipe back yourself.")
-            }
-            Section {
-                TextField("Tap here, switch to the Murmur keyboard, and dictate", text: $testText, axis: .vertical)
-                    .lineLimit(3...8)
-                if !testText.isEmpty {
-                    Button("Clear", role: .destructive) { testText = "" }
+                Section {
+                    Toggle("Return to the app automatically", isOn: $settings.autoReturn)
+                    Toggle("Keep the screen on while dictating", isOn: $settings.keepScreenAwake)
+                    LabeledContent("Last time", value: model.hostReturn.lastOutcome
+                        ?? (model.hostReturn.isAvailable ? "—" : "Not available on this iOS"))
+                } header: {
+                    Text("After the keyboard opens Murmur")
+                } footer: {
+                    Text("Murmur learns which app you were typing in from a part of iOS that isn't public, and reopens it. Turn this off to always swipe back yourself.")
                 }
-            } header: {
-                Text("Try it")
-            }
-            Section("Latency, last \(summary.total.count) dictations (median / p95)") {
-                metricsRow("Recognition", summary.asr)
-                metricsRow("Cleanup", summary.cleanup)
-                metricsRow("Total", summary.total)
-            }
-            Section {
-                Picker("Kind", selection: $latencyKind) {
-                    Text("Translations").tag(DictationTimings.Kind.translation)
-                    Text("Dictations").tag(DictationTimings.Kind.dictation)
+                Section {
+                    TextField("Tap here, switch to the Murmur keyboard, and dictate", text: $testText, axis: .vertical)
+                        .lineLimit(3...8)
+                    if !testText.isEmpty {
+                        Button("Clear") { testText = "" }
+                            .fontWeight(.semibold)
+                    }
+                } header: {
+                    Text("Try it")
                 }
-                .pickerStyle(.segmented)
-                shareRow("Cloud transcript", cloud.cloudTranscripts)
-                metricsRow("Stop → result", cloud.stopToResult)
-                metricsRow("Tap → stop", cloud.tapToStop)
-                metricsRow("Encode", cloud.encode)
-                metricsRow("Token at stop", cloud.token)
-                metricsRow("Upload", cloud.upload)
-                metricsRow("Server wait", cloud.wait)
-                metricsRow("Server auth", cloud.serverAuth)
-                metricsRow("Server preflight", cloud.serverPreflight)
-                metricsRow("Server transcribe", cloud.serverTranscribe)
-                metricsRow("Server model", cloud.serverModel)
-                metricsRow("Result → insert", cloud.resultToInsert)
-                metricsRow("Tap → insert", cloud.tapToInsert)
-                shareRow("Reused connection", cloud.reused)
-                shareRow("Cold worker", cloud.cold)
-                shareRow("Warm-up hit its worker", cloud.warmedWorker)
-                LabeledContent("Regions") {
-                    Text(verbatim: Self.describe(cloud.regions)).monospacedDigit()
+                Section("Latency, last \(summary.total.count) dictations (median / p95)") {
+                    metricsRow("Recognition", summary.asr)
+                    metricsRow("Cleanup", summary.cleanup)
+                    metricsRow("Total", summary.total)
                 }
-                LabeledContent("Token signing") {
-                    Text(verbatim: tokenSigning)
+                Section {
+                    Picker("Kind", selection: $latencyKind) {
+                        Text("Translations").tag(DictationTimings.Kind.translation)
+                        Text("Dictations").tag(DictationTimings.Kind.dictation)
+                    }
+                    .pickerStyle(.segmented)
+                    shareRow("Cloud transcript", cloud.cloudTranscripts)
+                    metricsRow("Stop → result", cloud.stopToResult)
+                    metricsRow("Tap → stop", cloud.tapToStop)
+                    metricsRow("Encode", cloud.encode)
+                    metricsRow("Token at stop", cloud.token)
+                    metricsRow("Upload", cloud.upload)
+                    metricsRow("Server wait", cloud.wait)
+                    metricsRow("Server auth", cloud.serverAuth)
+                    metricsRow("Server preflight", cloud.serverPreflight)
+                    metricsRow("Server transcribe", cloud.serverTranscribe)
+                    metricsRow("Server model", cloud.serverModel)
+                    metricsRow("Result → insert", cloud.resultToInsert)
+                    metricsRow("Tap → insert", cloud.tapToInsert)
+                    shareRow("Reused connection", cloud.reused)
+                    shareRow("Cold worker", cloud.cold)
+                    shareRow("Warm-up hit its worker", cloud.warmedWorker)
+                    LabeledContent("Regions") {
+                        Text(verbatim: Self.describe(cloud.regions)).monospacedDigit()
+                    }
+                    LabeledContent("Token signing") {
+                        Text(verbatim: tokenSigning)
+                    }
+                    #if DEBUG
+                    Toggle("Translate and fix grammar in one request", isOn: $settings.translateInOneRequest)
+                    if let export = model.timingsLog.exportURL {
+                        ShareLink("Export timings", item: export)
+                    }
+                    LabeledContent("Keyboard peak") {
+                        HStack {
+                            Text(verbatim: keyboardPeak > 0 ? Self.megabytes(keyboardPeak) : "—").monospacedDigit()
+                            Button("Reset") {
+                                SharedSettings.shared.debugKeyboardPeakFootprint = 0
+                                keyboardPeak = 0
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                    #endif
+                } header: {
+                    Text("Cloud latency, last \(cloud.count) (median / p95)")
+                } footer: {
+                    Text("Only dictations with a cloud transcript count, not the on-device fallback or failures. Upload, wait and the server rows add up a dictation's requests: transcribe then cleanup, or one dictate for a translation. Inserts more than 10 s after the result are left out, from the tap too: those are taps on Insert last dictation.")
                 }
                 #if DEBUG
-                Toggle("Translate and fix grammar in one request", isOn: $settings.translateInOneRequest)
-                    .tint(Palette.toggleGreen)
-                if let export = model.timingsLog.exportURL {
-                    ShareLink("Export timings", item: export)
-                }
-                LabeledContent("Keyboard peak") {
-                    HStack {
-                        Text(verbatim: keyboardPeak > 0 ? Self.megabytes(keyboardPeak) : "—").monospacedDigit()
-                        Button("Reset") {
-                            SharedSettings.shared.debugKeyboardPeakFootprint = 0
-                            keyboardPeak = 0
-                        }
-                        .buttonStyle(.borderless)
+                Section {
+                    Picker("State", selection: demoState) {
+                        Text("Off").tag(KeyboardDemo.State?.none)
+                        ForEach(KeyboardDemo.State.allCases, id: \.self) { Text(verbatim: $0.rawValue).tag(Optional($0)) }
                     }
+                    Picker("Layout", selection: demoLayout) {
+                        Text("As set").tag(KeyboardLayoutPreference?.none)
+                        Text("Voice").tag(Optional(KeyboardLayoutPreference.voice))
+                        Text("Numbers first").tag(Optional(KeyboardLayoutPreference.numbers))
+                        Text("QWERTY").tag(Optional(KeyboardLayoutPreference.qwerty))
+                    }
+                    .disabled(keyboardDemo == nil)
+                } header: {
+                    Text("Keyboard demo")
+                } footer: {
+                    Text("The keyboard shows this state instead of the live one, for screenshots. It ends after 15 minutes or when Murmur next launches.")
                 }
                 #endif
-            } header: {
-                Text("Cloud latency, last \(cloud.count) (median / p95)")
-            } footer: {
-                Text("Only dictations with a cloud transcript count, not the on-device fallback or failures. Upload, wait and the server rows add up a dictation's requests: transcribe then cleanup, or one dictate for a translation. Inserts more than 10 s after the result are left out, from the tap too: those are taps on Insert last dictation.")
+                Section("Housekeeping") {
+                    Button("Reconcile insertions") {
+                        model.history.reconcileInsertions(payloads: model.transport.payloads)
+                    }
+                    Button("Prune IPC files") {
+                        model.timingsLog.recordClaims(from: model.transport.payloads)
+                        model.transport.payloads.prune(olderThan: 0)
+                    }
+                    Button("Forget verified engines") {
+                        SharedSettings.shared.verifiedEngines = [:]
+                    }
+                    Button("Replay onboarding") {
+                        model.router.popToRoot()
+                        model.onboarding.restart()
+                    }
+                    // Ink and bold, not red: red means the microphone is open.
+                    Button("Clear history") { confirmClear = true }
+                        .fontWeight(.semibold)
+                }
             }
-            #if DEBUG
-            Section {
-                Picker("State", selection: demoState) {
-                    Text("Off").tag(KeyboardDemo.State?.none)
-                    ForEach(KeyboardDemo.State.allCases, id: \.self) { Text(verbatim: $0.rawValue).tag(Optional($0)) }
-                }
-                Picker("Layout", selection: demoLayout) {
-                    Text("As set").tag(KeyboardLayoutPreference?.none)
-                    Text("Voice").tag(Optional(KeyboardLayoutPreference.voice))
-                    Text("Numbers first").tag(Optional(KeyboardLayoutPreference.numbers))
-                    Text("QWERTY").tag(Optional(KeyboardLayoutPreference.qwerty))
-                }
-                .disabled(keyboardDemo == nil)
-            } header: {
-                Text("Keyboard demo")
-            } footer: {
-                Text("The keyboard shows this state instead of the live one, for screenshots. It ends after 15 minutes or when Murmur next launches.")
-            }
-            #endif
-            Section("Housekeeping") {
-                Button("Reconcile insertions") {
-                    model.history.reconcileInsertions(payloads: model.transport.payloads)
-                }
-                Button("Prune IPC files") {
-                    model.timingsLog.recordClaims(from: model.transport.payloads)
-                    model.transport.payloads.prune(olderThan: 0)
-                }
-                Button("Forget verified engines") {
-                    SharedSettings.shared.verifiedEngines = [:]
-                }
-                Button("Replay onboarding") {
-                    model.router.popToRoot()
-                    model.onboarding.restart()
-                }
-                Button("Clear history", role: .destructive) { confirmClear = true }
-            }
+            .listRowBackground(Theme.fill)
         }
         .scrollContentBackground(.hidden)
-        .background(Palette.canvas)
+        .background(Theme.canvas)
+        .tint(Theme.ink)
         .navigationTitle("Debug")
         .navigationBarTitleDisplayMode(.inline)
         .confirmationDialog("Delete every transcript?", isPresented: $confirmClear, titleVisibility: .visible) {

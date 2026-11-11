@@ -50,7 +50,7 @@ final class AppModel {
     private(set) var dataSharing = false
     /// Murmur Pro on the App Store.
     let pro: ProStore
-    /// "Get unlimited words" is on screen.
+    /// Murmur Pro's plans are on screen.
     var showsPaywall = false
     /// The "Sign in again" sheet while it's up, and where it opened. RootView presents it, so it
     /// also opens during onboarding; the swipe-back screen and the start dialog close it first.
@@ -86,7 +86,7 @@ final class AppModel {
         if launchOptions.onboardingStep == .complete { OnboardingFixtures.seedCompletedHistory(history) }
         let library = LibraryStore.open(inMemory: launchOptions.useFixtures || launchOptions.isOnboardingScreenshot)
         self.library = library
-        if launchOptions.useFixtures { LibraryFixtures.seed(library) }
+        if launchOptions.useFixtures, !launchOptions.emptyLibrary { LibraryFixtures.seed(library) }
         let backend = Self.makeBackend(launchOptions: launchOptions)
         self.backend = backend
         account = backend?.account
@@ -157,6 +157,13 @@ final class AppModel {
         if launchOptions.route == .swipeBack { showSwipeBack = true }
         if launchOptions.route == .transcript, let first = history.recent(limit: 1).first {
             router.path = [.transcript(first.id)]
+        }
+        if launchOptions.route == .note, let newest = library.notes.first {
+            router.paths[.scratchpad] = [.note(newest.id)]
+            #if DEBUG
+            // With `-session-fixture listening|writing`, the note's own mic shows that state.
+            noteDictation.pinForScreenshots(note: newest.id, phase: session.phase)
+            #endif
         }
         history.applyRetention()
         recoverInterruptedDictations()
@@ -626,7 +633,7 @@ enum DeepLink: Equatable {
     case startSession(token: String?)
     /// `murmur://settings` — the keyboard's settings button.
     case openSettings
-    /// `murmur://pro` — "Get unlimited words", from the keyboard's limit message.
+    /// `murmur://pro` — Murmur Pro's plans, from the keyboard's limit message.
     case pro
     /// `murmur://invite?code=a1b2c3d4` — Open in Murmur, on a friend's invite page.
     case invite(code: String)
@@ -658,6 +665,8 @@ enum DeepLink: Equatable {
 enum LaunchRoute: String {
     case home, settings, languages, debug, transcript, swipeBack
     case dictionary, snippets, style, scratchpad, menu, account, paywall, referral
+    /// The newest note, open in its editor.
+    case note
 
     /// What the screens are called now; the names above keep working.
     private static let aliases: [String: LaunchRoute] = ["notes": .scratchpad, "invite": .referral]
@@ -699,8 +708,9 @@ enum LaunchRoute: String {
 /// off|starting|on|listening|writing|failed|reconnect` pins its phase without a microphone, so
 /// Home can be shot in every state.
 ///
-/// Home's other states (screenshots, DEBUG builds only, with `-fixtures`): `-quota-fixture
-/// trial|basic|limit|pro` picks the plan, and `-history-fixture empty` leaves the history empty.
+/// Other states (screenshots, DEBUG builds only, with `-fixtures`): `-quota-fixture
+/// trial|basic|limit|pro` picks the plan, `-history-fixture empty` leaves the history empty and
+/// `-library-fixture empty` leaves out the words, snippets and notes.
 struct LaunchOptions: Equatable {
     var route: LaunchRoute?
     var useFixtures = false
@@ -715,6 +725,7 @@ struct LaunchOptions: Equatable {
     var sessionFixture: SessionController.Phase?
     var quotaFixture: AccountService.Quota?
     var emptyHistory = false
+    var emptyLibrary = false
 
     init(arguments: [String]) {
         route = LaunchRoute(arguments: arguments)
@@ -734,6 +745,7 @@ struct LaunchOptions: Equatable {
         sessionFixture = Self.value(after: "-session-fixture", in: arguments).flatMap(SessionController.Phase.init(fixture:))
         quotaFixture = Self.value(after: "-quota-fixture", in: arguments).flatMap(AccountService.Quota.fixture(named:))
         emptyHistory = Self.value(after: "-history-fixture", in: arguments) == "empty"
+        emptyLibrary = Self.value(after: "-library-fixture", in: arguments) == "empty"
         #endif
     }
 

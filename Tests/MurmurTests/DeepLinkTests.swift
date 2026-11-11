@@ -31,7 +31,7 @@ struct DeepLinkTests {
         #expect(LaunchRoute(arguments: ["Murmur", "-route", "languages"]) == .languages)
         #expect(LaunchRoute(arguments: ["Murmur"]) == nil)
         for name in ["home", "settings", "languages", "debug", "transcript", "swipeBack", "dictionary", "snippets",
-                     "style", "scratchpad", "menu", "account", "paywall", "referral"] {
+                     "style", "scratchpad", "menu", "account", "paywall", "referral", "note"] {
             #expect(LaunchRoute(arguments: ["Murmur", "-route", name])?.rawValue == name)
         }
         // What two screens are called now; their old names above still open them.
@@ -105,6 +105,8 @@ struct DeepLinkTests {
         #expect(LaunchOptions(arguments: ["Murmur", "-fixtures"]).quotaFixture == nil)
         #expect(LaunchOptions(arguments: ["Murmur", "-fixtures", "-history-fixture", "empty"]).emptyHistory)
         #expect(!LaunchOptions(arguments: ["Murmur", "-fixtures"]).emptyHistory)
+        #expect(LaunchOptions(arguments: ["Murmur", "-fixtures", "-library-fixture", "empty"]).emptyLibrary)
+        #expect(!LaunchOptions(arguments: ["Murmur", "-fixtures"]).emptyLibrary)
     }
 
     @Test @MainActor func initialPathOpensNestedScreens() {
@@ -115,6 +117,7 @@ struct DeepLinkTests {
         #expect(Router.initialPath(for: .account) == [.account])
         #expect(Router.initialTab(for: .snippets) == .snippets)
         #expect(Router.initialTab(for: .settings) == .home)
+        #expect(Router.initialTab(for: .note) == .scratchpad)
     }
 
     @Test @MainActor func eachTabKeepsItsOwnStackAndTheMenuOpensOnHome() {

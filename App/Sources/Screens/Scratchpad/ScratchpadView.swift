@@ -2,7 +2,8 @@ import MurmurCore
 import MurmurUI
 import SwiftUI
 
-/// Quick notes, typed or dictated with the mic. Signed in, they're on every device (`LibrarySync`).
+/// Notes: quick thoughts, typed or dictated with the mic. Signed in, they're on every device
+/// (`LibrarySync`).
 struct ScratchpadView: View {
     @Environment(AppModel.self) private var model
     @State private var search = ""
@@ -11,37 +12,65 @@ struct ScratchpadView: View {
         let notes = filtered
         Group {
             if model.library.notes.isEmpty {
-                emptyState
+                VStack(spacing: 0) {
+                    title
+                        .padding(.horizontal, 20)
+                    Spacer()
+                    EmptyState("Say a thought, keep it",
+                               message: "Notes are a place to dictate when you have nowhere else to put it.") {
+                        Button("New note", action: createNote)
+                            .buttonStyle(.murmur(.primary, size: .compact))
+                    }
+                    Spacer()
+                    Spacer()
+                }
             } else {
                 List {
+                    title
+                        .plainListRow()
+                    SearchField(text: $search, prompt: "Search notes")
+                        .padding(.top, 14)
+                        .padding(.bottom, 10)
+                        .plainListRow()
+                    if notes.isEmpty {
+                        EmptyState("No notes found", message: "Nothing matches “\(search)”.")
+                            .padding(.vertical, 48)
+                            .plainListRow()
+                    }
                     ForEach(notes) { note in
-                        NavigationLink(value: Route.note(note.id)) { NoteRow(note: note) }
-                            .swipeActions {
-                                Button(role: .destructive) { model.library.deleteNote(note.id) } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                                ShareLink(item: note.body) { Label("Share", systemImage: "square.and.arrow.up") }
-                                    .tint(Palette.ink)
+                        Button {
+                            model.router.open(.note(note.id))
+                        } label: {
+                            NoteRow(note: note)
+                        }
+                        .buttonStyle(.plain)
+                        .plainListRow()
+                        .swipeActions {
+                            // Ink, not red: red means the microphone is open.
+                            Button(role: .destructive) { model.library.deleteNote(note.id) } label: {
+                                Label("Delete", systemImage: "trash")
                             }
+                            .tint(Theme.ink)
+                            ShareLink(item: note.body) { Label("Share", systemImage: "square.and.arrow.up") }
+                                .tint(Theme.second)
+                        }
                     }
                 }
-                .listStyle(.insetGrouped)
-                .scrollContentBackground(.hidden)
-                .searchable(text: $search, prompt: "Search notes")
-                .overlay {
-                    if notes.isEmpty { ContentUnavailableView.search(text: search) }
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    AddButton(label: "New note", action: createNote)
-                }
+                .plainList()
             }
         }
-        .background(Palette.canvas)
-        .navigationTitle("Scratchpad")
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             MenuToolbarItem()
+            BarActionItem(systemImage: "plus", label: "New note", action: createNote)
         }
+    }
+
+    private var title: some View {
+        ScreenTitle(MainTab.scratchpad.title)
+            .padding(.top, 6)
+            .accessibilityIdentifier(AccessibilityID.screen("notes"))
     }
 
     private var filtered: [Note] {
@@ -52,36 +81,21 @@ struct ScratchpadView: View {
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "note.text.badge.plus")
-                .font(.system(size: 44, weight: .light))
-                .foregroundStyle(Palette.muted)
-            Text("Capture quick thoughts\nwith your voice")
-                .font(.ui(20, .semibold, relativeTo: .title3))
-                .foregroundStyle(Palette.text)
-                .multilineTextAlignment(.center)
-            Button("Create a note", action: createNote)
-                .buttonStyle(.pill(.ink, height: 50))
-                .frame(width: 200)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
     private func createNote() {
         let note = model.library.createNote()
         model.router.open(.note(note.id))
     }
 }
 
+/// A note in the list: its title, then when it changed and how it starts.
 private struct NoteRow: View {
     let note: Note
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 3) {
             Text(note.displayTitle)
-                .font(.transcript(.body).weight(.medium))
-                .foregroundStyle(Palette.text)
+                .font(.transcript(.body).weight(.semibold))
+                .foregroundStyle(Theme.ink)
                 .lineLimit(1)
             HStack(spacing: 6) {
                 Text(note.updatedAt, format: .relative(presentation: .named))
@@ -92,9 +106,12 @@ private struct NoteRow: View {
                 }
             }
             .font(.transcript(.subheadline))
-            .foregroundStyle(Palette.textSecondary)
+            .foregroundStyle(Theme.third)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 13)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) { Hairline() }
+        .contentShape(.rect)
     }
 }
 
@@ -115,12 +132,12 @@ struct NoteEditorView: View {
             if let note {
                 editor(note)
             } else {
-                ContentUnavailableView("Note not found", systemImage: "note.text")
+                EmptyState("Note not found", message: "It may have been deleted on another device.")
+                    .frame(maxHeight: .infinity)
             }
         }
-        .background(Palette.paper)
+        .background(Theme.canvas)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar(.hidden, for: .tabBar)
         .toast($toast)
         .onAppear {
             note = model.library.note(id)
@@ -148,20 +165,23 @@ struct NoteEditorView: View {
                                  set: { text in update { $0.body = text } }),
                    selection: $selection)
             .font(.transcript(.body))
+            .lineSpacing(4)
+            .foregroundStyle(Theme.ink)
             .scrollContentBackground(.hidden)
-            .padding(.horizontal, 12)
+            // The editor insets its text by 5 pt itself: 20 pt in all, the screen's margin.
+            .padding(.horizontal, 15)
             .focused($bodyFocused)
             .overlay(alignment: .topLeading) {
                 if note.body.isEmpty {
-                    Text("Tap the mic to start dictating, or type.")
+                    Text("Tap the mic and talk, or type.")
                         .font(.transcript(.body))
-                        .foregroundStyle(Palette.disabled)
-                        .padding(.horizontal, 17)
+                        .foregroundStyle(Theme.third)
+                        .padding(.horizontal, 20)
                         .padding(.top, 8)
                         .allowsHitTesting(false)
                 }
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+            .safeAreaBar(edge: .bottom, spacing: 0) {
                 NoteMicBar(noteID: id)
             }
             .toolbar {
@@ -170,24 +190,32 @@ struct NoteEditorView: View {
                         newTitle = note.title
                         renaming = true
                     } label: {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 4) {
                             Text(note.displayTitle)
-                                .font(.ui(17, .medium))
+                                .font(.murmur(.headline))
                                 .lineLimit(1)
                                 .truncationMode(.tail)
-                            Image(systemName: "pencil")
-                                .font(.system(size: 14))
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 12, weight: .semibold))
                         }
-                        .foregroundStyle(Palette.text)
+                        .foregroundStyle(Theme.ink)
                         // A title made of the note's first line would run under the bar's buttons.
                         .frame(maxWidth: 220)
                     }
                     .accessibilityLabel("Rename, \(note.displayTitle)")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    ShareLink(item: note.body) { Image(systemName: "square.and.arrow.up") }
-                        .disabled(note.body.isEmpty)
+                    ShareLink(item: note.body) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 19, weight: .regular))
+                            .foregroundStyle(Theme.ink)
+                            .frame(width: 44, height: 44)
+                            .contentShape(.rect)
+                    }
+                    .disabled(note.body.isEmpty)
+                    .accessibilityLabel("Share")
                 }
+                .sharedBackgroundVisibility(.hidden)
             }
     }
 
@@ -217,50 +245,52 @@ struct NoteEditorView: View {
     }
 }
 
-/// The note's mic, bottom right as in Wispr Flow. While it listens: ✕ to drop the dictation, the
-/// time, and the mic turned stop button, ringed by the voice's level.
+/// The note's mic, in the middle at the bottom. While it listens it is red, ringed by the voice,
+/// with ✕ on its left to drop the dictation and the time on its right.
 private struct NoteMicBar: View {
     let noteID: UUID
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var listeningSince = Date()
 
     var body: some View {
         let phase = model.noteDictation.phase(for: noteID)
-        HStack(spacing: 12) {
-            Spacer(minLength: 0)
-            if phase == .listening || phase == .processing {
-                HStack(spacing: 10) {
-                    if phase == .listening {
-                        Button { model.noteDictation.cancel() } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(Palette.textSecondary)
-                                .frame(width: 36, height: 36)
-                                .background(Palette.canvas, in: .circle)
-                        }
-                        .accessibilityLabel("Cancel dictation")
-                        Text(timerInterval: listeningSince...Date.distantFuture, countsDown: false)
-                            .font(.ui(16, .medium).monospacedDigit())
-                            .foregroundStyle(Palette.text)
-                            .frame(minWidth: 44, alignment: .leading)
-                            .accessibilityLabel("Listening")
-                    } else {
-                        Text("Writing…")
-                            .font(.ui(16, .medium))
-                            .foregroundStyle(Palette.textSecondary)
+        HStack(spacing: 20) {
+            Group {
+                if phase == .listening {
+                    Button { model.noteDictation.cancel() } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.ink)
+                            .frame(width: 44, height: 44)
+                            .overlay { Circle().strokeBorder(Theme.ink, lineWidth: 1.5) }
+                            .contentShape(.circle)
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Cancel dictation")
+                    .transition(.opacity)
                 }
-                .padding(.leading, 6)
-                .padding(.trailing, 14)
-                .padding(.vertical, 6)
-                .background(Palette.paper, in: .capsule)
-                .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
             }
+            .frame(width: 84, alignment: .trailing)
             micButton(phase)
+            Group {
+                switch phase {
+                case .listening:
+                    Text(timerInterval: listeningSince...Date.distantFuture, countsDown: false)
+                        .font(.murmur(.headline).monospacedDigit())
+                        .foregroundStyle(Theme.ink)
+                        .accessibilityLabel("Listening")
+                case .processing:
+                    Text("Writing…")
+                        .font(.murmur(.subhead, weight: .semibold))
+                        .foregroundStyle(Theme.second)
+                case .idle, .starting:
+                    EmptyView()
+                }
+            }
+            .frame(width: 84, alignment: .leading)
         }
-        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 14)
         .padding(.bottom, 12)
         .animation(.snappy(duration: 0.25), value: phase)
         .onChange(of: phase) { _, new in
@@ -273,43 +303,46 @@ private struct NoteMicBar: View {
             Task { await model.noteDictation.toggle(for: noteID) }
         } label: {
             ZStack {
-                if phase == .listening { LevelRings(reduceMotion: reduceMotion) }
+                // Red only while the microphone is open for this note.
                 Circle()
-                    .fill(Palette.ink)
-                    .frame(width: 64, height: 64)
-                    .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+                    .fill(phase == .listening ? Theme.live : Theme.ink)
                 switch phase {
                 case .idle:
-                    Image(systemName: "mic.fill").font(.system(size: 24, weight: .medium)).foregroundStyle(.white)
+                    Image(systemName: "mic").font(.system(size: 24, weight: .medium)).foregroundStyle(Theme.onInk)
                 case .listening:
-                    Image(systemName: "stop.fill").font(.system(size: 20, weight: .medium)).foregroundStyle(.white)
+                    RoundedRectangle(cornerRadius: 4).fill(Theme.onLive).frame(width: 20, height: 20)
                 case .starting, .processing:
-                    ProgressView().tint(.white)
+                    ProgressView().tint(Theme.onInk)
                 }
             }
-            .frame(width: 84, height: 84)
+            .frame(width: 64, height: 64)
+            .background {
+                if phase == .listening { NoteEchoRings() }
+            }
             .contentShape(.circle)
         }
+        .buttonStyle(.bare)
         .disabled(phase == .starting || phase == .processing)
         .accessibilityLabel(phase == .listening ? "Stop dictation" : "Dictate")
         .accessibilityHint(phase == .listening ? "Inserts what you said at the cursor" : "")
     }
 }
 
-/// Rings around the stop button that swell with the voice (the session's published level).
-private struct LevelRings: View {
-    let reduceMotion: Bool
+/// The echo rings around the stop button, fed by the session's published level every 50 ms. On
+/// screen only while a note is being dictated.
+private struct NoteEchoRings: View {
     @Environment(AppModel.self) private var model
+    @State private var levels: [Double] = []
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.05)) { _ in
-            let level = Double(model.transport.currentState().level) / 255
-            Circle()
-                .stroke(Palette.ink.opacity(reduceMotion ? 0.15 + level * 0.5 : 0.25), lineWidth: 2)
-                .frame(width: 64, height: 64)
-                .scaleEffect(reduceMotion ? 1.18 : 1.06 + min(1, level * 1.6) * 0.22)
-                .animation(.easeOut(duration: 0.12), value: level)
-        }
-        .accessibilityHidden(true)
+        EchoRingsView(levels: levels, diameter: 64)
+            .task {
+                while !Task.isCancelled {
+                    let level = Double(model.transport.currentState().level) / 255
+                    // As many samples as the outermost ring trails by.
+                    levels = Array((levels + [level]).suffix(EchoRings.count * EchoRings.lag + 2))
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+            }
     }
 }

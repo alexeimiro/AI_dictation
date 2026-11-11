@@ -5,6 +5,8 @@ import SwiftUI
 public struct MurmurButtonStyle: ButtonStyle {
     public enum Kind: Sendable {
         case primary, secondary
+        /// "Continue with Apple": pure black with a white label, which Apple's guidelines ask for.
+        case apple
     }
 
     public enum Size: Sendable {
@@ -41,12 +43,20 @@ public struct MurmurButtonStyle: ButtonStyle {
 
     private var background: Color {
         guard isEnabled else { return Theme.fill }
-        return kind == .primary ? Theme.ink : Theme.canvas
+        return switch kind {
+        case .primary: Theme.ink
+        case .secondary: Theme.canvas
+        case .apple: .black
+        }
     }
 
     private var foreground: Color {
         guard isEnabled else { return Theme.third }
-        return kind == .primary ? Theme.onInk : Theme.ink
+        return switch kind {
+        case .primary: Theme.onInk
+        case .secondary: Theme.ink
+        case .apple: .white
+        }
     }
 }
 
@@ -54,6 +64,22 @@ extension ButtonStyle where Self == MurmurButtonStyle {
     public static func murmur(_ kind: MurmurButtonStyle.Kind, size: MurmurButtonStyle.Size = .large) -> MurmurButtonStyle {
         MurmurButtonStyle(kind, size: size)
     }
+}
+
+/// A button that is only its label: it fades a little while pressed and doesn't dim when it is
+/// disabled, so a label can show its own busy state.
+public struct BareButtonStyle: ButtonStyle {
+    public init() {}
+
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.7 : 1)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+extension ButtonStyle where Self == BareButtonStyle {
+    public static var bare: BareButtonStyle { BareButtonStyle() }
 }
 
 /// The old button names, drawn as the new capsules until onboarding and the remaining screens are
