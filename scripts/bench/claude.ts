@@ -1,6 +1,7 @@
 // Benchmark-only: the cleanup and translation step on a Claude model, with exactly the prompt the
 // `cleanup` function sends OpenAI and the same output guards, so the two compare like for like.
-// Production stays on OpenAI (supabase/functions/_shared/cleanup.ts).
+// Production runs Claude through `runCleanup` (supabase/functions/_shared/cleanup.ts) when a model
+// secret names one; this copy has no retry and its own thinking settings.
 import Anthropic from "npm:@anthropic-ai/sdk@1.2.0";
 import { buildInstructionParts } from "../../supabase/functions/_shared/cleanup.ts";
 import {

@@ -1,9 +1,10 @@
 // Live checks against the real model. Costs money; opt in with:
 //   RUN_GOLDEN=1 OPENAI_API_KEY=... deno test --allow-env --allow-net supabase/functions/cleanup/golden_test.ts
+// A Claude model (CLEANUP_MODEL=claude-…) takes ANTHROPIC_API_KEY instead.
 // The English set guards the shared rules; the `ru:` set guards the Russian language pack. The
 // two probes at the end print latency by dictation length and the token size of each system block.
 import { assert, assertEquals, assertFalse } from "jsr:@std/assert@1";
-import { type CleanupOutcome, DEFAULT_EFFORT, DEFAULT_MODEL, runCleanup } from "../_shared/cleanup.ts";
+import { apiKeyName, type CleanupOutcome, DEFAULT_EFFORT, DEFAULT_MODEL, runCleanup } from "../_shared/cleanup.ts";
 import { countWords } from "../_shared/text.ts";
 import type { CleanupRequest } from "../_shared/types.ts";
 
@@ -20,7 +21,7 @@ function golden(name: string, defaults: Partial<CleanupRequest>, fn: (clean: Cle
     sanitizeResources: false,
     sanitizeOps: false,
     async fn() {
-      const apiKey = Deno.env.get("OPENAI_API_KEY") ?? "";
+      const apiKey = Deno.env.get(apiKeyName(model)) ?? "";
       await fn(async (partial) => {
         const outcome = await runCleanup({
           dictationId: crypto.randomUUID(),

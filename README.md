@@ -1,7 +1,7 @@
 # Murmur
 
 A voice keyboard for iOS. You dictate in any app, OpenAI transcribes the speech, and an OpenAI
-model cleans up the text before the keyboard inserts it. "Murmur" is a working name: it is set in
+or Claude model (whichever `CLEANUP_MODEL` names) cleans up the text before the keyboard inserts it. "Murmur" is a working name: it is set in
 `Config/Base.xcconfig` and `Brand.swift`.
 
 The product plan, decisions, design system and phases are in [docs/PLAN.md](docs/PLAN.md).
@@ -17,7 +17,7 @@ which only counts while the keyboard is off screen.
 
 ```
 Keyboard ext ──command file + Darwin notify──► App session (hot mic) ──► transcribe fn (OpenAI)
-     ▲ libnotify state (status, mic level)                                    │   └► cleanup fn (OpenAI)
+     ▲ libnotify state (status, mic level)                                    │   └► cleanup fn (OpenAI or Claude)
      └────────────── result file {requestId, documentIdentifier, text} ◄─────┘
 ```
 
@@ -168,14 +168,17 @@ The `cleanup` function sends OpenAI's Responses API one system prompt in three p
 rules, a language pack (English, Russian, or one named after any other language; with no tag, one
 that keeps whatever language the transcript is in) and the
 per-user context last — so every user of a language shares the cached prefix (`prompt_cache_key`
-per language). Requests are sent with `store: false`. Environment knobs (`supabase/functions/.env` locally,
+per language). Requests are sent with `store: false`. A `claude-` model goes to Anthropic's Messages
+API instead, with the same three parts as cached system blocks and the same output guards; `dictate`
+picks the provider the same way. Environment knobs (`supabase/functions/.env` locally,
 `supabase secrets set NAME=value` for a hosted project):
 
 | Variable | Default | What it does |
 |---|---|---|
-| `OPENAI_API_KEY` | — | Required by `cleanup` and `transcribe`. Without it cleanup answers 503 and the app inserts its locally formatted text, and transcription answers 503 and the app falls back to on-device recognition where a model is installed. |
-| `CLEANUP_MODEL` | `gpt-6-astra` | The cleanup model (`gpt-6.1-sol` costs less; `gpt-6.1-terra` is faster). |
-| `CLEANUP_EFFORT` | `low` | Reasoning effort (`none` works on Terra and Luna only). |
+| `OPENAI_API_KEY` | — | Required by `transcribe` and `dictate`, and by `cleanup` with an OpenAI model. Without it cleanup answers 503 and the app inserts its locally formatted text, and transcription answers 503 and the app falls back to on-device recognition where a model is installed. |
+| `ANTHROPIC_API_KEY` | — | Required by `cleanup` and `dictate` when `CLEANUP_MODEL` or `TRANSLATE_MODEL` is a `claude-` model; missing, they answer 503 as above. |
+| `CLEANUP_MODEL` | `gpt-6-astra` | The cleanup model (`gpt-6.1-sol` costs less; `gpt-6.1-terra` is faster). A `claude-` model (e.g. `claude-haiku-5-5`) runs on Anthropic. |
+| `CLEANUP_EFFORT` | `low` | Reasoning effort (`none` works on Terra and Luna only). On Claude, `none` means low effort with thinking off where the model allows it (Claude Haiku 5.5 does). |
 | `CLEANUP_DEADLINE_MS` | `9000` | Hard bound on the whole call; keep it below the app's 11 s request timeout. |
 | `CLEANUP_DISABLED` | unset | `1` answers 503 before any database or model call (kill switch). |
 | `TRANSCRIBE_MODEL` | `gpt-transcribe` | OpenAI's transcription model. Older models (`gpt-4o-transcribe`, shut down 2027-02-26) get the language and terms as `language` / `prompt`. |

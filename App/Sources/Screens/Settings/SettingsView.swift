@@ -151,8 +151,8 @@ struct SettingsView: View {
                     .settingRow()
                 }
                 Text(model.account?.isSignedIn == true
-                     ? "Your dictionary, snippets and notes are saved to your account, so they’re on every device you sign in on. Transcripts and recordings stay on this iPhone. To write your text, the recording and its transcript go to OpenAI, which doesn’t train on them; Murmur’s servers don’t keep either."
-                     : "Transcripts, recordings, your dictionary, snippets and notes stay on this iPhone; sign in to have the dictionary, snippets and notes on your other devices too. To write your text, the recording and its transcript go to OpenAI, which doesn’t train on them; Murmur’s servers don’t keep either.")
+                     ? "Your dictionary, snippets and notes are saved to your account, so they’re on every device you sign in on. Transcripts and recordings stay on this iPhone. To write your text, the recording goes to OpenAI and, for Improve my grammar or a translation, its transcript to Anthropic; neither trains on them, and Murmur’s servers don’t keep either."
+                     : "Transcripts, recordings, your dictionary, snippets and notes stay on this iPhone; sign in to have the dictionary, snippets and notes on your other devices too. To write your text, the recording goes to OpenAI and, for Improve my grammar or a translation, its transcript to Anthropic; neither trains on them, and Murmur’s servers don’t keep either.")
                     .font(.murmur(.footnote))
                     .foregroundStyle(Theme.third)
                     .padding(.vertical, 12)

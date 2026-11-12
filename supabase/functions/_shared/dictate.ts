@@ -3,7 +3,15 @@
 // already has, and warm mode
 // opens the connections a dictation needs while the user is still speaking. Everything the handler
 // talks to is injected (`DictateDeps`), so the tests drive it offline.
-import { type CleanupOutcome, describeCleanupError, runCleanup } from "./cleanup.ts";
+import {
+  apiKeyName,
+  type CleanupOutcome,
+  describeCleanupError,
+  failureReason,
+  isClaudeModel,
+  pingClaude,
+  runCleanup,
+} from "./cleanup.ts";
 import type { DictateConfig } from "./config.ts";
 import { type Caller, clientInfo, corsHeaders, json } from "./http.ts";
 import type { Preflight } from "./preflight.ts";
@@ -56,6 +64,11 @@ export interface DictateDeps {
   config: DictateConfig;
   /** OPENAI_API_KEY. Without it, a request that passes the checks gets 503 and a warm-up skips OpenAI. */
   apiKey: string | undefined;
+  /**
+   * ANTHROPIC_API_KEY, for a `claude-` translation or grammar model. Without it, a request that
+   * needs that model gets 503 and a warm-up skips Anthropic.
+   */
+  anthropicApiKey: string | undefined;
   /** The caller of the bearer token, or null (401). */
   authenticate(request: Request): Promise<Caller | null>;
   /** `dictation_preflight` in the scope and for the dictation `preflightFor` picks; throws when the RPC fails (503). */
@@ -66,7 +79,7 @@ export interface DictateDeps {
   recordUsage(caller: Caller, dictationId: string, words: number): PromiseLike<unknown>;
   /** Runs work after the reply is sent. */
   background(work: PromiseLike<unknown>): void;
-  /** Replaces `fetch` for the OpenAI calls. */
+  /** Replaces `fetch` for the OpenAI and Anthropic calls. */
   fetcher?: typeof fetch;
   /** The handler's clock in ms (`performance.now`): the phases, the audio budget and the warm memo. */
   now?: () => number;
@@ -270,13 +283,6 @@ function describeTranscriptionError(error: unknown, request: Request): string {
   return "transcription failed";
 }
 
-/** Why an audio-mode translation is unavailable, for the reply. */
-function unavailableReason(error: unknown): "deadline" | "openai_connection" | "openai_error" {
-  if (isAbort(error)) return "deadline";
-  if (error instanceof TypeError) return "openai_connection";
-  return "openai_error";
-}
-
 function badRequest(detail: string): Response {
   return json({ error: "bad_request", detail }, 400);
 }
@@ -337,7 +343,7 @@ function translated(outcome: CleanupOutcome, written: string | undefined): Trans
 }
 
 export function createDictateHandler(deps: DictateDeps): (request: Request) => Promise<Response> {
-  const { config, apiKey } = deps;
+  const { config, apiKey, anthropicApiKey } = deps;
   const now = deps.now ?? (() => performance.now());
   const fetcher = deps.fetcher ?? fetch;
   const begin = deps.worker ?? (() => beginRequest());
@@ -346,11 +352,15 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
     ((ms: number, request?: Request) =>
       request ? AbortSignal.any([request.signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms));
   /** When this isolate last made each warm-up round trip. */
-  const warmedAt = { openai: -Infinity, database: -Infinity };
+  const warmedAt = { openai: -Infinity, anthropic: -Infinity, database: -Infinity };
+  /** The Claude model a dictation may call, which a warm-up looks up; none while both models are OpenAI's. */
+  const claudeModel = [config.translation.model, config.cleanup.model].find(isClaudeModel);
 
   const perMinute = (caller: Caller) => caller.isAnonymous ? config.anonymousPerMinute : config.perMinute;
   /** A translation runs as `cleanup` translates; Improve my grammar as it cleans up. */
   const modelConfig = (request: CleanupRequest) => request.targetLanguage ? config.translation : config.cleanup;
+  /** The key of `model`'s provider. */
+  const keyFor = (model: string) => isClaudeModel(model) ? anthropicApiKey : apiKey;
 
   /**
    * Everything before OpenAI. The token is checked from the headers; once it names a caller, the
@@ -410,9 +420,9 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
     return { caller: user, body: parsed.value, preflight: checked.value };
   }
 
-  function noKey(): Response {
+  function noKey(name: string): Response {
     // Like an outage: the app falls back on the device (audio) or fails the translation (text).
-    console.error("OPENAI_API_KEY is not set");
+    console.error(`${name} is not set`);
     return unavailable();
   }
 
@@ -500,8 +510,12 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
    * budget (the app waits 30 s).
    */
   async function dictateAudio(d: Dictation & { body: AudioBody }): Promise<Response> {
-    if (!apiKey) return noKey();
+    // Both keys before the transcription, so a missing one costs no audio upload to OpenAI.
+    if (!apiKey) return noKey("OPENAI_API_KEY");
     const { request, phases, body } = d;
+    const model = modelConfig(body.translation);
+    const modelKey = keyFor(model.model);
+    if (!modelKey) return noKey(apiKeyName(model.model));
     const transcribe = config.transcribe;
     phases.ready();
     try {
@@ -546,7 +560,6 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
       return reply(d, { status: "raw", reason: "short", text: "", usage: words, outcome: null });
     }
 
-    const model = modelConfig(body.translation);
     const budgetMs = Math.min(model.deadlineMs, config.deadlineMs - (now() - d.startedAt));
     if (budgetMs < MIN_MODEL_MS) return reply(d, unavailableResult("deadline"), { budgetMs });
     try {
@@ -555,7 +568,7 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
         runCleanup(d.translation, {
           ...model,
           deadlineMs: budgetMs,
-          apiKey,
+          apiKey: modelKey,
           signal: signal(budgetMs, request),
           fetcher,
         }),
@@ -565,7 +578,7 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
       // The transcript is kept, so the app can retry the translation alone; nothing is counted.
       const label = describeCleanupError(error);
       console.error(label, errorName(error));
-      return reply(d, unavailableResult(unavailableReason(error)), { budgetMs, error: label });
+      return reply(d, unavailableResult(failureReason(error)), { budgetMs, error: label });
     }
   }
 
@@ -573,13 +586,19 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
   async function dictateText(d: Dictation & { body: TextBody }): Promise<Response> {
     const { request, phases, translation, body } = d;
     if (countWords(translation.transcript, translation.language) === 0) return reply(d, EMPTY);
-    if (!apiKey) return noKey();
     const settings = config.translation;
+    const modelKey = keyFor(settings.model);
+    if (!modelKey) return noKey(apiKeyName(settings.model));
     phases.ready();
     try {
       const outcome = await phases.mark(
         "modelMs",
-        runCleanup(translation, { ...settings, apiKey, signal: signal(settings.deadlineMs, request), fetcher }),
+        runCleanup(translation, {
+          ...settings,
+          apiKey: modelKey,
+          signal: signal(settings.deadlineMs, request),
+          fetcher,
+        }),
       );
       return reply(d, translated(outcome, body.translation.targetLanguage));
     } catch (error) {
@@ -591,7 +610,10 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
     }
   }
 
-  /** Warm mode: the token, then OpenAI and the database, each skipped while this isolate is warm. */
+  /**
+   * Warm mode: the token, then OpenAI, Anthropic (with a Claude model configured) and the database,
+   * each skipped while this isolate is warm.
+   */
   async function warm(
     request: Request,
     worker: RequestStart,
@@ -606,10 +628,14 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
     if (!caller.value) return json({ error: "unauthorized" }, 401);
     const user = caller.value;
 
-    const [openai, database] = await Promise.all([
+    const [openai, anthropic, database] = await Promise.all([
       // Free: it opens TLS and HTTP/2 to OpenAI in the isolate's pool, and a misconfigured
       // translation model shows in the log before a dictation needs it.
       warmUp("openai", apiKey ? () => pingOpenAI(apiKey) : null),
+      // The same for Anthropic, only when a Claude model is configured.
+      claudeModel
+        ? warmUp("anthropic", anthropicApiKey ? () => pingAnthropic(claudeModel, anthropicApiKey) : null)
+        : null,
       // Read only: it opens the isolate's connection to the database API. No writes.
       warmUp("database", () => pingDatabase(user)),
     ]);
@@ -617,12 +643,14 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
     const timings = {
       authMs,
       ...(openai.ms === undefined ? {} : { openaiMs: openai.ms }),
+      ...(anthropic?.ms === undefined ? {} : { anthropicMs: anthropic.ms }),
       ...(database.ms === undefined ? {} : { dbMs: database.ms }),
       totalMs,
     };
     log(JSON.stringify({
       event: "dictate_warm",
       openai: openai.state,
+      ...(anthropic ? { anthropic: anthropic.state } : {}),
       database: database.state,
       isAnonymous: user.isAnonymous,
       ...worker,
@@ -651,7 +679,8 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
   // The pings' signals leave out the request: a caller hanging up would fail them, and a failed
   // round trip clears the memo, so each hung-up warm-up could make them again.
   async function pingOpenAI(key: string): Promise<boolean> {
-    const model = config.translation.model;
+    // With a Claude translation model, OpenAI still transcribes: its model is looked up instead.
+    const model = isClaudeModel(config.translation.model) ? config.transcribe.model : config.translation.model;
     try {
       const response = await fetcher(`https://api.openai.com/v1/models/${encodeURIComponent(model)}`, {
         headers: { Authorization: `Bearer ${key}` },
@@ -659,12 +688,16 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
       });
       // Read to the end, so the connection goes back to the pool.
       await response.arrayBuffer();
-      if (!response.ok) console.error(`warm-up: OpenAI answered ${response.status} for the translation model ${model}`);
+      if (!response.ok) console.error(`warm-up: OpenAI answered ${response.status} for the model ${model}`);
       return true;
     } catch (error) {
       console.error("warm-up: OpenAI unreachable", errorName(error));
       return false;
     }
+  }
+
+  function pingAnthropic(model: string, key: string): Promise<boolean> {
+    return pingClaude(model, { apiKey: key, signal: signal(WARM_FETCH_MS), fetcher });
   }
 
   async function pingDatabase(caller: Caller): Promise<boolean> {

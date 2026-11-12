@@ -17,9 +17,10 @@ Murmur collects, why, and the choices you have. Questions: miralex13@gmail.com.
   us) and an account ID. They let you sign in and keep your plan and library on every device.
 - **Your recordings, to transcribe them:** when you dictate, the audio goes from the Murmur app
   to our server and on to OpenAI, which turns it into text. If you use Improve my grammar or
-  translation, the text goes to OpenAI too. Our server doesn't keep the audio or the text.
-  OpenAI processes them to return the result. Under its API terms it doesn't use them to train
-  its models, and it may keep them for up to 30 days to detect abuse.
+  translation, the text goes to Anthropic, whose Claude model writes it. Our server doesn't keep
+  the audio or the text. OpenAI and Anthropic process them to return the result. Under their API
+  terms neither uses them to train its models, and each may keep them for a limited time to detect
+  abuse (OpenAI for up to 30 days).
 - **Your dictionary, snippets and notes:** while you're signed in, they're saved to your account
   so they're on every device you use. They aren't shared with anyone.
 - **Invites:** if you join with a friend's invite code, we record whose code it was, so you each
@@ -39,7 +40,8 @@ We don't track you across apps and websites, show ads, or sell or rent your data
 ## Who processes it for us
 
 - **Supabase** hosts our server, database and sign-in, in the European Union (Frankfurt).
-- **OpenAI** transcribes, translates and corrects dictations.
+- **OpenAI** transcribes dictations.
+- **Anthropic** corrects and translates them (Improve my grammar and translation).
 - **Apple** handles Sign in with Apple and App Store purchases. **Google** handles Sign in with
   Google.
 

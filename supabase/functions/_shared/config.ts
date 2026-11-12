@@ -15,7 +15,7 @@ export function envNumber(env: Env, name: string, fallback: number): number {
 /** The settings of one Responses API call (`runCleanup`). */
 export interface ModelConfig {
   model: string;
-  /** OpenAI reasoning effort (none, minimal, low, …; model-dependent). */
+  /** Reasoning effort (none, minimal, low, …; model-dependent; see `CleanupOptions.effort`). */
   effort: string;
   /** Hard bound on the whole call. */
   deadlineMs: number;

@@ -6,11 +6,16 @@ import {
   assertRejects,
   assertStringIncludes,
 } from "jsr:@std/assert@1";
+import Anthropic from "npm:@anthropic-ai/sdk@1.2.0";
 import {
+  apiKeyName,
   buildInstructionParts,
   buildResponsesRequest,
+  claudeThinking,
   CleanupAPIError,
   describeCleanupError,
+  failureReason,
+  pingClaude,
   runCleanup,
 } from "../_shared/cleanup.ts";
 import { cleanupConfig, translationConfig } from "../_shared/config.ts";
@@ -86,7 +91,8 @@ function fakeFetch(body: Record<string, unknown>, captured: Captured = {}, statu
   return ((url: string, init: RequestInit) => {
     captured.url = url;
     captured.init = init;
-    captured.body = JSON.parse(String(init.body));
+    // A GET (the SDK's model lookup) has no body.
+    captured.body = init.body === undefined ? undefined : JSON.parse(String(init.body));
     if (failure) return Promise.reject(failure);
     return Promise.resolve(Response.json(body, { status }));
   }) as unknown as typeof fetch;
@@ -410,6 +416,137 @@ Deno.test("the effort and model follow the options", () => {
   assertEquals(body.reasoning, { effort: "none" });
   assertEquals(buildResponsesRequest(request, resolveLanguage("en-US"), { model: "m" }).reasoning, { effort: "low" });
 });
+
+/** A Messages API reply with the given text, merged with `overrides`. */
+function message(text: string, overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "msg_test",
+    type: "message",
+    role: "assistant",
+    model: "claude-haiku-5-5",
+    content: [{ type: "text", text }],
+    stop_reason: "end_turn",
+    stop_sequence: null,
+    usage: { input_tokens: 40, output_tokens: 12, cache_read_input_tokens: 1900, cache_creation_input_tokens: 10 },
+    ...overrides,
+  };
+}
+
+/** `options` for Claude Haiku 5.5 as the hosted secrets would set it: CLEANUP_EFFORT stays "none". */
+function claude(fetcher: typeof fetch) {
+  return { ...options(fetcher), model: "claude-haiku-5-5", effort: "none", apiKey: "sk-ant-test" };
+}
+
+/** An Anthropic error reply the SDK won't retry. */
+function anthropicError(status: number) {
+  return (() =>
+    Promise.resolve(Response.json(
+      { type: "error", error: { type: "rate_limit_error", message: "secret" } },
+      { status, headers: { "x-should-retry": "false" } },
+    ))) as unknown as typeof fetch;
+}
+
+Deno.test("a claude- model goes to Anthropic with the same instructions, each part a cache breakpoint", async () => {
+  const captured: Captured = {};
+  const outcome = await runCleanup(request, claude(fakeFetch(message("Can you send me the report by Friday?"), captured)));
+  assertEquals(captured.url, "https://api.anthropic.com/v1/messages");
+  // SDK 1.x sends an API key as a bearer token.
+  assertEquals(new Headers(captured.init!.headers).get("authorization"), "Bearer sk-ant-test");
+  const body = captured.body!;
+  assertEquals([body.model, body.max_tokens], ["claude-haiku-5-5", 16000]);
+  assertEquals([body.thinking, body.output_config], [{ type: "disabled" }, { effort: "low" }]);
+  assertEquals(
+    body.system,
+    buildInstructionParts(request, resolveLanguage("en-US"))
+      .map((text) => ({ type: "text", text, cache_control: { type: "ephemeral" } })),
+  );
+  assertEquals((body.system as unknown[]).length, 3, "rules, language pack, per-user context");
+  assertEquals(body.messages, [{ role: "user", content: buildTranscriptMessage(request.transcript) }]);
+
+  assertEquals([outcome.status, outcome.text], ["cleaned", "Can you send me the report by Friday?"]);
+  assertEquals([outcome.model, outcome.language, outcome.stopReason, outcome.ttftMs], ["claude-haiku-5-5", "en", "end_turn", null]);
+  // Input counted as OpenAI counts it: uncached, cache reads and cache writes together.
+  assertEquals(outcome.usage, { input: 1950, output: 12, cacheRead: 1900, cacheWrite: 10 });
+});
+
+Deno.test("a Claude translation gets the translation prompt and the translation guard", async () => {
+  const captured: Captured = {};
+  const turkish = "Raporu cumaya kadar gönderebilir misin? Çok teşekkürler!";
+  const outcome = await runCleanup(translationRequest, claude(fakeFetch(message(turkish), captured)));
+  assertEquals(
+    (captured.body!.system as { text: string }[]).map((block) => block.text),
+    [TRANSLATION_RULES, buildTranslationContext(translationRequest, resolveLanguage("ru-RU"))],
+  );
+  assertEquals(captured.body!.messages, [{ role: "user", content: buildTranslationMessage(translationRequest.transcript, "tr-TR") }]);
+  assertEquals([outcome.status, outcome.text], ["cleaned", turkish]);
+
+  const untranslated = await runCleanup(translationRequest, claude(fakeFetch(message(translationRequest.transcript))));
+  assertEquals([untranslated.status, untranslated.reason], ["raw", "untranslated"]);
+});
+
+Deno.test("Claude refusals, truncation and answers fall back to the transcript", async () => {
+  for (const reason of ["refusal", "max_tokens"]) {
+    const outcome = await runCleanup(request, claude(fakeFetch(message("", { stop_reason: reason }))));
+    assertEquals([outcome.status, outcome.reason, outcome.text], ["raw", reason, request.transcript]);
+  }
+  const answer = await runCleanup(request, claude(fakeFetch(message("Sure! Here's a summary of the report you asked for."))));
+  assertEquals([answer.status, answer.reason], ["raw", "assistant_reply"]);
+});
+
+Deno.test("Claude thinking: OpenAI's none turns it off where the model allows; Claude's levels keep it adaptive", () => {
+  const off = { thinking: { type: "disabled" as const }, output_config: { effort: "low" as const } };
+  assertEquals(claudeThinking("claude-haiku-5-5", "none"), off);
+  assertEquals(claudeThinking("claude-haiku-5-5", "minimal"), off);
+  assertEquals(claudeThinking("claude-haiku-5-5", "medium"), { output_config: { effort: "medium" } });
+  assertEquals(claudeThinking("claude-sonnet-5-5", "none"), { thinking: { type: "between_tools" }, output_config: { effort: "low" } });
+  assertEquals(claudeThinking("claude-opus-5-5", "none"), { output_config: { effort: "low" } }, "Opus 5.5 always thinks");
+  assertEquals([apiKeyName("claude-haiku-5-5"), apiKeyName("gpt-6.1-terra")], ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]);
+});
+
+Deno.test("Anthropic failures keep only the status and type, and get log labels and dictate reasons", async () => {
+  const limited = await assertRejects(() => runCleanup(request, claude(anthropicError(429))), CleanupAPIError);
+  assertEquals([limited.status, limited.code, limited.provider], [429, "rate_limit_error", "anthropic"]);
+  assertFalse(limited.message.includes("secret"));
+  assertEquals([describeCleanupError(limited), failureReason(limited)], ["anthropic rate limited", "anthropic_error"]);
+  const failed = await assertRejects(() => runCleanup(request, claude(anthropicError(500))), CleanupAPIError);
+  assertEquals(describeCleanupError(failed), "anthropic error 500");
+
+  const hungUp = new AbortController();
+  hungUp.abort();
+  const aborted = await assertRejects(() =>
+    runCleanup(request, { ...claude(fakeFetch(message("never"))), signal: hungUp.signal })
+  );
+  assertEquals([describeCleanupError(aborted), failureReason(aborted)], ["cleanup deadline", "deadline"]);
+  const timedOut = new Anthropic.APIConnectionTimeoutError();
+  assertEquals([describeCleanupError(timedOut), failureReason(timedOut)], ["cleanup deadline", "deadline"]);
+  const offline = new Anthropic.APIConnectionError({ message: "Connection error." });
+  assertEquals([describeCleanupError(offline), failureReason(offline)], ["anthropic connection", "anthropic_connection"]);
+
+  // OpenAI's keep their reasons.
+  assertEquals(failureReason(new CleanupAPIError(500, null)), "openai_error");
+  assertEquals(failureReason(new TypeError("network")), "openai_connection");
+  assertEquals(failureReason(new DOMException("deadline", "TimeoutError")), "deadline");
+});
+
+Deno.test("a Claude warm-up counts any answer as through, and only no answer as failed", async () => {
+  const captured: Captured = {};
+  const ping = (fetcher: typeof fetch) => pingClaude("claude-haiku-5-5", { apiKey: "sk-ant-test", signal, fetcher });
+  assert(await ping(fakeFetch({ id: "claude-haiku-5-5", type: "model" }, captured)));
+  assertEquals(captured.url, "https://api.anthropic.com/v1/models/claude-haiku-5-5");
+  assert(await quietly(() => ping(fakeFetch({ type: "error", error: { type: "not_found_error" } }, {}, 404))));
+  assertFalse(await quietly(() => ping(fakeFetch({}, {}, 200, new TypeError("dns")))));
+});
+
+/** Runs `work` with console.error silenced: the failure paths log on purpose. */
+async function quietly<T>(work: () => Promise<T>): Promise<T> {
+  const original = console.error;
+  console.error = () => {};
+  try {
+    return await work();
+  } finally {
+    console.error = original;
+  }
+}
 
 Deno.test("TRANSLATE_* change translations only; unset, translations keep today's cleanup settings", async () => {
   // What the hosted project sets today, then the same with a translation model on top.

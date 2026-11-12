@@ -46,24 +46,45 @@ function responsesReply(text: string): Record<string, unknown> {
   };
 }
 
+/** A Messages API reply with the given text. */
+function messageReply(text: string): Record<string, unknown> {
+  return {
+    id: "msg_test",
+    type: "message",
+    role: "assistant",
+    model: "claude-haiku-5-5",
+    content: [{ type: "text", text }],
+    stop_reason: "end_turn",
+    stop_sequence: null,
+    usage: { input_tokens: 50, output_tokens: 12, cache_read_input_tokens: 1900, cache_creation_input_tokens: 0 },
+  };
+}
+
+/** The hosted secrets with Claude Haiku 5.5 writing the text: CLEANUP_EFFORT stays OpenAI's "none". */
+const CLAUDE = { CLEANUP_MODEL: "claude-haiku-5-5", CLEANUP_EFFORT: "none" };
+
 /** The test's clock, which the fake OpenAI calls move on to stand for their duration. */
 interface Clock {
   advance(ms: number): void;
 }
-/** One fake OpenAI endpoint. */
+/** One fake OpenAI or Anthropic endpoint. */
 type Route = (init: RequestInit, clock: Clock) => Response | Promise<Response>;
 
 interface Setup {
   env?: Record<string, string>;
   apiKey?: string;
+  anthropicApiKey?: string;
   /** The preflight's answer: fields over ALLOWED, an error it throws, or a promise the test settles. */
   preflight?: Partial<Preflight> | Error | (() => Promise<Preflight>);
   transcription?: Route;
   responses?: Route;
   models?: Route;
+  /** Anthropic's /v1/messages. */
+  messages?: Route;
 }
 
 interface Fetched {
+  /** Anthropic's paths are prefixed "anthropic". */
   path: string;
   init: RequestInit;
   /** The JSON body, for the Responses call. */
@@ -98,12 +119,21 @@ function setup(options: Setup = {}) {
       clock.advance(120);
       return Response.json({ id: "gpt-6-astra", object: "model" });
     }),
+    "anthropic/v1/messages": options.messages ?? ((_, clock) => {
+      clock.advance(450);
+      return Response.json(messageReply(TRANSLATION));
+    }),
+    "anthropic/v1/models": (_, clock) => {
+      clock.advance(80);
+      return Response.json({ id: "claude-haiku-5-5", type: "model" });
+    },
   };
   const fetcher = (async (input: string | URL, init: RequestInit = {}) => {
-    const path = new URL(String(input)).pathname;
+    const url = new URL(String(input));
+    const path = url.host === "api.anthropic.com" ? `anthropic${url.pathname}` : url.pathname;
     recorded.events.push(`fetch ${path}`);
     recorded.fetches.push({ path, init, json: typeof init.body === "string" ? JSON.parse(init.body) : undefined });
-    const route = routes[path.startsWith("/v1/models/") ? "/v1/models" : path];
+    const route = routes[path.replace(/\/v1\/models\/.*/, "/v1/models")];
     if (!route) throw new Error(`unexpected fetch ${path}`);
     init.signal?.throwIfAborted();
     // A real call answers later: the caller's phase has started timing by the time it does.
@@ -114,6 +144,7 @@ function setup(options: Setup = {}) {
   const deps: DictateDeps = {
     config: dictateConfig(new Map(Object.entries(options.env ?? {}))),
     apiKey: "apiKey" in options ? options.apiKey : "sk-test",
+    anthropicApiKey: "anthropicApiKey" in options ? options.anthropicApiKey : "sk-ant-test",
     authenticate: (request) => {
       recorded.events.push("auth");
       const token = request.headers.get("Authorization");
@@ -307,6 +338,66 @@ Deno.test("without an OpenAI key, a request that passes the checks gets 503", as
   }
   assertEquals(recorded.preflights.length, 2);
   assertEquals(recorded.fetches, []);
+});
+
+Deno.test("a Claude model writes the text with the Anthropic key; OpenAI still transcribes", async () => {
+  const { handler, recorded } = setup({ env: CLAUDE });
+  const reply = await (await handler(audioRequest())).json();
+  assertEquals([reply.transcript, reply.text, reply.status], [TRANSCRIPT, TRANSLATION, "cleaned"]);
+  assertEquals([reply.transcribeModel, reply.model, reply.timings.modelMs], ["gpt-transcribe", "claude-haiku-5-5", 450]);
+  assertEquals(paths(recorded), ["/v1/audio/transcriptions", "anthropic/v1/messages"]);
+  const [transcription, translation] = recorded.fetches;
+  assertEquals(new Headers(transcription.init.headers).get("authorization"), "Bearer sk-test");
+  assertEquals(new Headers(translation.init.headers).get("authorization"), "Bearer sk-ant-test");
+  assertEquals([translation.json!.model, translation.json!.thinking], ["claude-haiku-5-5", { type: "disabled" }]);
+  assertEquals([recorded.logs[0].model, recorded.logs[0].cachedTokens], ["claude-haiku-5-5", 1900]);
+
+  const text = await (await handler(textRequest())).json();
+  assertEquals([text.text, text.model], [TRANSLATION, "claude-haiku-5-5"]);
+  assertEquals(paths(recorded).at(-1), "anthropic/v1/messages");
+});
+
+Deno.test("each mode takes its own model's provider: Claude grammar beside an OpenAI translation", async () => {
+  const fixed = "Я вчера купил два яблока и одну грушу.";
+  const { handler, recorded } = setup({
+    env: { ...CLAUDE, TRANSLATE_MODEL: "gpt-6.1-terra" },
+    transcription: () => Response.json({ text: "я вчера купил две яблоки и один груша", languages: [{ code: "ru" }] }),
+    messages: () => Response.json(messageReply(fixed)),
+  });
+  const grammar = await (await handler(audioRequest({ ...metadata, targetLanguage: undefined, style: "grammar" }))).json();
+  assertEquals([grammar.text, grammar.model], [fixed, "claude-haiku-5-5"]);
+  const translation = await (await handler(audioRequest())).json();
+  assertEquals(translation.model, "gpt-6-astra-2026-09-01");
+  assertEquals(paths(recorded), [
+    "/v1/audio/transcriptions",
+    "anthropic/v1/messages",
+    "/v1/audio/transcriptions",
+    "/v1/responses",
+  ]);
+});
+
+Deno.test("without the Anthropic key, a Claude model's request gets 503 before any audio is uploaded", async () => {
+  const { handler, recorded } = setup({ env: CLAUDE, anthropicApiKey: undefined });
+  for (const request of [audioRequest(), textRequest()]) {
+    const response = await quietly(() => handler(request));
+    assertEquals(response.status, 503);
+    assertEquals(await response.json(), { error: "dictate_unavailable" });
+  }
+  assertEquals(recorded.fetches, []);
+  // OpenAI's models need no Anthropic key.
+  const openai = setup({ anthropicApiKey: undefined });
+  assertEquals((await openai.handler(audioRequest())).status, 200);
+});
+
+Deno.test("a failed Claude call keeps the transcript, with Anthropic's reason", async () => {
+  const { handler, recorded } = setup({
+    env: CLAUDE,
+    messages: () => Response.json({ type: "error", error: { type: "overloaded_error" } }, { status: 529, headers: { "x-should-retry": "false" } }),
+  });
+  const reply = await quietly(async () => await (await handler(audioRequest())).json());
+  assertEquals([reply.transcript, reply.status, reply.reason, reply.text], [TRANSCRIPT, "unavailable", "anthropic_error", ""]);
+  assertEquals(recorded.logs[0].error, "anthropic error 529");
+  assertEquals(recorded.usage, []);
 });
 
 Deno.test("audio mode: the transcript, its translation and the timings in one reply", async () => {
@@ -597,6 +688,28 @@ Deno.test("warm mode retries a round trip that failed, and skips OpenAI without 
   const reply = await (await keyless.handler(warmRequest())).json();
   assertEquals(Object.keys(reply.timings), ["authMs", "dbMs", "totalMs"]);
   assertEquals(keyless.recorded.fetches, []);
+});
+
+Deno.test("with a Claude model, a warm-up also opens Anthropic, and OpenAI looks up the transcription model", async () => {
+  const { handler, recorded, clock } = setup({ env: CLAUDE });
+  const { timings } = await (await handler(warmRequest())).json();
+  assertEquals(Object.keys(timings), ["authMs", "openaiMs", "anthropicMs", "dbMs", "totalMs"]);
+  assertEquals(paths(recorded).sort(), ["/v1/models/gpt-transcribe", "anthropic/v1/models/claude-haiku-5-5"]);
+  assertEquals(new Headers(recorded.fetches.find((f) => f.path.startsWith("anthropic"))!.init.headers).get("authorization"), "Bearer sk-ant-test");
+  clock.advance(30_000);
+  await (await handler(warmRequest())).json();
+  assertEquals(recorded.logs.map((line) => line.anthropic), ["ok", "memoized"]);
+
+  const keyless = setup({ env: CLAUDE, anthropicApiKey: undefined });
+  const reply = await (await keyless.handler(warmRequest())).json();
+  assertEquals(Object.keys(reply.timings), ["authMs", "openaiMs", "dbMs", "totalMs"]);
+  assertEquals(keyless.recorded.logs[0].anthropic, "no_key");
+
+  // With both models OpenAI's, the log has no Anthropic field and nothing goes there.
+  const openai = setup();
+  await (await openai.handler(warmRequest())).json();
+  assertFalse("anthropic" in openai.recorded.logs[0]);
+  assertEquals(paths(openai.recorded), ["/v1/models/gpt-6-astra"]);
 });
 
 Deno.test("requests refused from their headers are 400s, before any preflight", async () => {

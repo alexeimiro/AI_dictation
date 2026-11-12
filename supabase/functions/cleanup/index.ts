@@ -1,18 +1,20 @@
 // POST /functions/v1/cleanup
-// Turns a transcript into the text the user meant to type, using an OpenAI model.
+// Turns a transcript into the text the user meant to type, using an OpenAI or a Claude model.
 // Body: CleanupRequest (see _shared/types.ts). With `targetLanguage` set it translates instead.
 // Responses:
 //   200 { text, status: "cleaned" | "raw", reason, targetLanguage, words, model, ttftMs, totalMs, remaining, timings }
 //       `reason` says why a reply is "raw" (refusal, guard such as "untranslated"); `targetLanguage`
 //       echoes the language a translation was written in, null for a cleanup. `totalMs` is the
-//       OpenAI call alone; `timings` splits the whole request (_shared/timing.ts).
+//       model call alone; `timings` splits the whole request (_shared/timing.ts).
 //   400 bad_request · 401 unauthorized · 402 limit_reached · 429 rate_limited
 //   502/503 cleanup_unavailable → the app inserts its locally formatted transcript instead.
-// Env: OPENAI_API_KEY (required), CLEANUP_MODEL (default gpt-6-astra), CLEANUP_EFFORT (reasoning
-// effort, default low), CLEANUP_DEADLINE_MS (whole call, default 9000), CLEANUP_DISABLED=1.
+// Env: CLEANUP_MODEL (default gpt-6-astra; a `claude-` model runs on Anthropic), CLEANUP_EFFORT
+// (reasoning effort, default low; none means thinking off on Claude), CLEANUP_DEADLINE_MS (whole
+// call, default 9000), CLEANUP_DISABLED=1, and the model's key: OPENAI_API_KEY, or
+// ANTHROPIC_API_KEY for a Claude model.
 // Translations take TRANSLATE_MODEL and TRANSLATE_EFFORT instead, each defaulting to its CLEANUP_*
 // value (_shared/config.ts).
-import { describeCleanupError, runCleanup } from "../_shared/cleanup.ts";
+import { apiKeyName, describeCleanupError, runCleanup } from "../_shared/cleanup.ts";
 import { cleanupConfig, translationConfig } from "../_shared/config.ts";
 import { adminClient, authenticate, background, clientInfo, corsHeaders, json } from "../_shared/http.ts";
 import { countWords } from "../_shared/text.ts";
@@ -84,15 +86,15 @@ Deno.serve(async (request) => {
     });
   }
 
-  // Without the secret, answer like an outage: the app inserts its locally formatted text.
-  const apiKey = Deno.env.get("OPENAI_API_KEY");
-  if (!apiKey) {
-    console.error("OPENAI_API_KEY is not set");
-    return json({ error: "cleanup_unavailable" }, 503);
-  }
-
   // With no TRANSLATE_* secret set, a translation runs with the cleanup settings, as it always has.
   const { model, effort, deadlineMs } = body.targetLanguage ? translationSettings : cleanupSettings;
+  // Without the model's key, answer like an outage: the app inserts its locally formatted text.
+  const keyName = apiKeyName(model);
+  const apiKey = Deno.env.get(keyName);
+  if (!apiKey) {
+    console.error(`${keyName} is not set`);
+    return json({ error: "cleanup_unavailable" }, 503);
+  }
   phases.ready();
   try {
     const outcome = await phases.mark("modelMs", runCleanup(body, { model, effort, apiKey, deadlineMs }));
