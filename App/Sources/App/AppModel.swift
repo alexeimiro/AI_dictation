@@ -148,7 +148,8 @@ final class AppModel {
                                         recordings: history.recordings,
                                         transcription: TranscriptionClient(functions: functions), dictate: dictate,
                                         warmup: backend.map { BackendWarmup(session: $0, dictate: dictate) },
-                                        timingsLog: timingsLog, consent: { await aiConsent.ensure() })
+                                        timingsLog: timingsLog, consent: { await aiConsent.ensure() },
+                                        signedIn: { Self.maySignedInDictate(backend: backend, launchOptions: launchOptions) })
         self.session = session
         noteDictation = NoteDictation(session: session, library: library)
         self.languages = LanguageSettingsModel(assets: assets, session: session)
@@ -211,6 +212,9 @@ final class AppModel {
         pro.onSynced = { [weak self] in self?.refreshQuota() }
         trial.onGranted = { [weak self] in self?.refreshQuota() }
         backend?.onGuestSession = { [weak self] in self?.claimTrial() }
+        // `Backend.init` has already taken a stored session; Auth's own events come after this.
+        account?.onChange = { [weak self] in self?.accountDidChange() }
+        publishSignIn()
         if !launchOptions.useFixtures && !launchOptions.usesOnboardingFixtures { pro.start() }
         if launchOptions.route == .paywall { showsPaywall = true }
         LiveActivityActions.model = self
@@ -504,6 +508,8 @@ final class AppModel {
     /// Re-runs the cleanup on a stored transcript. Returns a message when it failed.
     func regenerate(_ id: UUID) async -> String? {
         guard let transcript = history.snapshot(id) else { return "Transcript not found" }
+        // Like a dictation, it needs someone signed in (a guest's would sign in anonymously).
+        guard maySignedInDictate else { return "You’re signed out. Sign in again on Home" }
         // The transcript goes to the AI service again, which needs the same OK as a dictation.
         guard await aiConsent.ensure() else { return SessionController.SessionError.aiNotAllowed.localizedDescription }
         do {
@@ -521,9 +527,84 @@ final class AppModel {
         }
     }
 
-    /// "Continue without an account" on the sign-in sheet.
-    func continueAsGuest() {
-        backend?.continueAsGuest()
+    // MARK: Signing in
+
+    /// Murmur records, and its keyboard works, only while someone is signed in.
+    var maySignedInDictate: Bool {
+        Self.maySignedInDictate(backend: backend, launchOptions: launchOptions)
+    }
+
+    static func maySignedInDictate(backend: Backend?, launchOptions: LaunchOptions) -> Bool {
+        maySignedInDictate(hasBackend: backend != nil, accountSignedIn: backend?.account.isSignedIn == true,
+                           fixtureRun: launchOptions.isFixtureRun, fakedAccount: launchOptions.accountState != nil)
+    }
+
+    /// Sign-in is required: a guest, or nobody, may not record. A build without accounts has none
+    /// to require. Screenshot and fixture runs use the configured backend with no session, so they
+    /// count as signed in, unless `-account-state` fakes a signed-out or guest account.
+    nonisolated static func maySignedInDictate(hasBackend: Bool, accountSignedIn: Bool, fixtureRun: Bool,
+                                               fakedAccount: Bool) -> Bool {
+        !hasBackend || accountSignedIn || (fixtureRun && !fakedAccount)
+    }
+
+    /// Tells the keyboard whether anyone is signed in (`SharedSettings.signedOut`), and has one on
+    /// screen look again (it reads the value when the session's state changes): at launch, when
+    /// the account changes and whenever Murmur comes to the front.
+    private func publishSignIn() {
+        let signedOut = !maySignedInDictate
+        let shared = SharedSettings.shared
+        guard shared.signedOut != signedOut else { return }
+        shared.signedOut = signedOut
+        transport.post(.stateChanged)
+    }
+
+    /// The account changed. No session outlives it, since the keyboard's start command reaches a
+    /// live session without `SessionController.start()`. A dictation under way (often the one
+    /// whose request found the account gone) is written first, its words kept: the session ends
+    /// itself after it. Signed in again, a start refused while signed out stops showing its
+    /// reason on Home.
+    private func accountDidChange() {
+        publishSignIn()
+        if maySignedInDictate {
+            if case .failed(let message) = session.phase,
+               message == SessionController.SessionError.signedOut.localizedDescription {
+                session.stop()
+            }
+            return
+        }
+        switch session.phase {
+        case .off, .recording, .processing: break
+        default: session.stop()
+        }
+    }
+
+    /// Where signing in happens: onboarding's own page while onboarding hasn't got past it, or
+    /// else the "Sign in again" sheet. Opened by the keyboard's Log in (`murmur://sign-in`) and
+    /// wherever Murmur won't record while nobody is signed in. Already signed in (the keyboard
+    /// hadn't heard yet), it only tells the keyboard.
+    func showSignIn() {
+        endReturn()
+        publishSignIn()
+        guard !maySignedInDictate else { return }
+        router.isMenuOpen = false
+        showsPaywall = false
+        switch Self.signInDestination(onboardingStep: onboarding.isComplete ? nil : onboarding.step) {
+        case .onboarding: onboarding.send(.signInRequested)
+        case .sheet: signInSheet = .options
+        }
+    }
+
+    enum SignInDestination: Equatable {
+        /// Onboarding's sign-in page: jumped to from the pages before it, or already on it.
+        case onboarding
+        /// The "Sign in again" sheet, over Home or the rest of onboarding.
+        case sheet
+    }
+
+    /// `onboardingStep`: nil once onboarding is complete.
+    nonisolated static func signInDestination(onboardingStep: OnboardingStep?) -> SignInDestination {
+        guard let onboardingStep, onboardingStep.order < OnboardingStep.setupIntro.order else { return .sheet }
+        return .onboarding
     }
 
     /// How the current access token is signed (Debug); nil without a backend or a session.
@@ -559,6 +640,8 @@ final class AppModel {
     /// Note", and Auto open note. `dictating` records into it straight away.
     func openNewNote(dictating: Bool) {
         guard onboarding.isComplete else { return }
+        // A note that couldn't record would only say so: signing in is the way on.
+        if dictating, !maySignedInDictate { return showSignIn() }
         routedAt = Date()
         autoNoteTask?.cancel()
         endReturn()
@@ -602,6 +685,15 @@ final class AppModel {
         autoNoteTask?.cancel()
         switch link {
         case .startSession(let token):
+            guard maySignedInDictate else {
+                // Nobody is signed in, so nothing records. The dictation the keyboard asked for
+                // goes too: left pending, the keyboard would start it once Murmur was ready after
+                // a sign-in.
+                if let token { _ = transport.payloads.consumeLaunchToken(token, maxAge: 20, now: Date()) }
+                transport.payloads.clearPendingStart()
+                showSignIn()
+                return
+            }
             if !onboarding.isComplete {
                 setup.refresh()
                 onboarding.send(.sessionLinkOpened)
@@ -644,6 +736,8 @@ final class AppModel {
                     onboarding.send(.authenticated(.email))
                 }
             }
+        case .signIn:
+            showSignIn()
         }
     }
 
@@ -652,6 +746,11 @@ final class AppModel {
     /// another app, Murmur shows Home and sends the user back there, or says on Home how to swipe
     /// back if it can't (`returnHint`); when it was used inside Murmur itself nothing moves.
     func startSessionFromKeyboard(fromAnotherApp: Bool = true, request: UUID? = nil) {
+        // Also reached from the "Turn on Murmur?" dialog, past `handle`'s check.
+        guard maySignedInDictate else {
+            transport.payloads.clearPendingStart()
+            return showSignIn()
+        }
         endReturn()
         // Home's bar shows the start, and what went wrong if it fails. Used inside Murmur, the
         // keyboard may be typing into a sheet or a note, so everything stays where it is; during
@@ -750,6 +849,7 @@ final class AppModel {
             }
             setup.refresh()
             settings.reloadFromKeyboard()
+            publishSignIn()
             refreshNotificationPermission()
             session.appDidBecomeActive()
             history.applyRetention()
@@ -785,6 +885,8 @@ enum DeepLink: Equatable {
     case invite(code: String)
     /// `murmur://auth-callback?…` — the emailed sign-in link and OAuth redirects.
     case authCallback(URL)
+    /// `murmur://sign-in` — Log in, on the keyboard's "You are logged out" page.
+    case signIn
 
     init?(url: URL) {
         guard url.scheme == Brand.urlScheme else { return nil }
@@ -801,6 +903,8 @@ enum DeepLink: Equatable {
             self = .invite(code: code)
         case ("auth-callback", _):
             self = .authCallback(url)
+        case ("sign-in", ""), ("sign-in", "/"):
+            self = .signIn
         default:
             return nil
         }
@@ -843,8 +947,10 @@ enum LaunchRoute: String {
 /// - `-account-state signedOut|guest` fakes it, with `-account-email <address>` and
 ///   `-account-provider apple|google|email` if given. Signed in has no screen of its own: it's
 ///   Home and Settings without the account's card and section.
-/// - `-account-sheet [email|guest]` opens the sign-in sheet, at the email step or asking about
-///   continuing as a guest
+/// - `-account-sheet [email]` opens the sign-in sheet, at the email step if asked
+///
+/// Without `-account-state`, a run with `-fixtures`, `-route` or onboarding fixtures counts as
+/// signed in (`isFixtureRun`): it uses the configured backend, with no session.
 ///
 /// The keyboard (screenshots, DEBUG builds only): `-keyboard-demo <state>[@<layout>]` makes the
 /// keyboard show that state instead of the live one (`KeyboardDemo`); a launch without it ends
@@ -935,6 +1041,10 @@ struct LaunchOptions: Equatable {
 
     /// Fake auth, offers, permissions and dictation.
     var usesOnboardingFixtures: Bool { isOnboardingScreenshot || onboardingFixtures }
+
+    /// A screenshot or UI-test run (`-fixtures`, `-route`, onboarding fixtures): it acts signed in
+    /// unless `-account-state` says otherwise (`AppModel.maySignedInDictate`).
+    var isFixtureRun: Bool { useFixtures || route != nil || usesOnboardingFixtures }
 
     private static func value(after flag: String, in arguments: [String]) -> String? {
         guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }

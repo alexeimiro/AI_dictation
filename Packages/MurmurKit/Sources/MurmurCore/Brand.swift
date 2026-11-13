@@ -39,6 +39,14 @@ public enum Brand {
         return components.url!
     }
 
+    /// Murmur's sign-in (`murmur://sign-in`), from the keyboard's "You are logged out" page.
+    public static var signInURL: URL {
+        var components = URLComponents()
+        components.scheme = urlScheme
+        components.host = "sign-in"
+        return components.url!
+    }
+
     /// What a dictation past Basic's weekly words says; the keyboard turns it into a way to Pro.
     public static let limitReachedMessage = "Dictation limit reached. Get unlimited access in Murmur."
 

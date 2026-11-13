@@ -68,7 +68,7 @@ struct OnboardingReducerTests {
 
     @Test func finishedOnboardingRejectsEverything() {
         let done = record(at: .complete)
-        for event: OnboardingEvent in [.next, .back, .skipOptional, .sessionLinkOpened,
+        for event: OnboardingEvent in [.next, .back, .skipOptional, .sessionLinkOpened, .signInRequested,
                                        .permissionChanged(.microphone, .granted)] {
             #expect(OnboardingReducer.reduce(done, event, now: now) == nil)
         }
@@ -203,6 +203,21 @@ struct OnboardingReducerTests {
             $0.permissions.microphone = .granted
         }
         #expect(reduce(ready, .sessionLinkOpened)?.step == .dataChoice)
+    }
+
+    /// The keyboard's Log in, after a sign-out restarted onboarding: straight to signing in from
+    /// the pages before it, and Back still leads to them. On a sign-in page or past them it does
+    /// nothing (the app opens the sign-in sheet there instead).
+    @Test func logInJumpsToSigningInFromThePagesBeforeIt() {
+        for step: OnboardingStep in [.welcome, .useCases, .personalizedExplainer] {
+            let jumped = reduce(record(at: step), .signInRequested)
+            #expect(jumped?.step == .signIn, "from \(step)")
+            #expect(jumped?.answers.useCases.isEmpty == true)
+        }
+        #expect(reduce(record(at: .welcome), .signInRequested, .back)?.step == .personalizedExplainer)
+        for step: OnboardingStep in [.signIn, .signInOptions, .emailSignIn, .setupIntro, .basicPractice, .trialOffer] {
+            #expect(reduce(record(at: step), .signInRequested) == nil, "from \(step)")
+        }
     }
 
     // MARK: Answers

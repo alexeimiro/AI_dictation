@@ -19,6 +19,9 @@ final class KeyboardModel {
     var sessionStatus: SessionStatus = .off
     var pendingResult: DictationResult?
     var hasFullAccess = false
+    /// Nobody is signed in to Murmur (`SharedSettings.signedOut`, read only with Full Access): the
+    /// keyboard is "You are logged out" and nothing else, once any dictation under way is done.
+    var signedOut = false
     /// The app's Default style, which the style pill changes too.
     var style: StylePreset = .verbatim
     var primaryLanguage = DictationLanguage.englishUS
@@ -66,6 +69,8 @@ final class KeyboardModel {
         var openApp: () -> Void = {}
         /// The limit card's way to Murmur Pro's plans in the app.
         var openPro: () -> Void = {}
+        /// "You are logged out"'s Log in: Murmur's sign-in.
+        var logIn: () -> Void = {}
         var setStyle: (StylePreset) -> Void = { _ in }
         var setLanguage: (DictationLanguage?) -> Void = { _ in }
         var showOverlay: (KeyboardOverlay) -> Void = { _ in }

@@ -27,7 +27,7 @@ final class Backend: SessionRenewing {
     let edgeURL: URL?
     let client: SupabaseClient
     /// The account this install signs in with. While its session is gone, `ensureSession` keeps
-    /// the cloud closed until the user signs in again or continues as a guest.
+    /// the cloud closed until the user signs in again.
     let account: AccountModel
     private let logger = Logger(subsystem: "Murmur", category: "Backend")
     /// Keeps `account` in step with Auth for as long as the backend lives.
@@ -123,9 +123,10 @@ final class Backend: SessionRenewing {
         Self.adopt(client.auth.currentSession, into: account)
     }
 
-    /// "Continue without an account" after a sign-out. The anonymous sign-in is left to the next
-    /// `ensureSession`: nothing goes out until the cloud is used, and its rule refreshes a session
-    /// the user signed in with meanwhile instead of replacing it.
+    /// "Continue without an account" after a sign-out, which the app no longer offers: sign-in is
+    /// required, and Murmur doesn't record for a guest (`AppModel.maySignedInDictate`). The anonymous
+    /// sign-in is left to the next `ensureSession`: nothing goes out until the cloud is used, and its
+    /// rule refreshes a session the user signed in with meanwhile instead of replacing it.
     func continueAsGuest() {
         account.continueAsGuest()
     }
@@ -149,7 +150,7 @@ final class Backend: SessionRenewing {
     /// which still gets per-user quota and rate limits. A signed-in user is never swapped for an
     /// anonymous one, which would lose their plan: once the server has rejected their session
     /// (here, or at Auth's own refresh) this throws `BackendError.signedOut`, at once and with no
-    /// request, until they sign in again or continue as a guest (`account`). Other refresh
+    /// request, until they sign in again (`account`). Other refresh
     /// failures (offline, a timeout, a 5xx) are thrown as they are, and the session stays stored
     /// for the next attempt.
     ///

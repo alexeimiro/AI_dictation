@@ -2,15 +2,14 @@ import MurmurUI
 import SwiftUI
 
 /// "Sign in again": from Home's card, Settings or onboarding's offer page after the account was
-/// signed out, or from Settings while a guest. Onboarding's sign-in services; it closes once the
-/// account is signed in.
+/// signed out, from Settings while a guest, and from the keyboard's Log in. Onboarding's sign-in
+/// services; it closes once the account is signed in. There is no way past it without an account:
+/// sign-in is required.
 struct SignInAgainView: View {
     /// Where the sheet opens. Anything but `options` is for screenshot runs (`-account-sheet`).
     enum Start: String, Identifiable {
         case options
         case email
-        /// Asking about "Continue without an account".
-        case confirmGuest = "guest"
 
         var id: Self { self }
     }
@@ -25,7 +24,6 @@ struct SignInAgainView: View {
     @State private var path: [Step]
     @State private var busy: AuthMethod?
     @State private var error: String?
-    @State private var confirmingGuest = false
 
     init(start: Start = .options) {
         self.start = start
@@ -49,9 +47,6 @@ struct SignInAgainView: View {
         .onChange(of: model.account?.isSignedIn ?? false) { _, signedIn in
             // Also when the emailed link signs in, which arrives as a deep link.
             if signedIn { dismiss() }
-        }
-        .task {
-            if start == .confirmGuest { confirmingGuest = true }
         }
     }
 
@@ -96,30 +91,6 @@ struct SignInAgainView: View {
                 .padding(.top, 28)
                 FieldError(message: error)
                     .padding(.top, 12)
-                if account?.isSignedOut == true {
-                    Button { confirmingGuest = true } label: {
-                        Text("Continue without an account")
-                            .font(.murmur(.subhead, weight: .semibold))
-                            .foregroundStyle(Theme.ink)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(busy != nil)
-                    // On the button: iOS 26 shows the dialog as a popover from where it's attached.
-                    .confirmationDialog("Continue without an account?", isPresented: $confirmingGuest,
-                                        titleVisibility: .visible) {
-                        Button("Continue as a guest") {
-                            model.continueAsGuest()
-                            dismiss()
-                        }
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        // No word on which plan: a new guest's is whatever the server grants.
-                        Text("Cloud dictation comes back now, as a guest without your account's plan. You can sign in again any time from Settings.")
-                    }
-                    .padding(.top, 8)
-                }
                 LegalFootnote()
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal, 12)

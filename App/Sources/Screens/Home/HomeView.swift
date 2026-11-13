@@ -83,8 +83,10 @@ struct HomeView: View {
     @ViewBuilder
     private var notices: some View {
         Group {
-            if let account = model.account, account.isSignedOut {
-                SignedOutCard(phrase: account.phrase) { model.signInSheet = .options }
+            // Lost session, a guest from before sign-in was required, or an old install that never
+            // signed in: Murmur records for none of them.
+            if !model.maySignedInDictate {
+                SignedOutCard(phrase: model.account?.phrase) { model.showSignIn() }
             }
             if SessionNotice.isShown(for: model.session.phase) {
                 SessionNotice()
@@ -329,8 +331,14 @@ struct SessionNotice: View {
         switch model.session.phase {
         case .failed(let message):
             NoticeCard(SessionBar.title(for: model.session.phase), message: message, isAlert: true) {
-                Button("Try again") { Task { await model.session.start() } }
-                    .buttonStyle(.murmur(.secondary, size: .compact))
+                // Trying again can't work while nobody is signed in.
+                if model.maySignedInDictate {
+                    Button("Try again") { Task { await model.session.start() } }
+                        .buttonStyle(.murmur(.secondary, size: .compact))
+                } else {
+                    Button("Sign in") { model.showSignIn() }
+                        .buttonStyle(.murmur(.secondary, size: .compact))
+                }
             }
         case .needsReconnect:
             NoticeCard(SessionBar.title(for: model.session.phase), message: "Reconnect to keep dictating.",
@@ -367,7 +375,7 @@ private struct LimitCard: View {
 }
 
 /// The account's session was lost without the user asking: cloud dictation waits until they sign
-/// in again (or continue as a guest, on the sheet).
+/// in again. Also shown to a guest, and to an old install that never signed in.
 struct SignedOutCard: View {
     /// How the copy names the remembered account (`AccountModel.Account.phrase`).
     let phrase: String?

@@ -69,6 +69,18 @@ private func waitUntil(timeout: Duration = .seconds(5), _ condition: () -> Bool)
     return condition()
 }
 
+/// How often the session asked "Before Murmur listens".
+@MainActor
+private final class ConsentSpy {
+    var count = 0
+}
+
+/// Whether someone is signed in, as the session asks it.
+@MainActor
+private final class SignedInSpy {
+    var value = true
+}
+
 @MainActor
 struct SessionControllerTests {
     private struct Harness {
@@ -89,8 +101,10 @@ struct SessionControllerTests {
     private let micFormat = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
 
     /// A ready session on the in-memory transport, with its own settings (no sounds) and log.
+    /// `signedIn` comes last, so a trailing closure still means `configure`.
     private func makeHarness(transcriber: Transcriber = SpokenTranscriber(), recordings: RecordingStore? = nil,
-                             configure: (SharedSettings) -> Void = { _ in }) -> Harness {
+                             configure: (SharedSettings) -> Void = { _ in },
+                             signedIn: @escaping @MainActor () -> Bool = { true }) -> Harness {
         let transport = InMemoryIPCTransport()
         let log = TimingsLog(directory: FileManager.default.temporaryDirectory
             .appendingPathComponent("session-timings-\(UUID().uuidString)", isDirectory: true))
@@ -100,7 +114,7 @@ struct SessionControllerTests {
         configure(settings)
         let session = SessionController(
             transport: transport, pipeline: DictationPipeline(cleanup: NoCleanup()), assets: SpeechAssetManager(),
-            history: history, recordings: recordings, timingsLog: log, settings: settings)
+            history: history, recordings: recordings, timingsLog: log, settings: settings, signedIn: signedIn)
         session.startForTesting(with: transcriber, language: english)
         return Harness(session: session, transport: transport, log: log, history: history)
     }
@@ -156,6 +170,45 @@ struct SessionControllerTests {
         #expect(transport.payloads.readSessionFailure()?.message == message)
         #expect(transport.currentState().status == .error)
         #expect(session.beginInAppDictation() == nil)
+    }
+
+    /// Sign-in is required: while nobody is signed in no session starts, and the AI question
+    /// doesn't even come up. The keyboard hears why, as it does for any start that fails.
+    @Test func signedOutTheSessionDoesNotStart() async {
+        let transport = InMemoryIPCTransport()
+        let settings = SharedSettings(defaults: UserDefaults(suiteName: "test.murmur.session.\(UUID().uuidString)"))
+        let asked = ConsentSpy()
+        let session = SessionController(
+            transport: transport, pipeline: DictationPipeline(cleanup: NoCleanup()), assets: SpeechAssetManager(),
+            history: HistorySpy(), settings: settings, consent: { asked.count += 1; return true }, signedIn: { false })
+
+        await session.start()
+
+        let message = SessionController.SessionError.signedOut.localizedDescription
+        #expect(session.phase == .failed(message))
+        #expect(!session.isLive)
+        #expect(asked.count == 0)
+        #expect(transport.payloads.readSessionFailure()?.message == message)
+        #expect(transport.currentState().status == .error)
+        #expect(session.beginInAppDictation() == nil)
+    }
+
+    /// The account went while a dictation was under way (its own request can be the one that
+    /// finds out): its words still reach the keyboard, and then the session ends rather than wait
+    /// for a dictation nobody may make.
+    @Test func aDictationUnderWayWhenTheAccountGoesIsDeliveredThenTheSessionEnds() async throws {
+        let account = SignedInSpy()
+        let harness = makeHarness(signedIn: { account.value })
+        let requestId = UUID()
+        try harness.send(.start, requestId)
+        #expect(await waitUntil { harness.session.phase == .recording(requestId) })
+
+        account.value = false
+        try harness.send(.stop, requestId)
+
+        #expect(await waitUntil { harness.session.phase == .off })
+        #expect(harness.transport.payloads.readResult(requestId)?.isInsertable == true)
+        #expect(harness.transport.currentState().status == .off)
     }
 
     /// The keyboard's stop command, when it was sent and how long it took to reach the app, ends

@@ -23,6 +23,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     private var padHost: UIHostingController<VoicePad>?
     /// The ☰ menu and style pages, in place of everything but the toolbar.
     private var overlayHost: UIHostingController<KeyboardOverlayView>?
+    /// "You are logged out", in place of everything, toolbar included.
+    private var signedOutHost: UIHostingController<SignedOutPage>?
+    /// The way to the next keyboard on that page where iOS draws none (`needsInputModeSwitchKey`).
+    private let signedOutGlobe = UIButton(type: .system)
     private var heightConstraint: NSLayoutConstraint?
     private var toolbarHeightConstraint: NSLayoutConstraint?
     /// The pad ends at its row of keys, or at the bottom while a dictation hides them.
@@ -107,6 +111,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         demo = settings.debugKeyboardDemo
         if let layout = demo?.layout { chooseLayout(layout, demo: true) }
         #endif
+        refreshSignedOut()
         updateHeights()
         updateAutoShift()
         reloadKeys()
@@ -219,6 +224,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         overlay.view.backgroundColor = Self.touchFill
         overlayHost = overlay
 
+        // Over all of it, toolbar included: while nobody is signed in it is the whole keyboard.
+        let signedOut = embed(SignedOutPage(model: model), in: view)
+        signedOut.view.backgroundColor = Self.touchFill
+        signedOutHost = signedOut
+        signedOutGlobe.translatesAutoresizingMaskIntoConstraints = false
+        signedOutGlobe.setImage(UIImage(systemName: "globe", withConfiguration: UIImage.SymbolConfiguration(
+            pointSize: 21, weight: .regular)), for: .normal)
+        signedOutGlobe.tintColor = KeyboardChrome.primaryUIColor
+        signedOutGlobe.accessibilityLabel = "Next keyboard"
+        signedOutGlobe.addTarget(self, action: #selector(UIInputViewController.handleInputModeList(from:with:)),
+                                 for: .allTouchEvents)
+        view.addSubview(signedOutGlobe)
+
         let height = view.heightAnchor.constraint(equalToConstant: Self.keyboardHeight)
         height.priority = UILayoutPriority(999)
         heightConstraint = height
@@ -253,11 +271,21 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             overlay.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             overlay.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             overlay.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            signedOut.view.topAnchor.constraint(equalTo: view.topAnchor),
+            signedOut.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            signedOut.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            signedOut.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            signedOutGlobe.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 4),
+            signedOutGlobe.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -2),
+            signedOutGlobe.widthAnchor.constraint(equalToConstant: 48),
+            signedOutGlobe.heightAnchor.constraint(equalToConstant: 48),
         ])
         panel.view.isHidden = true
         pad.view.isHidden = true
         padKeys.isHidden = true
         overlay.view.isHidden = true
+        signedOut.view.isHidden = true
+        signedOutGlobe.isHidden = true
     }
 
     /// The voice keyboard needs Full Access to dictate and has no letters, so without it the
@@ -306,14 +334,17 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
 
     /// The keys, the voice pad or the listening panel, whichever fits the plane and the phase, or
     /// none under an open page. A dictation hides the keys: the key layouts show the listening
-    /// panel, and the pad grows over its row of keys to show its own.
+    /// panel, and the pad grows over its row of keys to show its own. While nobody is signed in,
+    /// "You are logged out" is all there is, once a dictation under way is done.
     private func updateKeyAreas() {
         let capturing = model.isCapturing
+        let locked = model.signedOut && !capturing
         let onPad = plane == .voice
         let paged = model.overlay != nil
         if model.showsVoicePad != onPad { model.showsVoicePad = onPad }
-        padHost?.view.isHidden = !onPad || paged
-        padKeys.isHidden = !onPad || capturing || paged
+        toolbarHost?.view.isHidden = locked
+        padHost?.view.isHidden = !onPad || paged || locked
+        padKeys.isHidden = !onPad || capturing || paged || locked
         padKeys.typingEnabled = !capturing
         if capturing {
             padAboveKeys?.isActive = false
@@ -322,8 +353,37 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             padToBottom?.isActive = false
             padAboveKeys?.isActive = true
         }
-        keyGrid.isHidden = onPad || capturing || paged
+        keyGrid.isHidden = onPad || capturing || paged || locked
         panelHost?.view.isHidden = onPad || !capturing || paged
+        signedOutHost?.view.isHidden = !locked
+        signedOutGlobe.isHidden = !locked || !needsInputModeSwitchKey
+    }
+
+    /// Whether anyone is signed in, as the app last said: on every appearance, and whenever the
+    /// session's state changes outside a dictation (the app announces a change that way). Without
+    /// Full Access the keyboard couldn't open Murmur to sign in, so it keeps its keys, and the mic
+    /// asks for Full Access instead. A Debug demo shows what it pins.
+    private func refreshSignedOut() {
+        var signedOut = model.hasFullAccess && settings.signedOut
+        #if DEBUG
+        if let demo { signedOut = demo.state == .loggedOut }
+        #endif
+        guard signedOut != model.signedOut else { return }
+        model.signedOut = signedOut
+        if signedOut {
+            // Nothing from before stays behind the page: an open menu, or a notice such as
+            // "You're signed out" that would still be there after signing in.
+            if model.overlay != nil {
+                model.overlay = nil
+                overlayHost?.view.isHidden = true
+            }
+            client?.dismissNotice()
+        }
+        updateKeyAreas()
+        let focus = signedOut ? signedOutHost?.view : toolbarHost?.view
+        DispatchQueue.main.async {
+            UIAccessibility.post(notification: .screenChanged, argument: focus)
+        }
     }
 
     private func wireActions() {
@@ -352,6 +412,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
                 guard let self else { return }
                 client?.dismissNotice()
                 HostAppOpener.open(Brand.proURL, from: self)
+            },
+            logIn: { [weak self] in
+                guard let self else { return }
+                feedback()
+                HostAppOpener.open(Brand.signInURL, from: self)
             },
             setStyle: { [weak self] style in
                 guard let self else { return }
@@ -726,6 +791,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         #endif
         model.update(from: client)
         if model.isProcessing, model.announcesReady { readyHaptics.prepare() }
+        // Not while capturing, when this runs twenty times a second.
+        if !model.isCapturing { refreshSignedOut() }
         updateKeyAreas()
         // Auto-Lock would otherwise cut a long dictation; the screen stays on only while one listens.
         ScreenWake.keepAwake(keepsScreenAwake && model.listeningSince != nil, from: self)
@@ -832,6 +899,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
                 status: .cleaned, createdAt: Date())
         case .fullAccess:
             model.phase = .needsFullAccess
+        case .loggedOut:
+            // `refreshSignedOut` already put the page up, Full Access or not.
+            model.phase = .idle
         case .style:
             model.phase = .idle
             showOverlay(.style)

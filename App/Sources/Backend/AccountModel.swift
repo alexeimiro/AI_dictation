@@ -6,7 +6,8 @@ import Observation
 /// quietly making the user a new anonymous one without their plan. `Backend` keeps it in step with
 /// Auth; Home and Settings show the sign-in sheet from it.
 ///
-/// Kept in the app's own defaults, not the App Group: the keyboard never talks to the backend.
+/// Kept in the app's own defaults, not the App Group: the keyboard never talks to the backend. It
+/// only hears whether anyone is signed in (`SharedSettings.signedOut`, from `onChange`).
 @MainActor
 @Observable
 final class AccountModel {
@@ -49,10 +50,11 @@ final class AccountModel {
         /// A non-anonymous user is signed in.
         case signedIn(Account)
         /// That account's session disappeared without the user asking. The cloud waits until they
-        /// sign in again or continue as a guest.
+        /// sign in again.
         case signedOut(Account)
-        /// They chose "Continue without an account": anonymous sessions are allowed again, and the
-        /// account stays remembered so they can sign back in from Settings.
+        /// They chose "Continue without an account", which the sign-in sheet offered until November
+        /// 2026: anonymous sessions are allowed again, and the account stays remembered so they can
+        /// sign back in from Settings. Murmur doesn't record for a guest (sign-in is required).
         case guest(Account)
 
         var account: Account {
@@ -84,6 +86,9 @@ final class AccountModel {
     /// How the sign-in copy names the remembered account (`Account.phrase`).
     var phrase: String? { state?.account.phrase }
 
+    /// After every change of `state` (`AppModel` tells the keyboard and stops the session).
+    @ObservationIgnored var onChange: (() -> Void)?
+
     @ObservationIgnored private let defaults: UserDefaults
     private static let key = "account.state"
 
@@ -105,7 +110,8 @@ final class AccountModel {
         if case .signedIn(let account) = state { move(to: .signedOut(account)) }
     }
 
-    /// "Continue without an account" after a sign-out.
+    /// "Continue without an account" after a sign-out. Nothing in the app offers it any more; the
+    /// state stays so that an account left as a guest is still understood.
     func continueAsGuest() {
         if case .signedOut(let account) = state { move(to: .guest(account)) }
     }
@@ -116,6 +122,7 @@ final class AccountModel {
         guard state != nil else { return }
         state = nil
         defaults.removeObject(forKey: Self.key)
+        onChange?()
     }
 
     /// Only a real change is written, so a launch that changes nothing leaves the stored state alone.
@@ -123,6 +130,7 @@ final class AccountModel {
         guard next != state else { return }
         state = next
         Self.store(next, in: defaults)
+        onChange?()
     }
 
     private static func load(from defaults: UserDefaults) -> State? {

@@ -73,6 +73,11 @@ on the pages that open a part, `ready` and `trialOffer`, which have none.
   build, Settings › Debug › Replay onboarding starts it again.
 - **A keyboard link during onboarding** (the keyboard asking the app to listen) goes to whichever
   of the keyboard and the microphone is still missing.
+- **Signed out, the keyboard is "You are logged out".** Its Log in (`murmur://sign-in`) jumps
+  from the pages before sign-in straight to `signIn` (`signInRequested`); past them, or once
+  onboarding is complete, it opens the "Sign in again" sheet. A keyboard link to listen while
+  nobody is signed in does the same and records nothing. Sign-out restarts onboarding, so this is
+  where the keyboard's Log in lands after one.
 
 ## How it is built
 

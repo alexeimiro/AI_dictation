@@ -170,6 +170,8 @@ enum OnboardingEvent: Equatable, Sendable {
     case offerResolved(OfferVariant)
     /// A keyboard session link arrived before onboarding finished.
     case sessionLinkOpened
+    /// The keyboard's Log in, or a dictation Murmur won't record while nobody is signed in.
+    case signInRequested
 }
 
 // MARK: Lenient decoding

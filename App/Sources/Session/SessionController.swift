@@ -105,6 +105,9 @@ final class SessionController {
     /// The user's OK to send recordings to the AI services that write them, asked if it hasn't
     /// been given (`AIConsent.ensure`). No session, so no dictation, starts without it.
     @ObservationIgnored private let consent: @MainActor () async -> Bool
+    /// Someone is signed in (`AppModel.maySignedInDictate`). No session starts without it either;
+    /// the app stops a live one when the account goes.
+    @ObservationIgnored private let signedIn: @MainActor () -> Bool
 
     /// A dictation ends by itself after 5 minutes.
     static let maxDictationSeconds: TimeInterval = 300
@@ -121,8 +124,10 @@ final class SessionController {
     init(transport: IPCTransport, pipeline: DictationPipeline, assets: SpeechAssetManager, history: any TranscriptSink,
          recordings: RecordingStore? = nil, transcription: (any CloudTranscribing)? = nil, dictate: (any Dictating)? = nil,
          warmup: BackendWarmup? = nil, timingsLog: TimingsLog? = nil, settings: SharedSettings = .shared,
-         consent: @escaping @MainActor () async -> Bool = { true }) {
+         consent: @escaping @MainActor () async -> Bool = { true },
+         signedIn: @escaping @MainActor () -> Bool = { true }) {
         self.consent = consent
+        self.signedIn = signedIn
         self.transport = transport
         self.publisher = HotStatePublisher(transport: transport)
         self.pipeline = pipeline
@@ -157,6 +162,8 @@ final class SessionController {
         phase = .starting
         publisher.set(.starting)
         transport.post(.stateChanged)
+        // Sign-in is required: not even the AI question comes up without an account.
+        guard signedIn() else { return failStart(SessionError.signedOut) }
         // Before the microphone: what is recorded from here on goes to the AI services. Nothing is
         // set up yet, so a "Not now" has no audio to take down.
         guard await consent() else { return failStart(SessionError.aiNotAllowed) }
@@ -723,9 +730,15 @@ final class SessionController {
                 timings.warmup = warmup?.takeTiming(for: dictation.requestId)
                 timingsLog?.append(timings)
             }
-            becomeReady()
-            // Not while a dictation the keyboard asked for in the meantime has just begun.
-            if settings.disableAfter == .immediately, active == nil {
+            if signedIn() {
+                becomeReady()
+                // Not while a dictation the keyboard asked for in the meantime has just begun.
+                if settings.disableAfter == .immediately, active == nil {
+                    stop()
+                }
+            } else {
+                // The account went while this dictation was under way (its own request may have
+                // found out): its words are delivered, and the session ends with it.
                 stop()
             }
             endBackgroundWork()
@@ -1186,12 +1199,16 @@ final class SessionController {
         case microphoneDenied
         /// The user answered "Not now" to sending recordings to the AI services (`AIConsent`).
         case aiNotAllowed
+        /// Nobody is signed in: Murmur doesn't record without an account.
+        case signedOut
 
         var errorDescription: String? {
             switch self {
             case .microphoneDenied: "Murmur needs microphone access. Turn it on in Settings › Murmur."
             // Shown on Home over "Try again", and on the keyboard, whose mic opens Murmur again.
             case .aiNotAllowed: "Murmur needs your OK to use its AI services. Try again to allow it."
+            // Shown on Home over "Sign in"; the keyboard shows "You are logged out" instead.
+            case .signedOut: "You’re signed out. Sign in to dictate with Murmur."
             }
         }
     }

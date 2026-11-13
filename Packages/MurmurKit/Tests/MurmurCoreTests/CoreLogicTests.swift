@@ -538,6 +538,22 @@ struct SharedSettingsTests {
         #expect(SharedSettings(defaults: defaults).keyboardFullQwerty)
     }
 
+    /// The keyboard locks ("You are logged out") only once the app has said nobody is signed in:
+    /// unwritten, after an update, it keeps working until Murmur next runs.
+    @Test func theKeyboardLocksOnlyOnceTheAppSaysNobodyIsSignedIn() throws {
+        let suite = "test.murmur.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = SharedSettings(defaults: defaults)
+        #expect(!settings.signedOut)
+        settings.signedOut = true
+        #expect(SharedSettings(defaults: defaults).signedOut)
+        settings.signedOut = false
+        #expect(!SharedSettings(defaults: defaults).signedOut)
+        #expect(Brand.signInURL.absoluteString == "murmur://sign-in")
+    }
+
     @Test func keyboardAppearanceFollowsTheFieldUntilPicked() throws {
         let suite = "test.murmur.settings.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -578,6 +594,7 @@ struct SharedSettingsTests {
         #expect(KeyboardDemo("menu@voice") == KeyboardDemo(state: .menu, layout: .voice))
         #expect(KeyboardDemo("off")?.state == .off)
         #expect(KeyboardDemo("limit@numbers") == KeyboardDemo(state: .limit, layout: .numbers))
+        #expect(KeyboardDemo("loggedOut") == KeyboardDemo(state: .loggedOut))
         #expect(KeyboardDemo("settings") == nil)
         #expect(KeyboardDemo("listening@dvorak") == nil)
         #expect(KeyboardDemo("dancing") == nil)

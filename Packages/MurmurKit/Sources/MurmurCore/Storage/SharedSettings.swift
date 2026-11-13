@@ -99,6 +99,7 @@ public final class SharedSettings: @unchecked Sendable {
         case defaultStyle
         case useBuiltInMic, transcriberEngine, liveActivities, transcriptRetention, autoReturn, keepScreenAwake
         case translateInOneRequest, lowDataMode, smartFormatting, keepRecordings, autoOpenNote, aiConsentVersion
+        case signedOut
         case primaryLanguage, secondaryLanguage, dictationLanguages, verifiedEngines
         case translationEnabled, translationSourceLanguage, translationTargetLanguage, recentTranslationLanguages
         case lastDetectedLanguage, autoDetectDefaultApplied, keyboardAppearance
@@ -222,6 +223,15 @@ public final class SharedSettings: @unchecked Sendable {
     public var aiConsentVersion: Int {
         get { defaults.integer(forKey: Key.aiConsentVersion.rawValue) }
         set { defaults.set(newValue, forKey: Key.aiConsentVersion.rawValue) }
+    }
+
+    /// Nobody is signed in to Murmur, as the app last said: the keyboard then shows only "You are
+    /// logged out" and a way to the app's sign-in. Written by the app at launch, whenever the
+    /// account changes and whenever it comes to the front. False until the app says so, so an
+    /// update keeps the keyboard working until Murmur next runs, which is before any dictation.
+    public var signedOut: Bool {
+        get { bool(.signedOut, default: false) }
+        set { defaults.set(newValue, forKey: Key.signedOut.rawValue) }
     }
 
     /// Auto-delete transcripts older than this. App-only; applied by the history store.

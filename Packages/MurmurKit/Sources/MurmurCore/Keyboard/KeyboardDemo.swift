@@ -10,6 +10,8 @@ public struct KeyboardDemo: Equatable, Sendable {
         case notice, pending, fullAccess, style, menu
         /// Basic's weekly words are used up.
         case limit
+        /// Nobody is signed in: "You are logged out" in place of the whole keyboard.
+        case loggedOut
     }
 
     public var state: State

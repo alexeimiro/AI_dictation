@@ -21,6 +21,15 @@ struct DeepLinkTests {
         #expect(LaunchRoute(rawValue: "paywall") == .paywall)
     }
 
+    /// The keyboard's "You are logged out" page opens Murmur's sign-in.
+    @Test func parsesSignIn() {
+        #expect(DeepLink(url: Brand.signInURL) == .signIn)
+        #expect(DeepLink(url: URL(string: "murmur://sign-in/")!) == .signIn)
+        #expect(DeepLink(url: URL(string: "murmur://sign-in/later")!) == nil)
+        #expect(LaunchOptions(arguments: ["Murmur", "-keyboard-demo", "loggedOut"]).keyboardDemo
+                == KeyboardDemo(state: .loggedOut))
+    }
+
     @Test func ignoresOtherSchemesAndPaths() {
         #expect(DeepLink(url: URL(string: "https://session/start?t=x")!) == nil)
         #expect(DeepLink(url: URL(string: "murmur://session/stop")!) == nil)
@@ -111,7 +120,8 @@ struct DeepLinkTests {
         #expect(options.accountSheet == .options)
         #expect(options.useFixtures)
         #expect(LaunchOptions(arguments: ["Murmur", "-account-sheet", "email"]).accountSheet == .email)
-        #expect(LaunchOptions(arguments: ["Murmur", "-account-sheet", "guest"]).accountSheet == .confirmGuest)
+        // The sheet no longer asks about going on as a guest: its old name opens it plainly.
+        #expect(LaunchOptions(arguments: ["Murmur", "-account-sheet", "guest"]).accountSheet == .options)
         #expect(LaunchOptions(arguments: ["Murmur", "-account-state", "guest"]).accountState?.account.email == nil)
         let apple = LaunchOptions(arguments: ["Murmur", "-account-state", "guest", "-account-provider", "apple"])
         #expect(apple.accountState?.account.provider == "apple")

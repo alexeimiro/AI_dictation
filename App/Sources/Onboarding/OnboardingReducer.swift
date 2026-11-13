@@ -115,6 +115,12 @@ enum OnboardingReducer {
 
         case .sessionLinkOpened:
             if let target = missingRequirement(for: record) { next.step = target }
+
+        case .signInRequested:
+            // Straight to signing in from the pages before it; the survey can wait. On a sign-in
+            // page already, or past them, there's nothing to jump to.
+            guard step.order < OnboardingStep.signIn.order else { return nil }
+            next.step = .signIn
         }
         return next
     }

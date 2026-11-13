@@ -286,9 +286,9 @@ final class OnboardingJourneyTests: XCTestCase {
     }
 
     /// The server rejected the session after sign-in, so the offer can't load and this page has
-    /// no way back. It opens the sign-in sheet instead of a retry that can't work, and going on
-    /// as a guest there finishes onboarding.
-    func testASignOutBeforeTheOfferStillLetsOnboardingFinish() {
+    /// no way back. It opens the sign-in sheet instead of a retry that can't work. Sign-in is
+    /// required, so the sheet has no way past it without an account.
+    func testASignOutBeforeTheOfferOpensTheSignInSheet() {
         launch(arguments: ["-onboarding-step", "trialOffer", "-account-state", "signedOut",
                            "-account-email", "olga@example.com"])
         expectText(Copy.Offer.signedOutTitle)
@@ -296,10 +296,7 @@ final class OnboardingJourneyTests: XCTestCase {
         tap(Copy.Offer.signInAgain)
         // The sign-in sheet's own words.
         expectText("You were signed in as olga@example.com")
-        tap("Continue without an account")
-        tap("Continue as a guest")
-        expectText(trialTitle)
-        tap(Copy.Offer.button)
-        XCTAssertTrue(app.buttons["Menu"].waitForExistence(timeout: 5), "Home after the offer")
+        XCTAssertTrue(button("Continue with Apple").exists)
+        XCTAssertFalse(button("Continue without an account").exists)
     }
 }
