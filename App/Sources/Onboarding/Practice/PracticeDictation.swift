@@ -20,9 +20,11 @@ protocol PracticeDictationClient: AnyObject {
     /// True when the keyboard inserts the result itself; a scripted client has the screen do it.
     var insertsText: Bool { get }
     /// Turns the session on (so the keyboard's mic starts at once) and attributes the next
-    /// dictations to `exercise`.
-    func begin(_ exercise: PracticeExercise) async
-    func end()
+    /// dictations to `exercise`. `page` names the page on screen, for `end(page:)`.
+    func begin(_ exercise: PracticeExercise, page: UUID) async
+    /// Stops attributing dictations to an exercise, unless another page has begun since: a page
+    /// that is sliding away disappears only after the next one has begun.
+    func end(page: UUID)
     /// Scripted clients only: plays a listening → processing → completed run.
     func simulateDictation()
 }
@@ -36,6 +38,8 @@ final class SessionPracticeClient: PracticeDictationClient {
     @ObservationIgnored private let buffer: PracticeTranscriptBuffer
     private var exercise: PracticeExercise?
     private var beganAt = Date.distantFuture
+    /// The page that began last; only it can end the exercise.
+    @ObservationIgnored private var page: UUID?
 
     init(session: SessionController, buffer: PracticeTranscriptBuffer) {
         self.session = session
@@ -58,14 +62,17 @@ final class SessionPracticeClient: PracticeDictationClient {
         }
     }
 
-    func begin(_ exercise: PracticeExercise) async {
+    func begin(_ exercise: PracticeExercise, page: UUID) async {
+        self.page = page
         self.exercise = exercise
         beganAt = Date()
         buffer.activeExercise = exercise
         if !session.isLive { await session.start() }
     }
 
-    func end() {
+    func end(page: UUID) {
+        guard page == self.page else { return }
+        self.page = nil
         buffer.activeExercise = nil
         exercise = nil
     }
@@ -78,7 +85,8 @@ final class SessionPracticeClient: PracticeDictationClient {
 @Observable
 final class ScriptedPracticeClient: PracticeDictationClient {
     private(set) var state: PracticeDictationState
-    @ObservationIgnored private var exercise: PracticeExercise = .basic
+    @ObservationIgnored private var exercise: PracticeExercise?
+    @ObservationIgnored private var page: UUID?
     @ObservationIgnored private let delay: Duration
     /// The state passed to `init` is for the first screen only (a screenshot route).
     @ObservationIgnored private var startedOnce = false
@@ -90,22 +98,31 @@ final class ScriptedPracticeClient: PracticeDictationClient {
 
     var insertsText: Bool { false }
 
-    func begin(_ exercise: PracticeExercise) async {
+    func begin(_ exercise: PracticeExercise, page: UUID) async {
+        self.page = page
         self.exercise = exercise
         if startedOnce { state = .idle }
         startedOnce = true
     }
 
-    func end() {}
+    func end(page: UUID) {
+        guard page == self.page else { return }
+        self.page = nil
+        exercise = nil
+    }
 
     func simulateDictation() {
-        let text = Self.sampleText(for: exercise)
         Task {
             state = .listening
             try? await Task.sleep(for: delay)
             state = .processing
             try? await Task.sleep(for: delay)
-            state = .completed(text)
+            // Like the real session: the take counts for the exercise on screen when it finishes.
+            guard let exercise else {
+                state = .idle
+                return
+            }
+            state = .completed(Self.sampleText(for: exercise))
         }
     }
 

@@ -57,7 +57,9 @@ on the pages that open a part, `ready` and `trialOffer`, which have none.
   someone who skips the exercises is asked at their first dictation. "Not now" stays on the page.
 - **Exercises.** The box is a real text view, so a dictation runs through the real keyboard and
   session. The takes are held until onboarding completes and then copied into history once, one
-  entry per exercise.
+  entry per exercise. A page being left disappears only after the next page has begun, so only
+  the page that began last can end an exercise; otherwise the email's dictation went nowhere and
+  its page never offered Next.
 - **Data choice.** The decision is saved with the policy version and the time. Bump
   `DataChoiceDecision.currentPolicyVersion` when the two options' wording changes meaning.
 - **Languages.** They start from the iPhone's preferred languages that dictation supports (not

@@ -11,6 +11,9 @@ struct PracticeView: View {
     @State private var text = ""
     @State private var murmurKeyboardActive = false
     @State private var fullAccessHint = false
+    /// This page, to the practice client: the page being left ends its exercise only after this
+    /// one has begun, and mustn't end this one's.
+    @State private var page = UUID()
 
     var body: some View {
         let store = model.onboarding
@@ -58,13 +61,15 @@ struct PracticeView: View {
             }
         }
         .task {
-            await model.practice.begin(exercise)
+            // Gone before it began: nothing to attribute.
+            guard !Task.isCancelled else { return }
+            await model.practice.begin(exercise, page: page)
             if model.launchOptions.usesOnboardingFixtures {
                 murmurKeyboardActive = OnboardingFixtures.murmurKeyboardActive(variant: model.launchOptions.onboardingVariant)
                 if case .completed(let result) = model.practice.state { apply(result) }
             }
         }
-        .onDisappear { model.practice.end() }
+        .onDisappear { model.practice.end(page: page) }
         .onChange(of: model.practice.state) { _, state in
             if case .completed(let result) = state { apply(result) }
         }
