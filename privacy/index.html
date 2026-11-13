@@ -9,10 +9,10 @@
 <link rel="stylesheet" href="../style.css">
 </head>
 <body>
-<header class="site"><a class="brand" href="../">Murmur</a></header>
+<header class="site"><a class="brand" href="../" aria-label="Murmur"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg><span>murmur</span></a></header>
 <main>
 <h1>Murmur Privacy Policy</h1>
-<p>Effective November 9, 2026</p>
+<p>Effective November 13, 2026</p>
 <p>Murmur is a voice keyboard for iPhone made by OKNENOR L.L.C-FZ (&quot;we&quot;). This policy explains what Murmur collects, why, and the choices you have. Questions: <a href="mailto:miralex13@gmail.com">miralex13@gmail.com</a>.</p>
 <h2>What stays on your iPhone</h2>
 <ul>
@@ -21,25 +21,28 @@
 </ul>
 <h2>What we collect and why</h2>
 <ul>
-<li><strong>Your account:</strong> your email address (or the private relay address Sign in with Apple gives us) and an account ID. They let you sign in and keep your plan and library on every device.</li>
-<li><strong>Your recordings, to transcribe them:</strong> when you dictate, the audio goes from the Murmur app to our server and on to OpenAI, which turns it into text. If you use Improve my grammar or translation, the text goes to OpenAI too. Our server doesn't keep the audio or the text. OpenAI processes them to return the result. Under its API terms it doesn't use them to train its models, and it may keep them for up to 30 days to detect abuse.</li>
+<li><strong>Your account:</strong> your email address (or the private relay address Sign in with Apple gives us), your name if Apple or Google passes it on, and an account ID. They let you sign in and keep your plan and library on every device.</li>
+<li><strong>Your recordings and their text, to write what you say:</strong> when you dictate, the audio goes from the Murmur app to our server and on to OpenAI, which turns it into text. When that text needs tidying or translating, it goes to Anthropic, whose Claude model rewrites it. Murmur asks for your permission before the first recording is sent, and you can take it back in Settings › Data and privacy (Murmur then stops listening until you allow it again). Our server doesn't keep the audio or the text. OpenAI and Anthropic process them to return the result. Under their API terms neither uses them to train its models, and each may keep them for a limited time to detect abuse (OpenAI for up to 30 days).</li>
 <li><strong>Your dictionary, snippets and notes:</strong> while you're signed in, they're saved to your account so they're on every device you use. They aren't shared with anyone.</li>
 <li><strong>Invites:</strong> if you join with a friend's invite code, we record whose code it was, so you each get your month of Murmur Pro. Your friend sees how many people joined with their code, not who.</li>
-<li><strong>How much you dictate:</strong> the number of words in each dictation, to apply the free plan's weekly limit. Not the words themselves.</li>
+<li><strong>How much you dictate:</strong> the number of words in each dictation, to apply the free plan's weekly limit, and what each dictation cost us to serve: how many seconds of audio and how much text the AI services handled, and which service did it. Not the words themselves.</li>
+<li><strong>Whether your iPhone has had a free trial:</strong> Murmur Pro's free trial, and an invite's free month, is one per iPhone. To tell, Murmur asks Apple's DeviceCheck service, through our server, whether this iPhone has had one, and marks it when it gets one. Apple keeps that mark for us. It doesn't tell us who you are or give us an identifier for your iPhone, and we don't keep the token the app sends to ask.</li>
 <li><strong>Purchases:</strong> if you subscribe to Murmur Pro, Apple tells us which plan you bought and when it renews, expires or is refunded, so we can grant Pro. We never see your payment details.</li>
-<li><strong>Your answers during setup:</strong> what you plan to use Murmur for, how you heard about it, your languages and default style, and your data-sharing choice.</li>
-<li><strong>Feedback and support messages:</strong> what you write to us, with the app version, iOS version, device model and language, to look into the problem. When you rate a dictation and have turned on &quot;Improve Murmur for everyone&quot;, the rating can include that dictation's text.</li>
+<li><strong>Your answers during setup:</strong> what you plan to use Murmur for, how you heard about it, your languages and default style, your data-sharing choice and, if you ask for the link to Murmur for Mac and PC, the email address to send it to.</li>
+<li><strong>Feedback and support messages:</strong> what you write to us, with the app version, iOS version, device model and language, to look into the problem. Each message is also emailed to us, with your account's email address so we can reply. When you rate a dictation and have turned on &quot;Improve Murmur for everyone&quot;, the rating can include that dictation's text.</li>
 </ul>
 <p>We don't track you across apps and websites, show ads, or sell or rent your data.</p>
 <h2>Who processes it for us</h2>
 <ul>
 <li><strong>Supabase</strong> hosts our server, database and sign-in, in the European Union (Frankfurt).</li>
-<li><strong>OpenAI</strong> transcribes, translates and corrects dictations.</li>
-<li><strong>Apple</strong> handles Sign in with Apple and App Store purchases. <strong>Google</strong> handles Sign in with Google.</li>
+<li><strong>OpenAI</strong> transcribes dictations.</li>
+<li><strong>Anthropic</strong> tidies and translates the text of dictations.</li>
+<li><strong>Apple</strong> handles Sign in with Apple, App Store purchases and the free-trial check (DeviceCheck). <strong>Google</strong> handles Sign in with Google.</li>
+<li><strong>Resend</strong> sends our emails: sign-in codes, and your support messages to us.</li>
 </ul>
 <p>Each processes data only to provide its service to us.</p>
 <h2>How long we keep it</h2>
-<p>We keep your account data until you delete your account. Deleting it (Menu › Account › Delete account) erases your account, library, usage and purchase records from our server, and revokes Sign in with Apple. Signing out deletes Murmur's data from that iPhone. Deleting the account doesn't cancel an App Store subscription: manage that in Settings › Apple Account › Subscriptions.</p>
+<p>We keep your account data until you delete your account. Deleting it (Menu › Account › Delete account) erases your account, library, usage and purchase records from our server, and revokes Sign in with Apple. The records of what your dictations cost us to serve stay, no longer tied to your account. Signing out deletes Murmur's data from that iPhone. Deleting the account doesn't cancel an App Store subscription: manage that in Settings › Apple Account › Subscriptions.</p>
 <h2>Your rights</h2>
 <p>You can see, correct, download or delete your data. Most of it is in the app; for anything else, write to <a href="mailto:miralex13@gmail.com">miralex13@gmail.com</a>. Depending on where you live, you may also have the right to object to processing, and to complain to your data protection authority.</p>
 <h2>Children</h2>
