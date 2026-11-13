@@ -91,7 +91,7 @@ struct HomeView: View {
             if SessionNotice.isShown(for: model.session.phase) {
                 SessionNotice()
             }
-            if let quota = model.quota, quota.remaining == 0, !model.pro.isSubscribed {
+            if let quota = model.quota, quota.remaining == 0, !model.hasProSubscription {
                 LimitCard(weeklyLimit: quota.weeklyLimit) { model.showsPaywall = true }
             }
             if !model.setup.isComplete, records.isEmpty {

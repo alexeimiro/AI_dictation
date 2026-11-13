@@ -69,7 +69,7 @@ struct AccountView: View {
                 }
 
                 header("Plan")
-                if model.pro.isSubscribed {
+                if model.hasProSubscription {
                     Button { managing = true } label: { LinkRow(title: "Manage subscription") }
                 } else {
                     Button { model.showsPaywall = true } label: { LinkRow(title: "Upgrade to Pro") }

@@ -68,7 +68,7 @@ struct OnboardingReducerTests {
 
     @Test func finishedOnboardingRejectsEverything() {
         let done = record(at: .complete)
-        for event: OnboardingEvent in [.next, .back, .skipOptional, .sessionLinkOpened, .signInRequested,
+        for event: OnboardingEvent in [.next, .back, .skipOptional, .skipExercises, .sessionLinkOpened, .signInRequested,
                                        .permissionChanged(.microphone, .granted)] {
             #expect(OnboardingReducer.reduce(done, event, now: now) == nil)
         }
@@ -191,6 +191,34 @@ struct OnboardingReducerTests {
         let skipped = reduce(denied, .skipOptional)
         #expect(skipped?.step == .wrapUpIntro)
         #expect(skipped?.practiceCommittedAt == nil)
+    }
+
+    /// "Not now" to "Before Murmur listens" on an exercise: "Skip the exercises" goes on to the
+    /// choices, so onboarding still finishes. It is only on the exercises.
+    @Test func notNowToTheAIServicesCanSkipTheExercises() {
+        for step in [OnboardingStep.basicPractice, .formattingPractice, .whisperPractice] {
+            let skipped = reduce(record(at: step), .skipExercises)
+            #expect(skipped?.step == .wrapUpIntro, "from \(step)")
+            #expect(skipped?.practiceCommittedAt == nil)
+        }
+        for step in [OnboardingStep.practiceIntro, .microphonePrimer, .whisperIntro, .practiceComplete,
+                     .wrapUpIntro, .dataChoice, .keyboardInstructions] {
+            #expect(reduce(record(at: step), .skipExercises) == nil, "not on \(step)")
+        }
+        // Then the rest of the journey, as after a denied microphone.
+        let rest = reduce(record(at: .basicPractice), .skipExercises, .next, .selectDataChoice(.doNotShare, at: now), .next)
+        #expect(rest?.step == .languages)
+    }
+
+    /// The microphone page's one button goes straight to the system's question: nothing on it
+    /// moves on or skips until the system has answered (App Review 5.1.1).
+    @Test func theMicrophonePageWaitsForTheSystemsAnswer() {
+        let asking = record(at: .microphonePrimer)
+        #expect(reduce(asking, .next) == nil)
+        #expect(reduce(asking, .skipOptional) == nil)
+        #expect(reduce(asking, .skipExercises) == nil)
+        #expect(reduce(asking, .permissionChanged(.microphone, .granted))?.step == .basicPractice,
+                "the first exercise, where the AI question comes")
     }
 
     @Test func sessionLinkGoesToTheMissingRequirementOnceSignedIn() {

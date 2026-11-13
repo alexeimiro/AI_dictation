@@ -91,7 +91,7 @@ sips -z 2796 1290 build/app-store-screenshots/6-paywall.png --out build/app-stor
 > TO TRY IT
 > 1. Open Murmur, tap Get started and answer the first questions. On "Sign in to start", tap Continue with Apple. Any Apple ID works, so no demo account is needed. Sign-in is required, because the account holds the plan and the weekly word count.
 > 2. Follow the setup: add the keyboard in Settings › General › Keyboard › Keyboards, and turn on Allow Full Access.
-> 3. On the microphone page, tap Continue. "Before Murmur listens" asks for permission to send recordings to the AI services (see AI below): tap Allow, then allow the microphone.
+> 3. On the microphone page, tap Continue and allow the microphone. The first exercise then shows "Before Murmur listens", which asks for permission to send recordings to the AI services (see AI below): tap Allow. After Not now, "Skip the exercises" finishes setup without them.
 > 4. Open Notes, switch to the Murmur keyboard with the globe key and tap the mic. Murmur opens, starts listening and brings you back to Notes by itself. Speak, then tap the check mark.
 >
 > While nobody is signed in, the Murmur keyboard shows only "You are logged out" and a Log in button, which opens Murmur's sign-in; the globe key still switches keyboards.
@@ -100,7 +100,7 @@ sips -z 2796 1290 build/app-store-screenshots/6-paywall.png --out build/app-stor
 > The first account on an iPhone gets a 14-day trial of Pro without payment details. Murmur asks Apple's DeviceCheck, through its server, whether the iPhone has had one, so a later account on the same iPhone starts on the free plan (1,000 words a week); if this device already had a Murmur trial, that is why. Either way the subscriptions can be bought. "Upgrade to Pro" in the menu or Settings shows the two auto-renewing subscriptions, Murmur Pro Monthly and Murmur Pro Annual, in the group "Murmur Pro". Restore purchase is on the same screen.
 >
 > AI
-> Recordings are transcribed by OpenAI's API, and the transcript is tidied or translated by Anthropic's Claude API, both through Murmur's server. Before the microphone is first turned on, the page "Before Murmur listens" names both services, says what each receives, and offers Allow and Not now (guideline 5.1.2(i)). Without Allow, Murmur doesn't turn the microphone on, so nothing is recorded or sent. The same permission is a switch in Settings › Data and privacy ("Write with AI services"). Neither service trains its models on the data. The user's words are typed into their own text field and aren't shared with other users.
+> Recordings are transcribed by OpenAI's API, and the transcript is tidied or translated by Anthropic's Claude API, both through Murmur's server. Before anything is recorded, the page "Before Murmur listens" names both services, says what each receives, and offers Allow and Not now (guideline 5.1.2(i)). In setup it comes after the system's microphone question, on the first exercise. Without Allow, Murmur doesn't turn the microphone on, so nothing is recorded or sent. The same permission is a switch in Settings › Data and privacy ("Write with AI services"). Neither service trains its models on the data. The user's words are typed into their own text field and aren't shared with other users.
 >
 > ACCOUNT DELETION
 > Open the menu, tap the account's row at the bottom, then Delete account. It deletes the account and its data on the server and revokes Sign in with Apple.

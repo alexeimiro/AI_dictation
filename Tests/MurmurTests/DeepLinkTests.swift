@@ -75,28 +75,57 @@ struct DeepLinkTests {
     }
 
     /// Someone left to swipe back by hand may take longer than the 10 s the session keeps their
-    /// recording. The dictation then starts again when the keyboard reports itself in their app,
-    /// for 45 s after Home said how to swipe back, and only then.
-    @Test func aDictationOwedAfterALateSwipeStartsWhenTheKeyboardIsBack() {
-        let link = Date(timeIntervalSince1970: 1_800_000_000)
-        let until = link.addingTimeInterval(AppModel.owedDictationWindow)
-        func step(after seconds: TimeInterval, phase: SessionController.Phase,
-                  murmurInFront: Bool = false) -> AppModel.OwedDictationStep {
-            AppModel.owedDictationStep(now: link.addingTimeInterval(seconds), until: until, phase: phase,
-                                       murmurInFront: murmurInFront)
+    /// recording. The dictation then starts again, for 45 s after Home said how to swipe back, and
+    /// only once the Murmur keyboard is back and UIKit says a keyboard is showing in the app Home
+    /// named. Opened anywhere else, nothing listens.
+    @Test func aDictationOwedAfterALateSwipeStartsOnlyInTheAppHomeNamed() {
+        let armed = Date(timeIntervalSince1970: 1_800_000_000)
+        let safari = "com.apple.mobilesafari"
+        let notes = "com.apple.mobilenotes"
+        func owed(back: Bool = true, report: String? = safari, onScreen: Bool? = true) -> AppModel.OwedDictation {
+            var owed = AppModel.OwedDictation(linkAt: armed.addingTimeInterval(-1), armedAt: armed, host: safari,
+                                              generation: 3)
+            if back { owed.keyboardBackAt = armed.addingTimeInterval(16) }
+            owed.awayReport = report.map {
+                KeyboardHostLog.Report(bundleID: $0, seenAt: armed.addingTimeInterval(16), onScreen: onScreen)
+            }
+            return owed
+        }
+        func step(_ owed: AppModel.OwedDictation, after seconds: TimeInterval = 17,
+                  phase: SessionController.Phase = .ready, generation: Int = 3,
+                  murmurActive: Bool = false) -> AppModel.OwedDictationStep {
+            AppModel.owedDictationStep(owed, now: armed.addingTimeInterval(seconds), phase: phase,
+                                       generation: generation, murmurActive: murmurActive)
         }
         #expect(AppModel.owedDictationWindow == 45)
-        #expect(step(after: 17, phase: .ready) == .start, "the recording was dropped at 10 s; the swipe came at 17 s")
-        #expect(step(after: 45, phase: .ready) == .start)
-        #expect(step(after: 45.1, phase: .ready) == .drop, "too long after the tap to start listening unasked")
-        #expect(step(after: 6, phase: .recording(UUID())) == .drop,
-                "back in time: the keyboard joins the recording itself")
-        #expect(step(after: 17, phase: .off) == .drop, "Murmur was turned off meanwhile")
-        #expect(step(after: 17, phase: .needsReconnect) == .drop)
+        #expect(step(owed()) == .start, "the recording was dropped at 10 s; the swipe back to Safari came at 17 s")
+        #expect(step(owed(), after: 45) == .start)
+        #expect(step(owed(report: "COM.APPLE.MOBILESAFARI")) == .start)
+        #expect(step(owed(onScreen: nil)) == .start, "UIKit didn't say, but named Safari")
+
+        // The review's case: Home said Safari, and the user opened Notes instead.
+        #expect(step(owed(report: notes)) == .elsewhere)
+        #expect(step(owed(back: false, report: notes)) == .elsewhere)
+
+        // Not known yet: wait for the other word.
+        #expect(step(owed(report: nil)) == .keep, "the keyboard is back, but UIKit hasn't said where")
+        #expect(step(owed(back: false)) == .keep, "UIKit says Safari has a keyboard, but Murmur's hasn't said it's back")
+        #expect(step(owed(onScreen: false)) == .keep, "the keyboard went away in Safari")
         // Murmur still in front: the keyboard is hiding as Murmur opens, or is in one of Murmur's
-        // own fields. The user hasn't gone back yet, so the dictation stays owed.
-        #expect(step(after: 1.2, phase: .recording(UUID()), murmurInFront: true) == .keep)
-        #expect(step(after: 17, phase: .ready, murmurInFront: true) == .keep)
+        // own fields. The user hasn't gone back yet.
+        #expect(step(owed(), after: 1.2, phase: .recording(UUID()), murmurActive: true) == .keep)
+        #expect(step(owed(), murmurActive: true) == .keep)
+
+        // Nothing is owed any more.
+        #expect(step(owed(), after: 45.1) == .drop, "too long after the tap to start listening unasked")
+        #expect(step(owed(), after: 45.1, murmurActive: true) == .drop)
+        #expect(step(owed(), after: 6, phase: .recording(UUID())) == .drop,
+                "back in time: the keyboard joins the recording itself")
+        #expect(step(owed(), phase: .off) == .drop, "Murmur was turned off meanwhile")
+        #expect(step(owed(), phase: .needsReconnect) == .drop)
+        #expect(step(owed(), generation: 4) == .drop, "the session stopped since")
+        #expect(step(owed(), generation: 5) == .drop, "the session stopped and started again since")
+        #expect(step(owed(), generation: 5, murmurActive: true) == .drop, "Home's stop clears it at once")
     }
 
     @Test func parsesLaunchOptions() {

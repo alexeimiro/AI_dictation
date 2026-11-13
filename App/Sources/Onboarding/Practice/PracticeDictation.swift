@@ -10,6 +10,9 @@ enum PracticeDictationState: Equatable, Sendable {
     /// The finished text. The real keyboard has already inserted it into the field.
     case completed(String)
     case failed(String)
+    /// "Not now" to "Before Murmur listens": no session, so nothing to dictate with. The page
+    /// offers the question again, or skipping the exercises.
+    case notAllowed
 }
 
 /// The dictation behind the practice screens. Production (`SessionPracticeClient`) is the real
@@ -19,8 +22,15 @@ protocol PracticeDictationClient: AnyObject {
     var state: PracticeDictationState { get }
     /// True when the keyboard inserts the result itself; a scripted client has the screen do it.
     var insertsText: Bool { get }
-    /// Turns the session on (so the keyboard's mic starts at once) and attributes the next
-    /// dictations to `exercise`. `page` names the page on screen, for `end(page:)`.
+    /// The first exercise is where "Before Murmur listens" is asked, after the system's question
+    /// about the microphone: true once it is allowed. After "Not now" it isn't asked again by the
+    /// next exercise; `askAgain()` does that. Asked before the box takes the keyboard, which would
+    /// cover the question's buttons.
+    func allow() async -> Bool
+    /// "Try again" after "Not now".
+    func askAgain() async -> Bool
+    /// Attributes the next dictations to `exercise` and, once allowed, turns the session on (so
+    /// the keyboard's mic starts at once). `page` names the page on screen, for `end(page:)`.
     func begin(_ exercise: PracticeExercise, page: UUID) async
     /// Stops attributing dictations to an exercise, unless another page has begun since: a page
     /// that is sliding away disappears only after the next one has begun.
@@ -36,19 +46,24 @@ protocol PracticeDictationClient: AnyObject {
 final class SessionPracticeClient: PracticeDictationClient {
     @ObservationIgnored private let session: SessionController
     @ObservationIgnored private let buffer: PracticeTranscriptBuffer
+    @ObservationIgnored private let consent: AIConsent
     private var exercise: PracticeExercise?
     private var beganAt = Date.distantFuture
     /// The page that began last; only it can end the exercise.
     @ObservationIgnored private var page: UUID?
+    /// "Not now" was the answer in this run.
+    private var declined = false
 
-    init(session: SessionController, buffer: PracticeTranscriptBuffer) {
+    init(session: SessionController, buffer: PracticeTranscriptBuffer, consent: AIConsent) {
         self.session = session
         self.buffer = buffer
+        self.consent = consent
     }
 
     var insertsText: Bool { true }
 
     var state: PracticeDictationState {
+        if declined, !consent.isGranted { return .notAllowed }
         switch session.phase {
         case .recording: return .listening
         case .processing: return .processing
@@ -62,11 +77,25 @@ final class SessionPracticeClient: PracticeDictationClient {
         }
     }
 
+    func allow() async -> Bool {
+        if consent.isGranted { return true }
+        guard !declined else { return false }
+        declined = !(await consent.ensure())
+        return !declined
+    }
+
+    func askAgain() async -> Bool {
+        declined = false
+        return await allow()
+    }
+
     func begin(_ exercise: PracticeExercise, page: UUID) async {
         self.page = page
         self.exercise = exercise
         beganAt = Date()
         buffer.activeExercise = exercise
+        // Without the OK there is no session: it would only ask again.
+        guard consent.isGranted else { return }
         if !session.isLive { await session.start() }
     }
 
@@ -88,20 +117,39 @@ final class ScriptedPracticeClient: PracticeDictationClient {
     @ObservationIgnored private var exercise: PracticeExercise?
     @ObservationIgnored private var page: UUID?
     @ObservationIgnored private let delay: Duration
+    /// The question as the app asks it; fixture runs allow without asking unless `-ai-consent`.
+    @ObservationIgnored private let consent: AIConsent
     /// The state passed to `init` is for the first screen only (a screenshot route).
     @ObservationIgnored private var startedOnce = false
+    @ObservationIgnored private var declined = false
 
-    init(state: PracticeDictationState = .idle, delay: Duration = .milliseconds(400)) {
+    init(state: PracticeDictationState = .idle, delay: Duration = .milliseconds(400),
+         consent: AIConsent = .allowedForFixtures()) {
         self.state = state
         self.delay = delay
+        self.consent = consent
     }
 
     var insertsText: Bool { false }
 
+    func allow() async -> Bool {
+        if consent.isGranted { return true }
+        if !declined { declined = !(await consent.ensure()) }
+        if declined { state = .notAllowed }
+        return !declined
+    }
+
+    func askAgain() async -> Bool {
+        declined = false
+        let allowed = await allow()
+        if allowed, state == .notAllowed { state = .idle }
+        return allowed
+    }
+
     func begin(_ exercise: PracticeExercise, page: UUID) async {
         self.page = page
         self.exercise = exercise
-        if startedOnce { state = .idle }
+        if startedOnce, state != .notAllowed { state = .idle }
         startedOnce = true
     }
 
@@ -112,6 +160,7 @@ final class ScriptedPracticeClient: PracticeDictationClient {
     }
 
     func simulateDictation() {
+        guard state != .notAllowed else { return }
         Task {
             state = .listening
             try? await Task.sleep(for: delay)

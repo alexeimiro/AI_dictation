@@ -62,11 +62,12 @@ struct RootView: View {
                 .onAppear { signInSheetOnScreen = true }
         }
         // After a reinstall, signing in brings back the account's style; a new account's trial is
-        // claimed.
+        // claimed, and an App Store subscription is sent to it.
         .onChange(of: model.account?.isSignedIn ?? false) { _, signedIn in
             if signedIn {
                 model.syncStyle()
                 model.claimTrial()
+                model.accountChanged()
             }
         }
     }

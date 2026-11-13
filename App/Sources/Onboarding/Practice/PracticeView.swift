@@ -14,6 +14,9 @@ struct PracticeView: View {
     /// This page, to the practice client: the page being left ends its exercise only after this
     /// one has begun, and mustn't end this one's.
     @State private var page = UUID()
+    /// Raised to put the keyboard up in the box: once "Before Murmur listens" is answered, since
+    /// the keyboard would cover the question's buttons.
+    @State private var focusRequest = 0
 
     var body: some View {
         let store = model.onboarding
@@ -47,6 +50,13 @@ struct PracticeView: View {
                 Button(OnboardingCopy.next) { store.send(.next) }
                     .buttonStyle(.murmur(.primary))
                     .transition(.opacity)
+            } else if notAllowed {
+                // "Not now" to the AI services: ask again, or go on without the exercises.
+                Button(OnboardingCopy.Practice.askAgain) { askAgain() }
+                    .buttonStyle(.murmur(.primary))
+                Button(OnboardingCopy.Practice.skipExercises) { store.send(.skipExercises) }
+                    .buttonStyle(.textOnly)
+                    .padding(.top, 4)
             }
         }
         .animation(.smooth(duration: 0.3), value: done)
@@ -61,7 +71,8 @@ struct PracticeView: View {
             }
         }
         .task {
-            // Gone before it began: nothing to attribute.
+            if await model.practice.allow() { focusBox() }
+            // Gone before it began, or while the question was up: nothing to attribute.
             guard !Task.isCancelled else { return }
             await model.practice.begin(exercise, page: page)
             if model.launchOptions.usesOnboardingFixtures {
@@ -84,9 +95,14 @@ struct PracticeView: View {
 
     // MARK: Pieces
 
-    /// Until the Murmur keyboard is up, the first exercise shows how to switch to it.
+    /// Until the Murmur keyboard is up, the first exercise shows how to switch to it. Not while
+    /// the AI services aren't allowed: there's no keyboard up then, and nothing to dictate with.
     private var showsKeyboardGuide: Bool {
-        exercise == .basic && !murmurKeyboardActive && text.isEmpty
+        exercise == .basic && !murmurKeyboardActive && text.isEmpty && !notAllowed
+    }
+
+    private var notAllowed: Bool {
+        model.practice.state == .notAllowed
     }
 
     @ViewBuilder
@@ -124,8 +140,7 @@ struct PracticeView: View {
     /// The box: a soft card with the text view in it, and for the email and the note a small
     /// label saying what it stands for.
     private var editor: some View {
-        // Fixture runs keep the keyboard down: they dictate through the scripted client.
-        let field = PracticeTextView(text: $text, focusOnAppear: !model.launchOptions.usesOnboardingFixtures) { active in
+        let field = PracticeTextView(text: $text, focusRequest: focusRequest) { active in
             if !model.launchOptions.usesOnboardingFixtures { murmurKeyboardActive = active }
         }
         return VStack(alignment: .leading, spacing: 0) {
@@ -196,6 +211,12 @@ struct PracticeView: View {
                         .controlSize(.small)
                         .tint(Theme.ink)
                 }
+            case .notAllowed:
+                Text(verbatim: OnboardingCopy.Practice.notAllowed)
+                    .font(.murmur(.subhead))
+                    .foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity)
             default:
                 fallbackFeedback
             }
@@ -232,6 +253,22 @@ struct PracticeView: View {
 
     // MARK: Behavior
 
+    /// Puts the keyboard up in the box. Fixture runs keep it down: they dictate through the
+    /// scripted client.
+    private func focusBox() {
+        guard !model.launchOptions.usesOnboardingFixtures else { return }
+        focusRequest += 1
+    }
+
+    /// "Try again" after "Not now": the question once more, then the exercise as usual.
+    private func askAgain() {
+        Task {
+            guard await model.practice.askAgain() else { return }
+            focusBox()
+            await model.practice.begin(exercise, page: page)
+        }
+    }
+
     private func apply(_ result: String) {
         if !model.practice.insertsText { text = result }
         model.onboarding.send(.practiceCompleted(exercise))
@@ -258,7 +295,8 @@ struct PracticeTextView: UIViewRepresentable {
     static let lineSpacing: CGFloat = 1.2
 
     @Binding var text: String
-    var focusOnAppear = true
+    /// Each raise puts the cursor in the box (and the keyboard up); 0 leaves it alone.
+    var focusRequest = 0
     let onKeyboardChange: (Bool) -> Void
 
     func makeUIView(context: Context) -> UITextView {
@@ -283,15 +321,21 @@ struct PracticeTextView: UIViewRepresentable {
         view.accessibilityLabel = OnboardingCopy.Practice.box
         context.coordinator.textView = view
         context.coordinator.observe()
-        if focusOnAppear {
-            DispatchQueue.main.async { view.becomeFirstResponder() }
-        }
+        focusIfRequested(view, context: context)
         return view
     }
 
     func updateUIView(_ view: UITextView, context: Context) {
         if view.text != text { view.text = text }
         context.coordinator.parent = self
+        focusIfRequested(view, context: context)
+    }
+
+    private func focusIfRequested(_ view: UITextView, context: Context) {
+        guard focusRequest != context.coordinator.focusRequest else { return }
+        context.coordinator.focusRequest = focusRequest
+        guard focusRequest > 0 else { return }
+        DispatchQueue.main.async { if !view.isFirstResponder { view.becomeFirstResponder() } }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -300,6 +344,8 @@ struct PracticeTextView: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: PracticeTextView
         weak var textView: UITextView?
+        /// The last `focusRequest` acted on.
+        var focusRequest = 0
         private var token: NSObjectProtocol?
 
         init(parent: PracticeTextView) {

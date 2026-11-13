@@ -139,7 +139,7 @@ struct MenuDrawer: View {
     @ViewBuilder
     private var plan: some View {
         let usage = model.quota?.usage()
-        let offersPro = !model.pro.isSubscribed
+        let offersPro = !model.hasProSubscription
         if usage != nil || offersPro {
             VStack(alignment: .leading, spacing: 10) {
                 if let usage {

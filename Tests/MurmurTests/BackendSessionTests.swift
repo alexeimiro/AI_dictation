@@ -242,6 +242,17 @@ struct BackendSessionTests {
         #expect(backend.client.auth.currentUser?.isAnonymous == true)
     }
 
+    /// A dictation dropped as the account ends (`SessionController.stop(discardingDictation:)`) is
+    /// cancelled: its request then finds no session, and mustn't make the user a new guest.
+    @Test func aCancelledCallMakesNoGuest() async throws {
+        let backend = try backend(storing: nil)
+        let call = Task { try await backend.ensureSession() }
+        call.cancel()
+        await #expect(throws: CancellationError.self) { try await call.value }
+        #expect(anonymousSignIns == 0)
+        #expect(backend.client.auth.currentSession == nil)
+    }
+
     /// A session that would run out within a dictation is refreshed while the user speaks
     /// (`BackendWarmup`), not when the request at stop needs it.
     @Test func aSessionExpiringSoonIsRefreshedEarly() async throws {

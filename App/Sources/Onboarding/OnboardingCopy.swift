@@ -158,6 +158,11 @@ enum OnboardingCopy {
         static let noteLabel = "Note"
         static let notePrompt = "Things to do today:\n1. Run the laundry\n2. Buy groceries"
 
+        /// After "Not now" to "Before Murmur listens" (`AIConsentCopy`).
+        static let notAllowed = "Murmur writes what you say with its AI services, so the exercises need your OK. You can skip them and try Murmur later."
+        static let askAgain = "Try again"
+        static let skipExercises = "Skip the exercises"
+
         static let listening = "Listening. Go ahead."
         static let writing = "Writing…"
         static let fullAccess = "Turn on Allow Full Access so the keyboard can dictate."

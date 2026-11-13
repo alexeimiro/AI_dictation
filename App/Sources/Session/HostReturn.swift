@@ -19,9 +19,21 @@ final class HostReturn {
 
     @ObservationIgnored private let observer = KeyboardHostObserver()
     @ObservationIgnored private let logger = Logger(subsystem: "Murmur", category: "Return")
+    /// Each time UIKit reports a keyboard change, on the main actor: the owed dictation
+    /// (`AppModel.keyboardHostReported`) waits for word of the app the keyboard is in.
+    @ObservationIgnored var onKeyboardReport: (() -> Void)?
+
+    init() {
+        observer.onReport = { [weak self] in
+            Task { @MainActor in self?.onKeyboardReport?() }
+        }
+    }
 
     /// False once an iOS update removes what the observer reads; then it's always the swipe.
     var isAvailable: Bool { observer.isAttached }
+
+    /// UIKit's latest report of a keyboard in another app.
+    var latestReport: KeyboardHostLog.Report? { observer.log.latest }
 
     /// Waits until dictation `requestId` is recording, however long the start takes (a question, a
     /// permission alert, a slow audio route), then reopens the app the keyboard was used in.
@@ -41,7 +53,7 @@ final class HostReturn {
             case .open(let entry):
                 let opened = await UIApplication.shared.open(entry.url)
                 if opened { session.didReturnToHost(for: requestId) }
-                return record(opened ? .returned(app: entry.name) : .couldNotOpen(app: entry.name),
+                return record(opened ? .returned(app: entry.name) : .couldNotOpen(app: entry.name, host: host ?? ""),
                               plan: plan, linkAt: linkAt)
             case .stop(let outcome):
                 return record(outcome, plan: plan, linkAt: linkAt)
@@ -64,9 +76,10 @@ final class HostReturn {
         return outcome
     }
 
-    /// The user swiped back by hand, and the keyboard reported itself in their app. `word` says
-    /// what became of the dictation they were owed (`AppModel.keyboardStatusChanged`):
-    /// "listeningAgain" when it was started again because the session had dropped their recording.
+    /// The user swiped back by hand, and the keyboard reported itself. `word` says what became of
+    /// the dictation they were owed (`AppModel.settleOwedDictation`): "listeningAgain" when it was
+    /// started again because the session had dropped their recording, "otherApp" when the keyboard
+    /// turned up in an app other than the one Home named.
     func noteOwedDictation(_ word: String, sinceLink: TimeInterval) {
         let milliseconds = Int((sinceLink * 1000).rounded())
         lastOutcome = (lastOutcome.map { "\($0); " } ?? "") + "\(word) \(milliseconds) ms after the link"
@@ -102,8 +115,8 @@ enum ReturnOutcome: Equatable {
     case notLearned
     /// The app is known but has no URL that brings it back as it was.
     case notListed(host: String)
-    /// iOS refused the app's URL.
-    case couldNotOpen(app: String)
+    /// iOS refused the app's URL. `host`: its bundle ID.
+    case couldNotOpen(app: String, host: String)
     /// The microphone is on, but that dictation isn't recording: it was dropped, or it ended.
     case notRecording(host: String?)
     /// The session didn't start, or was turned off.
@@ -139,13 +152,22 @@ enum ReturnOutcome: Equatable {
         }
     }
 
+    /// The bundle ID of the app the user is to go back to, when UIKit named it.
+    var host: String? {
+        switch self {
+        case .returned, .notLearned, .sessionOff, .left: nil
+        case .couldNotOpen(_, let host), .notListed(let host): host.isEmpty ? nil : host
+        case .turnedOff(let host), .notRecording(let host): host
+        }
+    }
+
     /// What Home says when the user has to go back by hand; nil when they are back already, or
     /// have nothing to go back for.
     var hint: ReturnHint? {
         switch self {
         case .returned, .sessionOff, .left: nil
         case .notLearned: ReturnHint(appName: nil)
-        case .couldNotOpen(let app): ReturnHint(appName: app)
+        case .couldNotOpen(let app, _): ReturnHint(appName: app)
         case .notListed(let host): ReturnHint(appName: HostAppCatalog.name(forBundleID: host))
         case .turnedOff(let host), .notRecording(let host):
             ReturnHint(appName: host.flatMap(HostAppCatalog.name(forBundleID:)))
@@ -227,43 +249,70 @@ struct ReturnPlan {
     }
 }
 
-/// The app UIKit last reported as showing a keyboard. Separate from the observer, so the rules
+/// The app UIKit last reported a keyboard change in. Separate from the observer, so the rules
 /// about which reports count can be tested.
 struct KeyboardHostLog {
     /// A report up to this much older than the keyboard's link still names the app it came from:
     /// it often arrives first, especially when the link launches Murmur.
     static let lookBack: TimeInterval = 5
 
-    private(set) var latest: (bundleID: String, seenAt: Date)?
+    struct Report: Equatable, Sendable {
+        let bundleID: String
+        let seenAt: Date
+        /// Whether the keyboard was on screen in that app; nil when UIKit didn't say.
+        let onScreen: Bool?
+    }
+
+    private(set) var latest: Report?
     /// Murmur and its extensions show keyboards too; they are never the app to go back to.
     let ownBundleID: String?
 
     mutating func record(_ bundleID: String, at date: Date) {
-        let trimmed = bundleID.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        if let ownBundleID, trimmed == ownBundleID || trimmed.hasPrefix(ownBundleID + ".") { return }
-        latest = (trimmed, date)
+        record(source: bundleID, host: nil, onScreen: nil, at: date)
+    }
+
+    /// `source` names the app whose keyboard changed. `host` is a second name UIKit gives, used
+    /// when the source is missing or is Murmur's own keyboard.
+    mutating func record(source: String?, host: String?, onScreen: Bool?, at date: Date) {
+        guard let app = app(from: source) ?? app(from: host) else { return }
+        latest = Report(bundleID: app, seenAt: date, onScreen: onScreen)
     }
 
     func recent(since date: Date) -> String? {
         guard let latest, latest.seenAt >= date else { return nil }
         return latest.bundleID
     }
+
+    private func app(from name: String?) -> String? {
+        guard let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        if let ownBundleID, trimmed == ownBundleID || trimmed.hasPrefix(ownBundleID + ".") { return nil }
+        return trimmed
+    }
 }
 
 /// Watches `currentState` on UIKit's `_UIRemoteKeyboards`, whose `sourceBundleIdentifier` names
-/// the app that last showed a keyboard. Every step is checked first, because asking an object for
-/// a key it doesn't have raises an Objective-C exception that Swift can't catch.
+/// the app that last showed or hid a keyboard (`hostBundleIdentifier` is a second name it may
+/// give), and whose `keyboardPosition` is empty while no keyboard is on screen. Every step is
+/// checked first, because asking an object for a key it doesn't have raises an Objective-C
+/// exception that Swift can't catch.
 private final class KeyboardHostObserver: NSObject, @unchecked Sendable {
     private static let stateKey = "currentState"
     private static let sourceKey = "sourceBundleIdentifier"
+    private static let hostKey = "hostBundleIdentifier"
+    private static let positionKey = "keyboardPosition"
 
     private let lock = NSLock()
     private var _log = KeyboardHostLog(ownBundleID: Bundle.main.bundleIdentifier)
+    private var _onReport: (@Sendable () -> Void)?
     private let remoteKeyboards: NSObject?
 
     var log: KeyboardHostLog { lock.withLock { _log } }
     var isAttached: Bool { remoteKeyboards != nil }
+    /// After each report is in the log.
+    var onReport: (@Sendable () -> Void)? {
+        get { lock.withLock { _onReport } }
+        set { lock.withLock { _onReport = newValue } }
+    }
 
     override init() {
         remoteKeyboards = Self.sharedRemoteKeyboards()
@@ -285,10 +334,26 @@ private final class KeyboardHostObserver: NSObject, @unchecked Sendable {
 
     override func observeValue(forKeyPath keyPath: String?, of object: Any?,
                                change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {
-        guard let state = change?[.newKey] as? NSObject,
-              state.responds(to: NSSelectorFromString(Self.sourceKey)),
-              let bundleID = state.value(forKey: Self.sourceKey) as? String else { return }
-        lock.withLock { _log.record(bundleID, at: Date()) }
+        guard let state = change?[.newKey] as? NSObject else { return }
+        let source = Self.string(state, Self.sourceKey)
+        let host = Self.string(state, Self.hostKey)
+        guard source != nil || host != nil else { return }
+        var onScreen: Bool?
+        if state.responds(to: NSSelectorFromString(Self.positionKey)),
+           let position = state.value(forKey: Self.positionKey) as? NSValue {
+            let frame = position.cgRectValue
+            onScreen = frame.width > 0 && frame.height > 0
+        }
+        let report = lock.withLock {
+            _log.record(source: source, host: host, onScreen: onScreen, at: Date())
+            return _onReport
+        }
+        report?()
+    }
+
+    private static func string(_ state: NSObject, _ key: String) -> String? {
+        guard state.responds(to: NSSelectorFromString(key)) else { return nil }
+        return state.value(forKey: key) as? String
     }
 }
 

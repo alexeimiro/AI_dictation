@@ -202,6 +202,8 @@ final class Backend: SessionRenewing {
                 account.sessionEnded()
                 throw BackendError.signedOut
             }
+            // A discarded dictation's request (the account just ended) mustn't make a new guest.
+            try Task.checkCancellation()
             logger.info("No session; signing in anonymously")
             _ = try await client.auth.signInAnonymously()
             onGuestSession?()

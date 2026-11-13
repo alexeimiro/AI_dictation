@@ -5,7 +5,8 @@ import SwiftUI
 
 /// Murmur Pro: what it adds, the annual and monthly plans with the App Store's local prices,
 /// Continue, Restore purchase and the terms. A subscriber sees their plan and Manage subscription
-/// instead.
+/// instead. When the Apple Account subscribes but the account signed in isn't on Pro (it changed
+/// since the purchase), Restore purchase is the way, with what the server said.
 struct PaywallView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -18,6 +19,9 @@ struct PaywallView: View {
 
     var body: some View {
         let store = model.pro
+        let subscribed = model.hasProSubscription
+        // The plans can't be bought again on this Apple Account: Restore purchase instead.
+        let offersPlans = !store.isSubscribed
         let options = model.launchOptions.useFixtures ? PlanOption.fixtures : PlanOption.options(from: store.products)
         // At the largest text sizes the buttons scroll with the rest: pinned, they would leave
         // no room for the plans.
@@ -66,12 +70,16 @@ struct PaywallView: View {
                         }
                     }
                     .padding(.top, 18)
-                    if store.isSubscribed {
-                        subscribed
+                    if subscribed {
+                        subscribedPlan
                     } else {
-                        plans(options, loading: store.isLoading)
+                        if offersPlans {
+                            plans(options, loading: store.isLoading)
+                        } else {
+                            notOnThisAccount
+                        }
                         if !pinsFooter {
-                            footer(options)
+                            footer(options, offersPlans: offersPlans)
                                 .padding(.horizontal, -24)
                                 .padding(.top, 12)
                         }
@@ -82,8 +90,8 @@ struct PaywallView: View {
                 .padding(.top, 8)
                 .padding(.bottom, 16)
             }
-            if !store.isSubscribed, pinsFooter {
-                footer(options)
+            if !subscribed, pinsFooter {
+                footer(options, offersPlans: offersPlans)
             }
         }
         .background(Theme.canvas.ignoresSafeArea())
@@ -133,7 +141,22 @@ struct PaywallView: View {
         .padding(.top, 24)
     }
 
-    private var subscribed: some View {
+    /// The App Store's subscription is this Apple Account's, but the account signed in isn't on
+    /// Pro: after a deleted account, or another account's sign-in.
+    private var notOnThisAccount: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Your Apple Account has \(Brand.name) Pro")
+                .font(.murmur(.headline))
+                .foregroundStyle(Theme.ink)
+            Text("This \(Brand.name) account isn’t on it yet. Tap Restore purchase to use it here.")
+                .font(.murmur(.subhead))
+                .foregroundStyle(Theme.second)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.top, 28)
+    }
+
+    private var subscribedPlan: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("You’re on \(Brand.name) Pro")
                 .font(.murmur(.headline))
@@ -148,30 +171,43 @@ struct PaywallView: View {
         .padding(.top, 28)
     }
 
-    private func footer(_ options: [PlanOption]) -> some View {
+    /// `offersPlans`: Continue buys the plan chosen; without it Restore purchase is the button,
+    /// and what the server said the last time the subscription was sent shows above it.
+    private func footer(_ options: [PlanOption], offersPlans: Bool) -> some View {
         let store = model.pro
         let busy = store.isPurchasing || restoring
         return VStack(spacing: 6) {
-            FieldError(message: message)
+            FieldError(message: message ?? (offersPlans ? nil : store.syncMessage))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.bottom, 4)
-            Button(action: purchase) {
-                HStack(spacing: 10) {
-                    if store.isPurchasing { ProgressView().tint(Theme.ink) }
-                    Text("Continue with \(Brand.name) Pro")
+            if offersPlans {
+                Button(action: purchase) {
+                    HStack(spacing: 10) {
+                        if store.isPurchasing { ProgressView().tint(Theme.ink) }
+                        Text("Continue with \(Brand.name) Pro")
+                    }
                 }
+                .buttonStyle(.murmur(.primary))
+                .disabled(busy || !options.contains { $0.id == selection })
+                Button(action: restore) {
+                    Text(restoring ? "Restoring…" : "Restore purchase")
+                        .font(.murmur(.subhead, weight: .semibold))
+                        .foregroundStyle(Theme.ink)
+                        .frame(minHeight: 44)
+                        .contentShape(.rect)
+                }
+                .buttonStyle(.plain)
+                .disabled(busy)
+            } else {
+                Button(action: restore) {
+                    HStack(spacing: 10) {
+                        if restoring { ProgressView().tint(Theme.ink) }
+                        Text(restoring ? "Restoring…" : "Restore purchase")
+                    }
+                }
+                .buttonStyle(.murmur(.primary))
+                .disabled(busy)
             }
-            .buttonStyle(.murmur(.primary))
-            .disabled(busy || !options.contains { $0.id == selection })
-            Button(action: restore) {
-                Text(restoring ? "Restoring…" : "Restore purchase")
-                    .font(.murmur(.subhead, weight: .semibold))
-                    .foregroundStyle(Theme.ink)
-                    .frame(minHeight: 44)
-                    .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .disabled(busy)
             Text("Renews automatically until you cancel. Cancel anytime in Settings › Apple Account › Subscriptions.")
                 .font(.murmur(.caption))
                 .foregroundStyle(Theme.third)

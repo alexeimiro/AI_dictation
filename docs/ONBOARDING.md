@@ -19,8 +19,8 @@ and their choices. The steps are the cases of `OnboardingStep`, in this order:
 | `setupIntro` | Opens the second part | "Set up" |
 | `keyboardInstructions` | What to turn on in Settings, and the way there | The keyboard is detected on return |
 | `practiceIntro` | Opens the third part | "Try Murmur" |
-| `microphonePrimer` | Why the microphone, before the system asks; its button first asks "Before Murmur listens" | Access is granted |
-| `basicPractice` | Say anything; first shows how to switch keyboards | Any text in the box, typed or dictated |
+| `microphonePrimer` | Why the microphone, before the system asks; its one button asks the system's question | Access is granted |
+| `basicPractice` | Say anything; first asks "Before Murmur listens", then shows how to switch keyboards | Any text in the box, typed or dictated |
 | `formattingPractice` | Dictate an email and change it halfway | A dictation |
 | `whisperIntro`, `whisperPractice` | Whisper a note | A dictation |
 | `practiceComplete` | A tick for each exercise done | "Continue" |
@@ -49,12 +49,17 @@ on the pages that open a part, `ready` and `trialOffer`, which have none.
 - **Full Access is confirmed in practice, not on return from Settings.** iOS only shows it once the
   keyboard has run. Setup moves on when the keyboard is detected; the first exercise checks Full
   Access once the Murmur keyboard is up and points to Settings if the keyboard never reports in.
-- **Microphone.** The page explains first and asks once, after a tap. If access is denied or
-  restricted it offers Settings, or "Skip the exercises", which goes to the last part.
-- **The AI question.** That tap first shows "Before Murmur listens" (`AIConsentView`): a recording
-  goes to OpenAI and its text to Anthropic, with Allow and Not now. It isn't a step of the journey:
-  the session asks the same question before it turns the microphone on, wherever that happens, so
-  someone who skips the exercises is asked at their first dictation. "Not now" stays on the page.
+- **Microphone.** The page explains first and asks once, after a tap. Its only button goes
+  straight to the system's question: App Review rejects a page with a way out shown before a
+  permission alert (5.1.1). If access is denied or restricted it offers Settings, or "Skip the
+  exercises", which goes to the last part.
+- **The AI question.** The first exercise asks "Before Murmur listens" (`AIConsentView`), after the
+  system's question: a recording goes to OpenAI and its text to Anthropic, with Allow and Not now.
+  It is asked before the box takes the keyboard, which would cover its buttons. It isn't a step of
+  the journey: the session asks the same question before it turns the microphone on, wherever that
+  happens, so someone who skips the exercises is asked at their first dictation. After "Not now" the
+  exercise offers "Try again" (the question once more) or "Skip the exercises", which goes to the
+  last part; the next exercises don't ask again by themselves.
 - **Exercises.** The box is a real text view, so a dictation runs through the real keyboard and
   session. The takes are held until onboarding completes and then copied into history once, one
   entry per exercise. A page being left disappears only after the next page has begun, so only

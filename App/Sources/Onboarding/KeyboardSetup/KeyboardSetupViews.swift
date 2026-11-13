@@ -72,7 +72,9 @@ struct KeyboardInstructionsView: View {
     }
 }
 
-/// Why the microphone, before the system asks. Denied or restricted access gets a way to
+/// Why the microphone, before the system asks. Its one button goes straight to the system's
+/// question (App Review 5.1.1: no way out of a page shown before a permission alert); "Before
+/// Murmur listens" comes after, on the first exercise. Denied or restricted access gets a way to
 /// Settings, and onboarding can go on without the exercises.
 struct MicrophonePrimerView: View {
     @Environment(AppModel.self) private var model
@@ -129,8 +131,6 @@ struct MicrophonePrimerView: View {
             requesting = true
             Task {
                 defer { requesting = false }
-                // Where a recording goes comes before the system's question about the microphone.
-                guard await model.aiConsent.ensure() else { return }
                 // The reducer moves on when the answer is "granted".
                 _ = await model.requestMicrophone()
             }

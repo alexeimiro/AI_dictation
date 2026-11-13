@@ -34,6 +34,9 @@ final class SessionController {
     }
 
     private(set) var phase: Phase = .off
+    /// Counts the session's starts and stops, so what was owed to one session (the dictation a
+    /// late swipe back starts again, `AppModel.owedDictation`) isn't owed to the next.
+    @ObservationIgnored private(set) var generation = 0
     private(set) var engineName = ""
     /// Extra detail while starting (e.g. the first-run speech model download).
     private(set) var startDetail: String?
@@ -69,6 +72,9 @@ final class SessionController {
     @ObservationIgnored private let logger = Logger(subsystem: "Murmur", category: "Session")
     @ObservationIgnored private var transcriber: Transcriber?
     @ObservationIgnored private var active: ActiveDictation?
+    /// Dictations being written (transcribed, tidied), by request: a stop that discards them
+    /// cancels these.
+    @ObservationIgnored private var completions: [UUID: (dictation: ActiveDictation, task: Task<Void, Never>)] = [:]
     @ObservationIgnored private var handledCommands: Set<UUID> = []
     @ObservationIgnored private var commandObservation: IPCObservation?
     @ObservationIgnored private var notificationTokens: [NSObjectProtocol] = []
@@ -159,6 +165,7 @@ final class SessionController {
         default: break
         }
         let startedAt = ContinuousClock.now
+        generation += 1
         phase = .starting
         publisher.set(.starting)
         transport.post(.stateChanged)
@@ -493,13 +500,22 @@ final class SessionController {
         await assets.reconcileReservations(keep: keep)
     }
 
-    /// Ends the session and releases the microphone.
-    func stop() {
-        if active != nil { endDictation(commit: true) }
+    /// Ends the session and releases the microphone. A dictation being recorded is finished and
+    /// sent, unless `discardingDictation`: then it, and any still being written, are dropped, and
+    /// nothing more of them is sent, typed or saved. That is for the OK to the AI services taken
+    /// back, and for an account that ended.
+    func stop(discardingDictation: Bool = false) {
+        // Nothing waiting may start on the way out.
         requestedStart = nil
+        queuedStart = nil
+        if discardingDictation {
+            discardDictations()
+        } else if active != nil {
+            endDictation(commit: true)
+        }
+        generation += 1
         jump = nil
         autoStarted = nil
-        queuedStart = nil
         cancelledRequests = []
         heartbeatTask?.cancel()
         idleTask?.cancel()
@@ -521,6 +537,35 @@ final class SessionController {
         transport.post(.stateChanged)
         liveActivity.end()
         logger.info("Session stopped")
+    }
+
+    /// Drops the dictation being recorded and those still being written: the recording isn't sent,
+    /// and a cancelled completion neither types, saves nor uploads anything more (`endDictation`).
+    /// A keyboard waiting for one of them is told it was cancelled.
+    func discardDictations() {
+        if let dictation = active {
+            active = nil
+            capTask?.cancel()
+            _ = audio.closeGate()
+            playSound(.stop)
+            transcriber?.abandonUtterance()
+            tellKeyboardCancelled(dictation)
+            logger.info("Discarded the dictation being recorded")
+        }
+        for (dictation, task) in completions.values {
+            task.cancel()
+            tellKeyboardCancelled(dictation)
+            logger.info("Discarded a dictation being written")
+        }
+        completions = [:]
+    }
+
+    private func tellKeyboardCancelled(_ dictation: ActiveDictation) {
+        guard dictation.source == .keyboard else { return }
+        try? transport.payloads.write(result: DictationResult(
+            requestId: dictation.requestId, documentIdentifier: dictation.documentIdentifier, text: "",
+            status: .cancelled, createdAt: Date(), language: dictation.language), updatesLatest: false)
+        transport.post(.resultReady)
     }
 
     /// Called when the app becomes active: no "Turn off after" countdown while it's on screen, and
@@ -712,9 +757,16 @@ final class SessionController {
         liveActivity.update(.processing, since: nil)
         let stoppedAt = ContinuousClock.now
         beginBackgroundWork()
-        Task {
+        let completion = Task {
             let outcome = await pipeline.complete(
                 dictation, transcriber: transcriber, audioSeconds: audioSeconds, stoppedAt: stoppedAt)
+            // Discarded meanwhile (`discardDictations`): its requests were cancelled with it, and
+            // nothing of it is typed or saved. The history may have just been wiped.
+            guard !Task.isCancelled else {
+                endBackgroundWork()
+                return
+            }
+            completions[dictation.requestId] = nil
             // The keyboard (or the note) first, then history and the timings, so saving never
             // delays the insertion.
             if dictation.source == .inApp {
@@ -743,6 +795,7 @@ final class SessionController {
             }
             endBackgroundWork()
         }
+        completions[dictation.requestId] = (dictation, completion)
     }
 
     private func deliver(_ result: DictationResult) {

@@ -70,7 +70,7 @@ struct PracticeDictationTests {
         session.startForTesting(
             with: PracticeTranscriber(),
             language: ResolvedLanguage(tag: "en-US", locale: Locale(identifier: "en-US"), engine: .speech))
-        practice = SessionPracticeClient(session: session, buffer: buffer)
+        practice = SessionPracticeClient(session: session, buffer: buffer, consent: .allowedForFixtures())
     }
 
     /// The keyboard's mic tapped, then tapped again, as in the practice box.

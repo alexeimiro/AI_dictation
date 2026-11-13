@@ -26,8 +26,13 @@ final class ProStore {
     private(set) var products: [Product] = []
     private(set) var isLoading = false
     private(set) var isPurchasing = false
-    /// This Apple Account has a current Murmur Pro subscription, as StoreKit sees it.
+    /// This Apple Account has a current Murmur Pro subscription, as StoreKit sees it. Whether the
+    /// signed-in account has it is the server's answer (`AppModel.hasProSubscription`).
     private(set) var isSubscribed = false
+    /// Why the server didn't take the subscription the last time it was sent (another account
+    /// holds it, or it couldn't be reached); nil once it took it. The paywall shows it with
+    /// Restore purchase.
+    private(set) var syncMessage: String?
 
     /// After the server took a transaction, so the plan shown can be refreshed.
     @ObservationIgnored var onSynced: (() -> Void)?
@@ -110,8 +115,16 @@ final class ProStore {
         return isSubscribed ? nil : "There's no Murmur Pro subscription on this Apple Account."
     }
 
-    /// The current subscription, to the server, unless the same transaction went there in the last
-    /// few hours (`force` sends it anyway). Returns a message when it couldn't be confirmed.
+    /// Another account signed in, or a guest's session started: the subscription is sent again,
+    /// so the server gives it to this account when it can (the account it was tied to is gone).
+    func accountChanged() async {
+        syncMessage = nil
+        await refresh(force: true)
+    }
+
+    /// The current subscription, to the server, unless the same transaction went there for the
+    /// same account in the last few hours (`force` sends it anyway). Returns a message when it
+    /// couldn't be confirmed.
     @discardableResult
     func refresh(force: Bool = false) async -> String? {
         var subscribed = false
@@ -146,11 +159,14 @@ final class ProStore {
         do {
             try await send(result.jwsRepresentation)
         } catch .httpError(code: 409) {
-            return "This subscription belongs to another Murmur account. Sign in with that account to use it."
+            syncMessage = "This subscription belongs to another Murmur account. Sign in with that account to use it."
+            return syncMessage
         } catch {
             logger.error("verify-purchase failed: \(error.localizedDescription, privacy: .public)")
-            return "Your purchase went through, but Murmur couldn't confirm it yet. It tries again on its own, or tap Restore purchase."
+            syncMessage = "Your purchase went through, but Murmur couldn't confirm it yet. It tries again on its own, or tap Restore purchase."
+            return syncMessage
         }
+        syncMessage = nil
         markSent(transaction.id)
         await transaction.finish()
         onSynced?()
@@ -164,17 +180,28 @@ final class ProStore {
 
     private static let sentKey = "pro.sentTransaction"
     private static let sentAtKey = "pro.sentAt"
+    private static let sentAccountKey = "pro.sentAccount"
     /// A subscriber's every launch would otherwise ask the server again.
     static let resendAfter: TimeInterval = 6 * 3600
 
-    private func recentlySent(_ id: UInt64) -> Bool {
+    /// Sent lately, and for the account signed in now: one sent for another account (deleted, or
+    /// signed out of) says nothing about this one's plan.
+    func recentlySent(_ id: UInt64, now: Date = Date()) -> Bool {
         guard defaults.string(forKey: Self.sentKey) == String(id),
               let at = defaults.object(forKey: Self.sentAtKey) as? Date else { return false }
-        return Date().timeIntervalSince(at) < Self.resendAfter
+        if let account = accountToken(), defaults.string(forKey: Self.sentAccountKey) != account.uuidString {
+            return false
+        }
+        return now.timeIntervalSince(at) < Self.resendAfter
     }
 
-    private func markSent(_ id: UInt64) {
+    func markSent(_ id: UInt64, now: Date = Date()) {
         defaults.set(String(id), forKey: Self.sentKey)
-        defaults.set(Date(), forKey: Self.sentAtKey)
+        defaults.set(now, forKey: Self.sentAtKey)
+        if let account = accountToken() {
+            defaults.set(account.uuidString, forKey: Self.sentAccountKey)
+        } else {
+            defaults.removeObject(forKey: Self.sentAccountKey)
+        }
     }
 }

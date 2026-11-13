@@ -30,6 +30,11 @@ enum OnboardingReducer {
                 next.step = target
             }
 
+        case .skipExercises:
+            // The exercises dictate through the AI services; without the OK the rest still runs.
+            guard [.basicPractice, .formattingPractice, .whisperPractice].contains(step) else { return nil }
+            next.step = .wrapUpIntro
+
         case .toggleUseCase(let useCase):
             guard step == .useCases else { return nil }
             if let index = next.answers.useCases.firstIndex(of: useCase) {

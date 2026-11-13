@@ -40,8 +40,9 @@ final class AppModel {
     /// After a return that left the user to swipe back by hand: the dictation they tapped the mic
     /// for is owed to them until `until`. The session drops a recording the keyboard hasn't joined
     /// in time (`SessionController.keyboardReturnWindow`); if that happened before they were back,
-    /// the dictation starts again when the keyboard reappears (`keyboardStatusChanged`).
-    @ObservationIgnored private var owedDictation: (linkAt: Date, until: Date)?
+    /// the dictation starts again once the keyboard is showing in the app Home named
+    /// (`settleOwedDictation`).
+    @ObservationIgnored private var owedDictation: OwedDictation?
     /// How long after Home said how to swipe back a dictation is still owed: time to read the line
     /// and swipe, and short enough that the mic tap is still what the user has in mind.
     nonisolated static let owedDictationWindow: TimeInterval = 45
@@ -69,6 +70,20 @@ final class AppModel {
     let pro: ProStore
     /// Murmur Pro's plans are on screen.
     var showsPaywall = false
+
+    /// This iPhone's Apple Account pays for Murmur Pro, and the account signed in has it. StoreKit
+    /// alone isn't enough: after an account change the server may not have given the subscription
+    /// to this account (a paid Pro, not the trial, in `quota`). Until it has, the way to Pro shows,
+    /// and the paywall offers Restore purchase. Before the first answer, StoreKit's word stands.
+    var hasProSubscription: Bool {
+        Self.hasProSubscription(storeKit: pro.isSubscribed, quota: quota)
+    }
+
+    nonisolated static func hasProSubscription(storeKit subscribed: Bool, quota: AccountService.Quota?) -> Bool {
+        guard subscribed else { return false }
+        guard let quota else { return true }
+        return quota.isPro && !quota.onTrial
+    }
     /// The "Sign in again" sheet while it's up, and where it opened. RootView presents it, so it
     /// also opens during onboarding; the keyboard's start and the start dialog close it first.
     var signInSheet: SignInAgainView.Start?
@@ -159,10 +174,11 @@ final class AppModel {
                 offer: OnboardingFixtures.offer(variant: launchOptions.onboardingVariant), account: account)
             practice = ScriptedPracticeClient(
                 state: OnboardingFixtures.practiceState(step: launchOptions.onboardingStep,
-                                                        variant: launchOptions.onboardingVariant))
+                                                        variant: launchOptions.onboardingVariant),
+                consent: aiConsent)
         } else {
             onboardingServices = .production(backend: backend, trial: trial)
-            practice = SessionPracticeClient(session: session, buffer: practiceBuffer)
+            practice = SessionPracticeClient(session: session, buffer: practiceBuffer, consent: aiConsent)
         }
         onboarding = Self.makeOnboardingStore(
             launchOptions: launchOptions,
@@ -206,12 +222,16 @@ final class AppModel {
         keyboardObservation = transport.observe(.keyboardStatus) { [weak self] in
             MainActor.assumeIsolated { self?.keyboardStatusChanged() }
         }
+        hostReturn.onKeyboardReport = { [weak self] in self?.keyboardHostReported() }
         importKeyboardAdditions()
         dataSharing = UserDefaults.standard.object(forKey: Self.dataSharingKey) as? Bool
             ?? (onboarding.answers.dataChoice?.choice == .improveModel)
         pro.onSynced = { [weak self] in self?.refreshQuota() }
         trial.onGranted = { [weak self] in self?.refreshQuota() }
-        backend?.onGuestSession = { [weak self] in self?.claimTrial() }
+        backend?.onGuestSession = { [weak self] in
+            self?.claimTrial()
+            self?.accountChanged()
+        }
         // `Backend.init` has already taken a stored session; Auth's own events come after this.
         account?.onChange = { [weak self] in self?.accountDidChange() }
         publishSignIn()
@@ -326,6 +346,8 @@ final class AppModel {
         onboarding.markHistorySeeded()
         librarySync?.syncSoon()
         syncStyle()
+        // The plan, for the menu and for whether the paywall offers Restore purchase.
+        refreshQuota()
         let answers = record.answers
         Task { await onboardingServices.profile.sync(answers) }
         redeemPendingInvite()
@@ -425,15 +447,25 @@ final class AppModel {
         }
     }
 
-    /// Settings' "Write with AI services". Off turns the microphone off, so nothing more is sent;
-    /// the next start asks again.
+    /// Settings' "Write with AI services". Off turns the microphone off and drops a dictation
+    /// under way, so nothing more is sent; the next start asks again.
     func setAIConsent(_ allowed: Bool) {
         if allowed {
             aiConsent.grant()
         } else {
             aiConsent.withdraw()
-            session.stop()
+            session.stop(discardingDictation: true)
         }
+    }
+
+    /// Another account signed in, or a guest's session started: the App Store subscription is sent
+    /// to the server again, which gives it to this account when the one it was tied to is gone
+    /// (deleted, or a guest's). Otherwise a subscriber who deleted the account and signed in again
+    /// would stay on Basic.
+    func accountChanged() {
+        guard !launchOptions.useFixtures, !launchOptions.usesOnboardingFixtures, launchOptions.accountState == nil
+        else { return }
+        Task { await pro.accountChanged() }
     }
 
     /// Asks the server for this account's free trial until it has decided (`TrialClaim`): after a
@@ -453,8 +485,11 @@ final class AppModel {
         }
     }
 
-    /// Sign out: this iPhone forgets the account and its data, and onboarding starts over.
+    /// Sign out: this iPhone forgets the account and its data, and onboarding starts over. A
+    /// dictation under way is dropped first: finished after the account is forgotten, its upload
+    /// would sign in a new guest and its text land in the emptied history.
     func signOut() async {
+        session.stop(discardingDictation: true)
         await accountService.signOut()
         resetAfterAccountEnded()
     }
@@ -481,13 +516,16 @@ final class AppModel {
         } catch {
             return error.localizedDescription
         }
+        // As for a sign-out: before the account is forgotten.
+        session.stop(discardingDictation: true)
         await accountService.signOut()
         resetAfterAccountEnded()
         return nil
     }
 
     private func resetAfterAccountEnded() {
-        session.stop()
+        // Again, for one that started meanwhile.
+        session.stop(discardingDictation: true)
         // Whoever uses this iPhone next is asked for themselves.
         aiConsent.withdraw()
         // Before the library goes: what's deleted here stays in the account.
@@ -775,7 +813,10 @@ final class AppModel {
             guard returnAttempt == attempt, let hint = outcome.hint, session.isLive, onboarding.isComplete
             else { return }
             returnHint = hint
-            owedDictation = (linkAt, Date().addingTimeInterval(Self.owedDictationWindow))
+            // Only for an app UIKit named: that's the app the keyboard must be back in.
+            owedDictation = outcome.host.map {
+                OwedDictation(linkAt: linkAt, armedAt: Date(), host: $0, generation: session.generation)
+            }
             UIAccessibility.post(notification: .announcement, argument: hint.text)
         }
     }
@@ -789,46 +830,96 @@ final class AppModel {
         if !keepingOwedDictation { owedDictation = nil }
     }
 
-    /// The keyboard appeared or went away somewhere. When the user was left to swipe back by hand
-    /// and took longer than the session keeps their recording, the dictation starts again now that
-    /// they are back in their app, so their words aren't lost.
-    ///
-    /// The keyboard's own word is the signal, not its "on screen" status: coming back, iOS takes
-    /// down the keyboard's old view and puts up a new one in either order, and both write that
-    /// status, so it can read "hidden" under a keyboard that is showing. And "Murmur left" means
-    /// no longer active: the keyboard reappears about a second after the swipe begins, while iOS
-    /// still calls Murmur inactive, not yet in the background (seen on an iPhone 16 Pro).
+    /// The Murmur keyboard appeared or went away somewhere. Its word counts once Murmur is no
+    /// longer active: coming back, iOS takes down the keyboard's old view and puts up a new one in
+    /// either order, and both write its "on screen" status, so the status itself can read "hidden"
+    /// under a keyboard that is showing. And the keyboard reappears about a second after the swipe
+    /// begins, while iOS still calls Murmur inactive, not yet in the background (seen on an iPhone
+    /// 16 Pro).
     private func keyboardStatusChanged() {
+        guard var owed = owedDictation else { return }
+        if UIApplication.shared.applicationState != .active {
+            owed.keyboardBackAt = Date()
+            owedDictation = owed
+        }
+        settleOwedDictation()
+    }
+
+    /// UIKit reported a keyboard shown or hidden in some app. Counted once Murmur is no longer
+    /// active: then it says where the user went.
+    private func keyboardHostReported() {
+        guard var owed = owedDictation, UIApplication.shared.applicationState != .active,
+              let report = hostReturn.latestReport, report.seenAt >= owed.armedAt else { return }
+        owed.awayReport = report
+        owedDictation = owed
+        settleOwedDictation()
+    }
+
+    /// When the user was left to swipe back by hand and took longer than the session keeps their
+    /// recording, the dictation starts again once they are back in the app Home named, so their
+    /// words aren't lost. Anywhere else, the microphone stays as it is.
+    private func settleOwedDictation() {
         guard let owed = owedDictation else { return }
         let now = Date()
-        let step = Self.owedDictationStep(now: now, until: owed.until, phase: session.phase,
-                                          murmurInFront: UIApplication.shared.applicationState == .active)
+        let step = Self.owedDictationStep(owed, now: now, phase: session.phase, generation: session.generation,
+                                          murmurActive: UIApplication.shared.applicationState == .active)
         guard step != .keep else { return }
         owedDictation = nil
         let sinceLink = now.timeIntervalSince(owed.linkAt)
-        if step == .start, session.beginDictationForKeyboard() {
-            hostReturn.noteOwedDictation("listeningAgain", sinceLink: sinceLink)
-        } else {
-            hostReturn.noteOwedDictation(step == .start ? "couldNotListenAgain" : "notOwedAnyMore", sinceLink: sinceLink)
+        switch step {
+        case .start:
+            let started = session.beginDictationForKeyboard()
+            hostReturn.noteOwedDictation(started ? "listeningAgain" : "couldNotListenAgain", sinceLink: sinceLink)
+        case .elsewhere:
+            hostReturn.noteOwedDictation("otherApp", sinceLink: sinceLink)
+        case .drop, .keep:
+            hostReturn.noteOwedDictation("notOwedAnyMore", sinceLink: sinceLink)
         }
     }
 
-    /// What becomes of an owed dictation when the keyboard reports itself.
+    /// The dictation a late swipe back is owed (`owedDictation`).
+    struct OwedDictation: Equatable {
+        let linkAt: Date
+        /// When Home said how to swipe back.
+        let armedAt: Date
+        /// The app Home named: its bundle ID, as UIKit reported it.
+        let host: String
+        /// The session's `generation` then: a stop or a start since ends what is owed.
+        let generation: Int
+        /// The Murmur keyboard last reported itself, with Murmur no longer active.
+        var keyboardBackAt: Date?
+        /// UIKit's latest report of a keyboard in another app, with Murmur no longer active.
+        var awayReport: KeyboardHostLog.Report?
+
+        var until: Date { armedAt.addingTimeInterval(AppModel.owedDictationWindow) }
+    }
+
+    /// What becomes of an owed dictation when the keyboard or UIKit reports in.
     enum OwedDictationStep: Equatable {
-        /// The user is back in their app without a recording: start one.
+        /// The Murmur keyboard is back, showing in the app Home named, and there's no recording:
+        /// start one.
         case start
-        /// Murmur is still in front (the keyboard is hiding as Murmur opens, or is in one of
-        /// Murmur's own fields): the user hasn't gone back yet.
+        /// Not yet: Murmur is still in front (the keyboard is hiding as Murmur opens, or is in one
+        /// of Murmur's own fields), or it isn't known yet where the keyboard is.
         case keep
+        /// The keyboard turned up in another app: nothing is started there.
+        case elsewhere
         /// Nothing is owed any more: the recording is still running and the keyboard joins it
-        /// itself, the session is off, or the tap was too long ago to start listening unasked.
+        /// itself, the session stopped or started since, or the tap was too long ago to start
+        /// listening unasked.
         case drop
     }
 
-    nonisolated static func owedDictationStep(now: Date, until: Date, phase: SessionController.Phase,
-                                              murmurInFront: Bool) -> OwedDictationStep {
-        guard !murmurInFront else { return .keep }
-        return phase == .ready && now <= until ? .start : .drop
+    nonisolated static func owedDictationStep(_ owed: OwedDictation, now: Date, phase: SessionController.Phase,
+                                              generation: Int, murmurActive: Bool) -> OwedDictationStep {
+        guard generation == owed.generation, now <= owed.until else { return .drop }
+        guard !murmurActive else { return .keep }
+        guard phase == .ready else { return .drop }
+        guard let report = owed.awayReport else { return .keep }
+        guard report.bundleID.caseInsensitiveCompare(owed.host) == .orderedSame else { return .elsewhere }
+        // Shown there, and the Murmur keyboard has said it's back.
+        guard report.onScreen != false, owed.keyboardBackAt != nil else { return .keep }
+        return .start
     }
 
     /// True unless Murmur was already on screen when the mic was tapped, which means the keyboard
@@ -843,6 +934,9 @@ final class AppModel {
         switch phase {
         case .active:
             if activeSince == nil { activeSince = Date() }
+            // Back in Murmur: only what happens after the user leaves again counts.
+            owedDictation?.keyboardBackAt = nil
+            owedDictation?.awayReport = nil
             if returningFromBackground {
                 returningFromBackground = false
                 scheduleAutoOpenNote()

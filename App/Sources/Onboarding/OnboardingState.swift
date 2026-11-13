@@ -153,6 +153,9 @@ enum OnboardingEvent: Equatable, Sendable {
     case back
     /// "Skip", "Maybe later" and similar optional exits.
     case skipOptional
+    /// "Skip the exercises" on an exercise after "Not now" to "Before Murmur listens": without the
+    /// AI services nothing is dictated, so on to the choices.
+    case skipExercises
     case toggleUseCase(UseCase)
     case showSignInOptions
     case showEmailSignIn

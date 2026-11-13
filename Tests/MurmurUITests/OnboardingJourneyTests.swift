@@ -160,10 +160,11 @@ final class OnboardingJourneyTests: XCTestCase {
         XCTAssertFalse(button(Copy.Welcome.button).exists)
     }
 
-    /// "Before Murmur listens" comes before the system asks for the microphone, and so before
-    /// anything is recorded (`-ai-consent`: this run asks, as a real one does). "Not now" stays on
-    /// the microphone page; "Allow" goes on to the first exercise.
-    func testTheAIQuestionComesBeforeTheMicrophone() {
+    /// The microphone page asks only the system's question (App Review 5.1.1: no way out before a
+    /// permission alert); "Before Murmur listens" comes on the first exercise (`-ai-consent`: this
+    /// run asks, as a real one does). After "Not now" the page asks again on request, or skips the
+    /// exercises, and onboarding still finishes.
+    func testNotNowToTheAIQuestionStillFinishesOnboarding() {
         launch(extra: ["-ai-consent"])
         throughSurvey()
         throughSignIn()
@@ -171,17 +172,43 @@ final class OnboardingJourneyTests: XCTestCase {
         tap(Copy.Keyboard.button)
         tap(Copy.PracticeIntro.button)
         expectText(Copy.Microphone.title)
+        XCTAssertFalse(button(Copy.Microphone.skip).exists, "no way out before the system's question")
 
+        // The fake system prompt grants the microphone; the question comes on the exercise.
         tap(Copy.continue)
         XCTAssertTrue(element(AccessibilityID.screen("aiConsent")).waitForExistence(timeout: 5), "the question")
         tap(id: AccessibilityID.aiConsentNotNow)
-        XCTAssertTrue(waitUntilHittable(button(Copy.continue)), "back on the microphone page")
-        expectText(Copy.Microphone.title)
-        XCTAssertFalse(app.staticTexts[Copy.Practice.basicLine].exists, "no exercise without the OK")
+        expectText(Copy.Practice.notAllowed)
+        XCTAssertFalse(app.staticTexts[Copy.Microphone.title].exists, "past the microphone page")
 
+        tap(Copy.Practice.askAgain)
+        XCTAssertTrue(element(AccessibilityID.screen("aiConsent")).waitForExistence(timeout: 5), "asked again")
+        tap(id: AccessibilityID.aiConsentNotNow)
+        tap(Copy.Practice.skipExercises)
+        expectText(Copy.WrapUpIntro.title)
+        throughWrapUp()
+        expectText(trialTitle)
+        tap(Copy.Offer.button)
+        XCTAssertTrue(app.buttons["Menu"].waitForExistence(timeout: 5), "Home after the offer")
+    }
+
+    /// Changing one's mind: "Try again", then Allow, and the exercises run as usual.
+    func testAllowingAfterNotNowStartsTheExercises() {
+        launch(extra: ["-ai-consent"])
+        throughSurvey()
+        throughSignIn()
+        tap(Copy.SetupIntro.button)
+        tap(Copy.Keyboard.button)
+        tap(Copy.PracticeIntro.button)
         tap(Copy.continue)
+        tap(id: AccessibilityID.aiConsentNotNow)
+        tap(Copy.Practice.askAgain)
         tap(id: AccessibilityID.aiConsentAllow)
         expectText(Copy.Practice.basicLine)
+        dictate()
+        expectText(Copy.Practice.emailLine)
+        XCTAssertFalse(element(AccessibilityID.screen("aiConsent")).exists, "allowed once, not asked again")
+        dictate()
     }
 
     func testBackKeepsAnswersAndReturnsToTheRightScreen() {

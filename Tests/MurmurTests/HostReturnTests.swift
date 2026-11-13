@@ -180,7 +180,7 @@ struct HostReturnTests {
     @Test func theLogWordNamesNoApp() {
         let outcomes: [ReturnOutcome] = [
             .returned(app: "Telegram"), .turnedOff(host: telegram), .notLearned, .notListed(host: safari),
-            .couldNotOpen(app: "Telegram"), .notRecording(host: telegram), .sessionOff, .left,
+            .couldNotOpen(app: "Telegram", host: telegram), .notRecording(host: telegram), .sessionOff, .left,
         ]
         #expect(Set(outcomes.map(\.code)).count == outcomes.count)
         for outcome in outcomes {
@@ -190,6 +190,45 @@ struct HostReturnTests {
             #expect(!outcome.code.localizedCaseInsensitiveContains("safari"))
         }
         #expect(ReturnOutcome.returned(app: "Telegram").hint == nil)
-        #expect(ReturnOutcome.couldNotOpen(app: "Telegram").hint == ReturnHint(appName: "Telegram"))
+        #expect(ReturnOutcome.couldNotOpen(app: "Telegram", host: telegram).hint == ReturnHint(appName: "Telegram"))
+    }
+
+    /// The owed dictation restarts only in the app Home named, so the outcome keeps its bundle ID
+    /// wherever UIKit gave one.
+    @Test func theOutcomeKeepsTheAppHomeNames() {
+        #expect(ReturnOutcome.notListed(host: safari).host == safari)
+        #expect(ReturnOutcome.couldNotOpen(app: "Telegram", host: telegram).host == telegram)
+        #expect(ReturnOutcome.turnedOff(host: telegram).host == telegram)
+        #expect(ReturnOutcome.notRecording(host: telegram).host == telegram)
+        #expect(ReturnOutcome.turnedOff(host: nil).host == nil)
+        #expect(ReturnOutcome.notLearned.host == nil, "Home says \"your app\": nothing to check against")
+        #expect(ReturnOutcome.couldNotOpen(app: "Telegram", host: "").host == nil)
+        #expect(ReturnOutcome.returned(app: "Telegram").host == nil)
+        #expect(ReturnOutcome.sessionOff.host == nil)
+        #expect(ReturnOutcome.left.host == nil)
+    }
+
+    /// UIKit's report names the app by its source; a second name stands in when the source is
+    /// missing or is Murmur's own keyboard. Whether the keyboard was on screen comes with it.
+    @Test func aReportNamesTheAppItsKeyboardIsIn() {
+        var log = KeyboardHostLog(ownBundleID: "com.antonmironenko.murmur")
+        log.record(source: safari, host: nil, onScreen: true, at: linkAt)
+        #expect(log.latest == KeyboardHostLog.Report(bundleID: safari, seenAt: linkAt, onScreen: true))
+
+        log.record(source: "com.antonmironenko.murmur.keyboard", host: "com.apple.mobilenotes", onScreen: true,
+                   at: linkAt.addingTimeInterval(1))
+        #expect(log.latest?.bundleID == "com.apple.mobilenotes")
+
+        log.record(source: nil, host: " ph.telegra.Telegraph ", onScreen: false, at: linkAt.addingTimeInterval(2))
+        #expect(log.latest == KeyboardHostLog.Report(bundleID: telegram, seenAt: linkAt.addingTimeInterval(2), onScreen: false))
+
+        // Murmur's own, or nothing: the last report stands.
+        log.record(source: "com.antonmironenko.murmur", host: nil, onScreen: true, at: linkAt.addingTimeInterval(3))
+        log.record(source: nil, host: "  ", onScreen: true, at: linkAt.addingTimeInterval(3))
+        #expect(log.latest?.bundleID == telegram)
+        #expect(log.recent(since: linkAt) == telegram)
+
+        log.record(safari, at: linkAt.addingTimeInterval(4))
+        #expect(log.latest?.onScreen == nil, "an older call doesn't say")
     }
 }

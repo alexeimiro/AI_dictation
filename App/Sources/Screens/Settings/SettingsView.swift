@@ -56,7 +56,7 @@ struct SettingsView: View {
                     SettingLabel("Allow Live Activities", detail: "Show \(Brand.name) on the Lock Screen and in the Dynamic Island while it’s on")
                 }
                 .settingRow()
-                if !model.pro.isSubscribed {
+                if !model.hasProSubscription {
                     Button { model.showsPaywall = true } label: {
                         SettingLabel("Upgrade to Pro", detail: "Unlimited words, every week") {
                             chevron

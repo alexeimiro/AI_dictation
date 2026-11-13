@@ -49,6 +49,45 @@ private final class NoCleanup: Cleaning {
     }
 }
 
+/// Counts what the session asks of it. With `holds`, a finished dictation waits for `release()`,
+/// like an upload still out, and notes whether its task was cancelled by then.
+private final class GatedTranscriber: Transcriber, @unchecked Sendable {
+    let displayName = "Test"
+    var currentLanguage: ResolvedLanguage?
+    var holds = false
+    private(set) var finishes = 0
+    private(set) var abandoned = 0
+    private(set) var cancelledWhileOut = false
+    private var waiting: CheckedContinuation<Void, Never>?
+    private var released = false
+
+    func prepare(micFormat: AVAudioFormat, language: ResolvedLanguage) async throws {
+        currentLanguage = language
+    }
+    func setLanguage(_ language: ResolvedLanguage) { currentLanguage = language }
+    func beginUtterance() {}
+    func append(_ buffer: AVAudioPCMBuffer) {}
+    func finishUtterance() async throws -> String { "meet me at the station" }
+    func finishUtterance(model request: ModelRequest?) async throws -> UtteranceOutput {
+        finishes += 1
+        if holds, !released {
+            await withCheckedContinuation { waiting = $0 }
+        }
+        cancelledWhileOut = Task.isCancelled
+        return UtteranceOutput(transcript: try await finishUtterance())
+    }
+    func cancelUtterance() async {}
+    func abandonUtterance() { abandoned += 1 }
+    func shutdown() async {}
+
+    @MainActor
+    func release() {
+        released = true
+        waiting?.resume()
+        waiting = nil
+    }
+}
+
 /// Runs `check` as each transcript reaches history, to see what had happened by then.
 @MainActor
 private final class HistorySpy: TranscriptSink {
@@ -468,5 +507,67 @@ struct SessionControllerTests {
         harness.session.endDictation(commit: true)
         #expect(await waitUntil { harness.history.checks.count == 1 })
         #expect((recordings.url(for: requestId) != nil) == keep)
+    }
+
+    // MARK: Discarding: the OK to the AI services taken back, or the account ended
+
+    /// A dictation being recorded is dropped, not finished: nothing is transcribed or sent, nothing
+    /// reaches history, and the keyboard waiting for it is told it was cancelled.
+    @Test func aDiscardedRecordingIsNeitherSentNorSaved() async throws {
+        let transcriber = GatedTranscriber()
+        let harness = makeHarness(transcriber: transcriber)
+        let request = UUID()
+        try harness.send(.start, request)
+        #expect(await waitUntil { harness.session.phase == .recording(request) })
+
+        harness.session.discardDictations()
+        try await Task.sleep(for: .milliseconds(200))
+
+        #expect(transcriber.finishes == 0, "nothing transcribed, so nothing uploaded")
+        #expect(transcriber.abandoned == 1)
+        #expect(harness.history.checks.isEmpty, "nothing in history")
+        #expect(harness.transport.payloads.readResult(request)?.status == .cancelled)
+        #expect(harness.transport.payloads.latestResult()?.requestId != request, "not offered to insert later")
+        #expect(harness.log.all().isEmpty)
+    }
+
+    /// One already being written (its upload out) when the account ends: its requests are
+    /// cancelled, and its text is neither typed nor saved into the history being wiped.
+    @Test func aDiscardedDictationBeingWrittenIsNeitherTypedNorSaved() async throws {
+        let transcriber = GatedTranscriber()
+        transcriber.holds = true
+        let harness = makeHarness(transcriber: transcriber)
+        let request = UUID()
+        try harness.send(.start, request)
+        #expect(await waitUntil { harness.session.phase == .recording(request) })
+        try harness.send(.stop, request)
+        #expect(await waitUntil { transcriber.finishes == 1 })
+        #expect(harness.session.phase == .processing(request))
+
+        harness.session.discardDictations()
+        transcriber.release()
+        try await Task.sleep(for: .milliseconds(300))
+
+        #expect(transcriber.cancelledWhileOut, "its task was cancelled, and its requests with it")
+        #expect(harness.history.checks.isEmpty, "nothing in history")
+        #expect(harness.transport.payloads.readResult(request)?.status == .cancelled, "nothing typed")
+        #expect(harness.log.all().isEmpty)
+    }
+
+    /// Without discarding, a dictation that is being written still finishes as before.
+    @Test func aDictationBeingWrittenFinishesWhenNothingDiscardsIt() async throws {
+        let transcriber = GatedTranscriber()
+        transcriber.holds = true
+        let harness = makeHarness(transcriber: transcriber)
+        let request = UUID()
+        try harness.send(.start, request)
+        #expect(await waitUntil { harness.session.phase == .recording(request) })
+        try harness.send(.stop, request)
+        #expect(await waitUntil { transcriber.finishes == 1 })
+        transcriber.release()
+
+        #expect(await waitUntil { harness.history.checks.count == 1 })
+        #expect(!transcriber.cancelledWhileOut)
+        #expect(harness.transport.payloads.readResult(request)?.text.isEmpty == false)
     }
 }
