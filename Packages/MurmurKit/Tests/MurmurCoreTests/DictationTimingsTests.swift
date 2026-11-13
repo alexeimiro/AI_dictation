@@ -46,11 +46,16 @@ struct DictationTimingsCodingTests {
             warmup: RequestTiming(function: "dictate", status: 200, tokenMs: 0, totalMs: 480, reused: true,
                                   server: ServerTiming(cold: true, executionId: "e1", authMs: 40, totalMs: 300)),
             cleanupModel: "gpt-6.1-terra", status: "cleaned", insertable: true, cloudTranscript: true,
-            claimedAt: stop.addingTimeInterval(2.8), style: "concise")
+            claimedAt: stop.addingTimeInterval(2.8), style: "concise",
+            startPath: DictationTimings.StartPath.jump.rawValue, startRequestedAt: stop.addingTimeInterval(-9),
+            tapToStartMs: 2_350, tapToListeningMs: 2_900,
+            jump: JumpTimings(waitedMs: 500, linkMs: 1_100, appAgeMs: 420, audioSessionMs: 1_400, engineMs: 1_600,
+                              readyMs: 1_900, liveActivityMs: 2_300, returnMs: 2_500))
         let (encoder, decoder) = coder()
         let decoded = try decoder.decode(DictationTimings.self, from: encoder.encode(timings))
         #expect(decoded == timings)
         #expect(decoded.style == "concise")
+        #expect(decoded.jump?.liveActivityMs == 2_300)
     }
 
     @Test func olderJSONWithoutTheNewKeysStillDecodes() throws {
@@ -64,6 +69,8 @@ struct DictationTimingsCodingTests {
         #expect(timings.stopRequestedAt == nil && timings.tapToStopMs == nil && timings.encodeMs == nil)
         #expect(timings.status == nil && timings.cleanupModel == nil && timings.insertable == nil)
         #expect(timings.cloudTranscript == nil && timings.claimedAt == nil && timings.style == nil)
+        #expect(timings.startPath == nil && timings.startRequestedAt == nil && timings.tapToStartMs == nil)
+        #expect(timings.tapToListeningMs == nil && timings.jump == nil)
         #expect(timings.requests == [RequestTiming(function: "transcribe", totalMs: 800)])
     }
 

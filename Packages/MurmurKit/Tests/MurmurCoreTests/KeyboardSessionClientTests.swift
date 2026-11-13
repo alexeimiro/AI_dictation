@@ -106,10 +106,20 @@ struct KeyboardSessionClientTests {
             Issue.record("expected .starting, got \(client.phase)")
             return
         }
+        let start = try #require(transport.payloads.readCommand())
+        #expect(start.kind == .start && start.listeningSince == nil)
         #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
+        guard case .listening(_, let since) = client.phase else { return }
 
         client.stopTapped()
-        #expect(transport.payloads.readCommand()?.kind == .stop)
+        // The stop says when this keyboard began to listen: with the start's own time, that is how
+        // long the tap took to show.
+        let stop = try #require(transport.payloads.readCommand())
+        #expect(stop.kind == .stop)
+        // To the millisecond: the command's dates are written as whole milliseconds.
+        let reported = try #require(stop.listeningSince)
+        #expect(abs(reported.timeIntervalSince(since)) < 0.002)
+        #expect(reported.timeIntervalSince(start.createdAt) > -0.002)
         try app.finish(requestId, text: "Hello world.", document: host.currentDocumentIdentifier)
         #expect(await waitUntil { host.inserted.count == 1 })
         #expect(host.inserted.first?.text == "Hello world.")
@@ -143,6 +153,9 @@ struct KeyboardSessionClientTests {
             return
         }
 
+        // Opened at once: the request's own time is the tap.
+        #expect(try #require(transport.payloads.readPendingStart()).tappedAt == nil)
+
         // The app validates the token and starts the session; the keyboard then starts recording.
         #expect(transport.payloads.consumeLaunchToken(token!, maxAge: 10, now: Date())?.requestId == requestId)
         app.publish(.ready)
@@ -152,7 +165,7 @@ struct KeyboardSessionClientTests {
         #expect(transport.payloads.readPendingStart() == nil)
     }
 
-    @Test func fallsBackToOpeningTheAppWhenTheAckTimesOut() async {
+    @Test func fallsBackToOpeningTheAppWhenTheAckTimesOut() async throws {
         let transport = InMemoryIPCTransport()
         let app = FakeApp(transport: transport)
         app.acknowledges = false
@@ -163,8 +176,16 @@ struct KeyboardSessionClientTests {
         client.activate()
 
         client.micTapped()
+        let start = try #require(transport.payloads.readCommand())
         #expect(await waitUntil { host.openedURLs.count == 1 })
         if case .openingApp = client.phase {} else { Issue.record("expected .openingApp, got \(client.phase)") }
+        // The request the app is opened with says when the tap was: the wait for the session that
+        // didn't answer is part of what the user waited.
+        let pending = try #require(transport.payloads.readPendingStart())
+        let tappedAt = try #require(pending.tappedAt)
+        #expect(pending.requestId == start.requestId)
+        #expect(abs(tappedAt.timeIntervalSince(start.createdAt)) < 0.01)
+        #expect(pending.createdAt.timeIntervalSince(tappedAt) >= 0.14)
     }
 
     @Test func resultForAnotherFieldIsOfferedInsteadOfInserted() async throws {

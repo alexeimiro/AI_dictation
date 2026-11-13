@@ -7,6 +7,14 @@ import os
 import Speech
 import UIKit
 
+/// For the timings: the tap that asked for a dictation, how the dictation came about and, when
+/// the keyboard opened the app for it, the steps of that start.
+private struct StartTiming {
+    let requestedAt: Date
+    let path: DictationTimings.StartPath
+    let jump: JumpTimings?
+}
+
 /// The dictation session: a hot mic in the app that the keyboard drives through IPC.
 ///
 /// Lifecycle: `start()` (foreground only) → `ready` ⇄ `recording` → `processing` → `ready` …
@@ -82,6 +90,9 @@ final class SessionController {
     @ObservationIgnored private var autoStarted: PendingStart?
     /// A start that arrived while the previous dictation was still being processed.
     @ObservationIgnored private var queuedStart: KeyboardCommand?
+    /// For the timings: the start the keyboard opened the app for, step by step from the user's
+    /// tap, until its dictation begins.
+    @ObservationIgnored private var jump: (requestId: UUID, tappedAt: Date, timings: JumpTimings)?
     /// Requests the keyboard cancelled, so a start armed or queued for them is dropped.
     @ObservationIgnored private var cancelledRequests: Set<UUID> = []
     /// Where an in-app dictation's result goes (the note dictated into); nil drops it.
@@ -152,7 +163,9 @@ final class SessionController {
         do {
             guard await Self.requestMicrophonePermission() else { throw SessionError.microphoneDenied }
             try await activateAudioSession(waitForForeground: true)
+            markJump(\.audioSessionMs)
             try audio.startEngine()
+            markJump(\.engineMs)
             guard let micFormat = audio.inputFormat else { throw AudioCapture.CaptureError.noInput }
 
             defer { startDetail = nil }
@@ -170,9 +183,13 @@ final class SessionController {
             idleSince = Date()
             publisher.set(.ready)
             transport.post(.stateChanged)
+            markJump(\.readyMs)
             startHeartbeat()
             scheduleIdleStop()
-            if settings.liveActivities { await liveActivity.start() }
+            if settings.liveActivities {
+                await liveActivity.start()
+                markJump(\.liveActivityMs)
+            }
             logger.info("Session started with \(transcriber.displayName, privacy: .public) in \(DictationPipeline.milliseconds(since: startedAt)) ms")
             beginQueuedStart()
             beginRequestedStart()
@@ -187,6 +204,7 @@ final class SessionController {
     private func failStart(_ error: any Error) {
         logger.error("Session start failed: \(String(describing: error), privacy: .public)")
         requestedStart = nil
+        jump = nil
         let message = Self.userMessage(for: error)
         phase = .failed(message)
         // The keyboard shows the reason; `.error` also stops it from bouncing to the app again.
@@ -231,10 +249,37 @@ final class SessionController {
     /// The keyboard opened the app for `request`: turn the microphone on and record that
     /// dictation straight away, so the user can talk while getting back to their app.
     func start(beginning request: PendingStart?) async {
-        if let request, request.autoStart == true { requestedStart = request }
+        if let request, request.autoStart == true {
+            requestedStart = request
+            // The tap was before the request when the keyboard first waited for a session that
+            // didn't answer.
+            let tappedAt = request.tappedAt ?? request.createdAt
+            jump = (request.requestId, tappedAt, JumpTimings(
+                waitedMs: request.tappedAt.map { request.createdAt.milliseconds(since: $0) },
+                linkMs: Date().milliseconds(since: tappedAt), appAgeMs: ProcessAge.milliseconds))
+        }
         await recoverForForeground()
         await start()
         beginRequestedStart()
+    }
+
+    /// Notes a step of the start the keyboard opened the app for, in milliseconds from the tap.
+    private func markJump(_ step: WritableKeyPath<JumpTimings, Int?>) {
+        guard let tappedAt = jump?.tappedAt else { return }
+        jump?.timings[keyPath: step] = Date().milliseconds(since: tappedAt)
+    }
+
+    /// The timings a dictation begins with when it is the one the keyboard opened the app for.
+    private func takeJump(for requestId: UUID) -> StartTiming? {
+        guard let jump, jump.requestId == requestId else { return nil }
+        self.jump = nil
+        return StartTiming(requestedAt: jump.tappedAt, path: .jump, jump: jump.timings)
+    }
+
+    /// For the timings: Murmur sent the user back to their app while `requestId` records.
+    func didReturnToHost(for requestId: UUID) {
+        guard active?.requestId == requestId, active?.jump != nil, let tappedAt = active?.startRequestedAt else { return }
+        active?.jump?.returnMs = Date().milliseconds(since: tappedAt)
     }
 
     /// The keyboard opens the app when the session doesn't answer. One that still looks ready
@@ -252,12 +297,15 @@ final class SessionController {
     private func beginRequestedStart() {
         guard phase == .ready, let request = requestedStart else { return }
         requestedStart = nil
+        // Nil for a dictation a shortcut asked for: nobody tapped the keyboard for it.
+        let timing = takeJump(for: request.requestId)
         guard transport.payloads.readPendingStart()?.requestId == request.requestId,
               !cancelledRequests.contains(request.requestId),
               Date().timeIntervalSince(request.createdAt) < 90 else { return }
         if beginDictation(requestId: request.requestId, documentIdentifier: request.documentIdentifier,
                           style: request.styleOverride, languageOverride: request.languageOverride,
-                          translationTargetLanguage: request.translationTargetLanguage, source: .keyboard) {
+                          translationTargetLanguage: request.translationTargetLanguage, source: .keyboard,
+                          timing: timing) {
             autoStarted = request
             logger.info("Recording the keyboard's dictation while the user goes back")
         }
@@ -442,6 +490,7 @@ final class SessionController {
     func stop() {
         if active != nil { endDictation(commit: true) }
         requestedStart = nil
+        jump = nil
         autoStarted = nil
         queuedStart = nil
         cancelledRequests = []
@@ -530,10 +579,11 @@ final class SessionController {
         transport.payloads.readKeyboardStatus().map { $0.inactiveSince > Date() } ?? false
     }
 
+    /// `timing`: the tap that asked for the dictation and how it came about, for the timings.
     @discardableResult
     private func beginDictation(requestId: UUID, documentIdentifier: UUID?, style: StylePreset?,
                                 languageOverride: String?, translationTargetLanguage: String?,
-                                source: ActiveDictation.Source) -> Bool {
+                                source: ActiveDictation.Source, timing: StartTiming? = nil) -> Bool {
         guard phase == .ready, let transcriber else {
             logger.notice("Start ignored in phase \(String(describing: self.phase), privacy: .public)")
             return false
@@ -585,6 +635,12 @@ final class SessionController {
         phase = .recording(requestId)
         publisher.set(.recording, requestTag: requestId.tag16)
         transport.post(.stateChanged)
+        if let timing {
+            active?.startRequestedAt = timing.requestedAt
+            active?.startPath = timing.path
+            active?.tapToStartMs = Date().milliseconds(since: timing.requestedAt)
+            active?.jump = timing.jump
+        }
         playSound(.start)
         // After the acknowledgement: nothing here may delay it.
         let writesWithModel = translationTargetLanguage != nil || (style ?? settings.defaultStyle).usesModel
@@ -619,11 +675,14 @@ final class SessionController {
     }
 
     /// Ends the current dictation; `commit: false` discards it. `requestedAt`: the keyboard's stop
-    /// command, for the timings.
-    func endDictation(commit: Bool, requestedAt: Date? = nil) {
+    /// command, for the timings, and `listeningSince`: when that keyboard began to show it listens.
+    func endDictation(commit: Bool, requestedAt: Date? = nil, listeningSince: Date? = nil) {
         if let requestedAt {
             active?.stopRequestedAt = requestedAt
             active?.tapToStopMs = Date().milliseconds(since: requestedAt)
+        }
+        if let listeningSince, let tappedAt = active?.startRequestedAt, listeningSince >= tappedAt {
+            active?.tapToListeningMs = listeningSince.milliseconds(since: tappedAt)
         }
         guard let dictation = active, let transcriber else { return }
         active = nil
@@ -718,7 +777,9 @@ final class SessionController {
         case .start:
             handleStart(command)
         case .stop:
-            if active?.requestId == command.requestId { endDictation(commit: true, requestedAt: command.createdAt) }
+            if active?.requestId == command.requestId {
+                endDictation(commit: true, requestedAt: command.createdAt, listeningSince: command.listeningSince)
+            }
         case .cancel:
             cancelledRequests.insert(command.requestId)
             if queuedStart?.requestId == command.requestId {
@@ -771,7 +832,7 @@ final class SessionController {
         queuedStart = nil
         guard !cancelledRequests.contains(command.requestId),
               Date().timeIntervalSince(command.createdAt) < Self.queuedStartLifetime else { return }
-        beginDictation(from: command)
+        beginDictation(from: command, queued: true)
     }
 
     /// After a queued start was cancelled, the published state is the session's own again.
@@ -785,11 +846,17 @@ final class SessionController {
         transport.post(.stateChanged)
     }
 
+    /// `queued`: the command waited for the dictation before it to finish.
     @discardableResult
-    private func beginDictation(from command: KeyboardCommand) -> Bool {
-        beginDictation(requestId: command.requestId, documentIdentifier: command.documentIdentifier,
-                       style: command.styleOverride, languageOverride: command.languageOverride,
-                       translationTargetLanguage: command.translationTargetLanguage, source: .keyboard)
+    private func beginDictation(from command: KeyboardCommand, queued: Bool = false) -> Bool {
+        // A keyboard that came back before the microphone was on sends the start itself: it is
+        // still the dictation the app was opened for.
+        let timing = takeJump(for: command.requestId)
+            ?? StartTiming(requestedAt: command.createdAt, path: queued ? .queued : .hot, jump: nil)
+        return beginDictation(requestId: command.requestId, documentIdentifier: command.documentIdentifier,
+                              style: command.styleOverride, languageOverride: command.languageOverride,
+                              translationTargetLanguage: command.translationTargetLanguage, source: .keyboard,
+                              timing: timing)
     }
 
     /// The app started this dictation for the keyboard, which never came back for it. It's

@@ -25,6 +25,15 @@ struct ActiveDictation: Sendable {
     /// ended the dictation itself.
     var stopRequestedAt: Date?
     var tapToStopMs: Int?
+    /// For the timings, when the keyboard asked for the dictation: the user's tap on the mic, how
+    /// the dictation came about, and how long the app took to be recording it.
+    var startRequestedAt: Date?
+    var startPath: DictationTimings.StartPath?
+    var tapToStartMs: Int?
+    /// The tap → the keyboard showing that it listens, which its stop command reports.
+    var tapToListeningMs: Int?
+    /// The steps of the start, when the keyboard opened the app for it.
+    var jump: JumpTimings?
 }
 
 /// What the session gets back: the IPC result for the keyboard, the history record, and the
@@ -390,7 +399,9 @@ final class DictationPipeline {
             tokenMs: DictationTimings.sum(requests.map(\.tokenMs)), stopToResultMs: metrics.totalMs ?? metrics.asrMs,
             requests: requests, cleanupModel: cleanupModel, status: status.rawValue,
             insertable: result.isInsertable, cloudTranscript: utterance?.cloudTranscript ?? false,
-            style: style.rawValue)
+            style: style.rawValue, startPath: dictation.startPath?.rawValue,
+            startRequestedAt: dictation.startRequestedAt, tapToStartMs: dictation.tapToStartMs,
+            tapToListeningMs: dictation.tapToListeningMs, jump: dictation.jump)
         return DictationOutcome(result: result, transcript: transcript, timings: timings, recording: recording)
     }
 

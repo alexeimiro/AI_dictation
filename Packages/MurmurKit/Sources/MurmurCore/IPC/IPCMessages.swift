@@ -17,11 +17,14 @@ public struct KeyboardCommand: Codable, Sendable, Equatable {
     public var languageOverride: String?
     /// BCP-47 output language. Nil keeps the recognized language (ordinary dictation).
     public var translationTargetLanguage: String?
+    /// With a stop: when the keyboard began showing that it listens to this dictation, for the
+    /// app's timings (the tap on the mic → listening).
+    public var listeningSince: Date?
 
     public init(
         id: UUID = UUID(), requestId: UUID, kind: CommandKind, createdAt: Date,
         documentIdentifier: UUID? = nil, styleOverride: StylePreset? = nil, languageOverride: String? = nil,
-        translationTargetLanguage: String? = nil
+        translationTargetLanguage: String? = nil, listeningSince: Date? = nil
     ) {
         self.id = id
         self.requestId = requestId
@@ -31,6 +34,7 @@ public struct KeyboardCommand: Codable, Sendable, Equatable {
         self.styleOverride = styleOverride
         self.languageOverride = languageOverride
         self.translationTargetLanguage = translationTargetLanguage
+        self.listeningSince = listeningSince
     }
 }
 
@@ -172,10 +176,13 @@ public struct PendingStart: Codable, Sendable, Equatable {
     public var styleOverride: StylePreset?
     public var languageOverride: String?
     public var translationTargetLanguage: String?
+    /// When the user tapped the mic, if that was before `createdAt`: the keyboard first sent a
+    /// start to a session that didn't answer. For the app's timings.
+    public var tappedAt: Date?
 
     public init(requestId: UUID, documentIdentifier: UUID?, createdAt: Date, autoStart: Bool? = nil,
                 styleOverride: StylePreset? = nil, languageOverride: String? = nil,
-                translationTargetLanguage: String? = nil) {
+                translationTargetLanguage: String? = nil, tappedAt: Date? = nil) {
         self.requestId = requestId
         self.documentIdentifier = documentIdentifier
         self.createdAt = createdAt
@@ -183,6 +190,7 @@ public struct PendingStart: Codable, Sendable, Equatable {
         self.styleOverride = styleOverride
         self.languageOverride = languageOverride
         self.translationTargetLanguage = translationTargetLanguage
+        self.tappedAt = tappedAt
     }
 }
 

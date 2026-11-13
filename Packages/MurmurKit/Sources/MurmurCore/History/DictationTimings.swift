@@ -121,11 +121,59 @@ public struct RequestTiming: Codable, Sendable, Hashable {
     }
 }
 
-/// Where one dictation's time went, from the keyboard's stop to the text being ready, for the
-/// app's timings log and the Debug screen. It never holds any text. A nil field wasn't measured.
+/// The start of a dictation the keyboard opened the app for: each step in milliseconds from the
+/// user's tap on the mic. A nil step wasn't reached or didn't happen (a session that was already
+/// on has no microphone to turn on).
+public struct JumpTimings: Codable, Sendable, Hashable {
+    /// How long the keyboard waited for a session that didn't answer before it opened the app. Nil
+    /// when it opened the app at once.
+    public var waitedMs: Int?
+    /// The app handling the keyboard's link: iOS brought Murmur to the front, launching it first
+    /// when it wasn't running.
+    public var linkMs: Int?
+    /// How long the app's process had been running at the link. A few hundred milliseconds means
+    /// the link launched it.
+    public var appAgeMs: Int?
+    /// The audio session active; the consent and the microphone permission come before it.
+    public var audioSessionMs: Int?
+    /// The audio engine running.
+    public var engineMs: Int?
+    /// The session ready: the language loaded and the transcriber prepared.
+    public var readyMs: Int?
+    /// The Live Activity started, which the dictation waits for.
+    public var liveActivityMs: Int?
+    /// The user sent back to the app they were typing in. Nil when Murmur couldn't.
+    public var returnMs: Int?
+
+    public init(waitedMs: Int? = nil, linkMs: Int? = nil, appAgeMs: Int? = nil, audioSessionMs: Int? = nil,
+                engineMs: Int? = nil, readyMs: Int? = nil, liveActivityMs: Int? = nil, returnMs: Int? = nil) {
+        self.waitedMs = waitedMs
+        self.linkMs = linkMs
+        self.appAgeMs = appAgeMs
+        self.audioSessionMs = audioSessionMs
+        self.engineMs = engineMs
+        self.readyMs = readyMs
+        self.liveActivityMs = liveActivityMs
+        self.returnMs = returnMs
+    }
+}
+
+/// Where one dictation's time went, from the tap on the mic to its recording and from the
+/// keyboard's stop to the text being ready, for the app's timings log and the Debug screen. It
+/// never holds any text. A nil field wasn't measured.
 public struct DictationTimings: Codable, Sendable, Hashable {
     public enum Kind: String, Codable, Sendable, CaseIterable {
         case translation, dictation
+    }
+
+    /// How a dictation the keyboard asked for began.
+    public enum StartPath: String, Sendable, CaseIterable {
+        /// The session was on and free: the keyboard's start command began it.
+        case hot
+        /// The session was finishing the dictation before, and the start waited for it.
+        case queued
+        /// The keyboard opened the app, which began it once the microphone was on.
+        case jump
     }
 
     /// The dictation's `requestId`, which also names its claim marker.
@@ -170,12 +218,27 @@ public struct DictationTimings: Codable, Sendable, Hashable {
     /// through `dictate` too now, so the requests no longer tell it from the styles the model
     /// writes. Nil in entries from builds before that.
     public var style: String?
+    /// How the dictation began (`StartPath`), when the keyboard asked for it.
+    public var startPath: String?
+    /// The user's tap on the mic: the keyboard's start command, or the request it opened the app
+    /// with. Nil when nobody tapped the keyboard for it (a note's mic, the Action Button).
+    public var startRequestedAt: Date?
+    /// The tap → the app recording, and saying so.
+    public var tapToStartMs: Int?
+    /// The tap → the keyboard showing that it listens, as its stop command reports it. After a
+    /// jump this is all of it: the user is back in their app. Nil when the app ended the
+    /// dictation itself.
+    public var tapToListeningMs: Int?
+    /// The steps of the start, when the keyboard opened the app for it.
+    public var jump: JumpTimings?
 
     public init(requestId: UUID, createdAt: Date, kind: Kind, audioSeconds: Double, stopRequestedAt: Date? = nil,
                 tapToStopMs: Int? = nil, encodeMs: Int? = nil, audioBytes: Int? = nil, tokenMs: Int? = nil,
                 stopToResultMs: Int? = nil, requests: [RequestTiming] = [], warmup: RequestTiming? = nil,
                 cleanupModel: String? = nil, status: String? = nil, insertable: Bool? = nil,
-                cloudTranscript: Bool? = nil, claimedAt: Date? = nil, style: String? = nil) {
+                cloudTranscript: Bool? = nil, claimedAt: Date? = nil, style: String? = nil,
+                startPath: String? = nil, startRequestedAt: Date? = nil, tapToStartMs: Int? = nil,
+                tapToListeningMs: Int? = nil, jump: JumpTimings? = nil) {
         self.requestId = requestId
         self.createdAt = createdAt
         self.kind = kind
@@ -194,6 +257,11 @@ public struct DictationTimings: Codable, Sendable, Hashable {
         self.cloudTranscript = cloudTranscript
         self.claimedAt = claimedAt
         self.style = style
+        self.startPath = startPath
+        self.startRequestedAt = startRequestedAt
+        self.tapToStartMs = tapToStartMs
+        self.tapToListeningMs = tapToListeningMs
+        self.jump = jump
     }
 
     /// The sum of the values that were measured; nil when none was.

@@ -7,7 +7,9 @@
 // percentile of each phase from the keyboard's stop to the insert, how often the connection and
 // the worker were cold, how often a dictation paid the second `cleanup` request, the same by
 // audio length and by the pause before the dictation, and whether each threshold of the speed
-// plan fires. The styles the model rewrites and translations get a short table each.
+// plan fires. The styles the model rewrites and translations get a short table each. Logs from
+// builds that time the start add a section on it: the tap on the mic to the app recording and to
+// the keyboard showing it, and each step of a start the keyboard opened the app for.
 //
 //   deno run --allow-read scripts/timings_report.ts <timings.jsonl> [--since 2026-11-10] [--until 2026-11-12] [--last 100]
 //
@@ -70,6 +72,29 @@ export interface DictationTimings {
    * model writes ("grammar", "professional", "chat", "concise").
    */
   style?: string;
+  /** How the keyboard's dictation began, in logs from builds that time the start: "hot", "queued" or "jump". */
+  startPath?: string;
+  /** The user's tap on the mic. */
+  startRequestedAt?: number;
+  /** The tap → the app recording, and saying so. */
+  tapToStartMs?: number;
+  /** The tap → the keyboard showing that it listens; after a jump, the user is back in their app. */
+  tapToListeningMs?: number;
+  jump?: JumpTimings;
+}
+
+/** `JumpTimings`: the steps of a start the keyboard opened the app for, each in ms from the tap. */
+export interface JumpTimings {
+  /** The keyboard first waited this long for a session that didn't answer. */
+  waitedMs?: number;
+  linkMs?: number;
+  /** How long the app's process had run at the link: little means the link launched it. */
+  appAgeMs?: number;
+  audioSessionMs?: number;
+  engineMs?: number;
+  readyMs?: number;
+  liveActivityMs?: number;
+  returnMs?: number;
 }
 
 /** `rewritten`: every style the model writes, Improve my grammar among them. */
@@ -79,6 +104,8 @@ export type Route = "wordForWord" | "rewritten" | "translation";
 const AUTOMATIC_INSERT_LIMIT_MS = 10_000;
 /** The region the database is in: a function that ran elsewhere reaches it across regions. */
 const HOME_REGION = "eu-central-1";
+/** A process this young when the keyboard's link arrived was launched by it. */
+const COLD_LAUNCH_MS = 5000;
 
 /** The log's entries, oldest first, and how many lines weren't one. */
 export function parseLog(text: string): { entries: DictationTimings[]; skipped: number } {
@@ -313,6 +340,57 @@ export function thresholds(entries: DictationTimings[]): Threshold[] {
   ];
 }
 
+/** A jump whose link launched the app; null when the log doesn't say how old the process was. */
+export function coldLaunch(entry: DictationTimings): boolean | null {
+  const age = entry.jump?.appAgeMs;
+  return typeof age === "number" ? age < COLD_LAUNCH_MS : null;
+}
+
+/** How long a jump's dictation waited for the Live Activity, which is asked for before it begins. */
+export function liveActivityWait(entry: DictationTimings): number | null {
+  return difference(entry.jump?.liveActivityMs, entry.jump?.readyMs);
+}
+
+/** The speed plan's conditional items for the start: the tap on the mic, and the jump into the app. */
+export function startThresholds(entries: DictationTimings[]): Threshold[] {
+  const hot = entries.filter((e) => e.startPath === "hot");
+  const jumps = entries.filter((e) => e.startPath === "jump");
+  const listening = stat(hot.map((e) => e.tapToListeningMs));
+  const cold = share(jumps, coldLaunch);
+  const launch = stat(jumps.filter((e) => coldLaunch(e)).map((e) => e.jump?.appAgeMs));
+  const waited = jumps.filter((e) => typeof e.jump?.waitedMs === "number");
+  const wait = stat(waited.map((e) => e.jump?.waitedMs));
+  const activity = stat(jumps.map(liveActivityWait));
+  return [
+    {
+      name: "Show Listening at once",
+      fires: (listening.p50 ?? 0) > 70,
+      measured: `session on: tap → listening p50 ${ms(listening.p50)}, p95 ${ms(listening.p95)} (n ${listening.n})`,
+      then: "p50 above 70 ms",
+    },
+    {
+      name: "Catch a dead app before the tap",
+      fires: waited.length > 0 && (fraction({ count: waited.length, total: jumps.length }) ?? 0) >= 0.10,
+      measured: `${percent({ count: waited.length, total: jumps.length })} of jumps first waited for a session, p50 ${
+        ms(wait.p50)
+      }`,
+      then: "10% or more of jumps",
+    },
+    {
+      name: "Record before the Live Activity",
+      fires: (activity.p50 ?? 0) >= 100,
+      measured: `the dictation waited p50 ${ms(activity.p50)}, p95 ${ms(activity.p95)} for it (n ${activity.n})`,
+      then: "p50 of 100 ms or more",
+    },
+    {
+      name: "Trim the cold launch",
+      fires: (fraction(cold) ?? 0) >= 0.25 || (launch.p50 ?? 0) > 150,
+      measured: `${percent(cold)} of jumps launched the app; launch → link p50 ${ms(launch.p50)}`,
+      then: "25% or more of jumps, or the launch above 150 ms",
+    },
+  ];
+}
+
 // MARK: Printing
 
 function ms(value: number | null | undefined): string {
@@ -341,6 +419,50 @@ function phaseTable(entries: DictationTimings[], rows: Row[] = PHASES): string {
     return [label, ms(p50), ms(p95), String(n)];
   }).filter((row) => row[3] !== "0");
   return table(["Phase", "median", "p95", "n"], lines);
+}
+
+const START_PATHS: [path: string, label: string][] = [
+  ["hot", "Session on"],
+  ["queued", "Waited for the dictation before"],
+  ["jump", "Opened the app"],
+];
+
+const JUMP_STEPS: Row[] = [
+  ["Waited for a session that didn't answer", (e) => e.jump?.waitedMs],
+  ["The app has the keyboard's link", (e) => e.jump?.linkMs],
+  ["Audio session active", (e) => e.jump?.audioSessionMs],
+  ["Audio engine running", (e) => e.jump?.engineMs],
+  ["Session ready", (e) => e.jump?.readyMs],
+  ["Live Activity started", (e) => e.jump?.liveActivityMs],
+  ["Recording", (e) => e.tapToStartMs],
+  ["Sent back to the app", (e) => e.jump?.returnMs],
+  ["Keyboard listening again", (e) => e.tapToListeningMs],
+];
+
+/** The start of the dictations the keyboard asked for; nothing for a log from before it was timed. */
+function startSection(entries: DictationTimings[]): string[] {
+  const timed = entries.filter((e) => e.startPath);
+  if (timed.length === 0) return [];
+  const paths = START_PATHS.map(([path, label]) => {
+    const group = timed.filter((e) => e.startPath === path);
+    const recording = stat(group.map((e) => e.tapToStartMs));
+    const listening = stat(group.map((e) => e.tapToListeningMs));
+    return [label, String(group.length), ms(recording.p50), ms(recording.p95), ms(listening.p50), ms(listening.p95)];
+  }).filter((row) => row[1] !== "0");
+  const out = [
+    "",
+    `== The start (${timed.length} dictations the keyboard asked for) ==`,
+    table(["How it began", "n", "tap → recording", "p95", "tap → listening", "p95"], paths),
+  ];
+  const jumps = timed.filter((e) => e.startPath === "jump");
+  if (jumps.length > 0) {
+    out.push("", `-- Opening the app, each step from the tap (${jumps.length}) --`, phaseTable(jumps, JUMP_STEPS));
+  }
+  out.push("", "-- Thresholds --", table(
+    ["Item", "fires", "measured", "fires when"],
+    startThresholds(timed).map((item) => [item.name, item.fires ? "YES" : "no", item.measured, item.then]),
+  ));
+  return out;
 }
 
 function counts(values: (string | undefined)[]): string {
@@ -480,6 +602,7 @@ export function report(entries: DictationTimings[], skipped = 0): string {
         `it reached the request's worker: ${percent(share(group.filter((e) => e.warmup), warmupReachedWorker))}`,
     );
   }
+  out.push(...startSection(entries));
   return out.join("\n");
 }
 

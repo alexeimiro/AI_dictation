@@ -1,7 +1,9 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import {
   cleanupTrip,
+  coldLaunch,
   type DictationTimings,
+  liveActivityWait,
   networkMs,
   parseLog,
   pauseBefore,
@@ -10,6 +12,7 @@ import {
   resultToInsert,
   routeOf,
   type ServerTiming,
+  startThresholds,
   stat,
   thresholds,
   transcription,
@@ -176,5 +179,57 @@ Deno.test("the report counts each route and survives an empty log", () => {
   assertStringIncludes(text, "== Rewritten styles (4) ==\nBy style: concise 2, chat 1\n");
   assertStringIncludes(text, "Left out (on-device, too short, or failed): 1.");
   assertStringIncludes(text, "1 lines skipped");
+  assert(!text.includes("NaN") && !text.includes("undefined"), text);
+});
+
+/** A dictation the keyboard opened the app for, every step timed from the tap. */
+function jump(index: number, more: NonNullable<DictationTimings["jump"]> = {}, total = 2600): DictationTimings {
+  return plain(index, {
+    startPath: "jump",
+    tapToStartMs: 2300,
+    tapToListeningMs: total,
+    jump: { linkMs: 900, appAgeMs: 180_000, audioSessionMs: 1300, engineMs: 1500, readyMs: 1800, liveActivityMs: 2250, returnMs: 2400, ...more },
+  });
+}
+
+Deno.test("a jump is a cold launch when its link started the app, and it waits for the Live Activity", () => {
+  assertEquals(coldLaunch(jump(1)), false);
+  assertEquals(coldLaunch(jump(1, { appAgeMs: 420 })), true);
+  assertEquals(coldLaunch(plain(1, { startPath: "jump" })), null);
+  assertEquals(liveActivityWait(jump(1)), 450);
+  assertEquals(liveActivityWait(jump(1, { liveActivityMs: undefined })), null);
+});
+
+Deno.test("the start's thresholds fire on the numbers the plan names", () => {
+  const fired = (entries: DictationTimings[]) => startThresholds(entries).filter((item) => item.fires).map((item) => item.name);
+  const hot = (listening: number) => plain(1, { startPath: "hot", tapToStartMs: 20, tapToListeningMs: listening });
+  assertEquals(fired([hot(40), hot(60), hot(65)]), []);
+  assertEquals(fired([hot(90), hot(120), hot(65)]), ["Show Listening at once"]);
+  // A Live Activity that answers quickly, a warm app, the app opened at once: nothing to do.
+  const quick = jump(1, { liveActivityMs: 1850 });
+  assertEquals(fired([quick, quick, quick, quick]), []);
+  assertEquals(fired([jump(1), jump(2)]), ["Record before the Live Activity"]);
+  assertEquals(fired([quick, quick, quick, jump(4, { liveActivityMs: 1850, appAgeMs: 100 })]), ["Trim the cold launch"]);
+  assertEquals(fired([quick, jump(2, { liveActivityMs: 1850, waitedMs: 500 })]), ["Catch a dead app before the tap"]);
+  // Nothing timed: nothing fires, and nothing reads as a number.
+  assertEquals(fired([plain(1)]), []);
+});
+
+Deno.test("the report adds the start only for a log that timed it", () => {
+  assert(!report([plain(0)]).includes("== The start"));
+  const text = report([
+    plain(0, { startPath: "hot", tapToStartMs: 18, tapToListeningMs: 52 }),
+    plain(1, { startPath: "hot", tapToStartMs: 22, tapToListeningMs: 61 }),
+    plain(2, { startPath: "queued", tapToStartMs: 900, tapToListeningMs: 940 }),
+    jump(3, { waitedMs: 500 }),
+    // An in-app dictation: no start to time.
+    plain(4),
+  ]);
+  assertStringIncludes(text, "== The start (4 dictations the keyboard asked for) ==");
+  assertStringIncludes(text, "Session on");
+  assertStringIncludes(text, "Waited for the dictation before");
+  assertStringIncludes(text, "-- Opening the app, each step from the tap (1) --");
+  assertStringIncludes(text, "Keyboard listening again");
+  assertStringIncludes(text, "Record before the Live Activity");
   assert(!text.includes("NaN") && !text.includes("undefined"), text);
 });

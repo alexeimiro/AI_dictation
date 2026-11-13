@@ -89,6 +89,9 @@ public final class KeyboardSessionClient {
     /// A dictation followed again after the keyboard came back: its text goes into whichever field
     /// is focused now, since that is where the user is looking.
     private var resumedRequestId: UUID?
+    /// The last start command and when it was sent: the tap, should the app have to be opened for
+    /// that dictation after all.
+    private var startSent: (requestId: UUID, at: Date)?
 
     public init(
         transport: IPCTransport,
@@ -160,8 +163,8 @@ public final class KeyboardSessionClient {
     /// The mic button: starts a dictation, or stops the one in progress.
     public func micTapped() {
         switch phase {
-        case .listening(let id, _):
-            stop(id)
+        case .listening(let id, let since):
+            stop(id, listeningSince: since)
             return
         case .starting, .openingApp, .processing:
             return
@@ -185,7 +188,7 @@ public final class KeyboardSessionClient {
 
     /// ✓ — stop and insert.
     public func stopTapped() {
-        if case .listening(let id, _) = phase { stop(id) }
+        if case .listening(let id, let since) = phase { stop(id, listeningSince: since) }
     }
 
     /// X — discard the dictation.
@@ -240,6 +243,7 @@ public final class KeyboardSessionClient {
     // MARK: Start handshake
 
     private func sendStart(_ requestId: UUID) {
+        startSent = (requestId, clock())
         guard send(.start, requestId: requestId) else {
             setPhase(.needsFullAccess)
             return
@@ -297,7 +301,9 @@ public final class KeyboardSessionClient {
             try transport.payloads.write(pendingStart: PendingStart(
                 requestId: requestId, documentIdentifier: activeDocumentIdentifier, createdAt: now, autoStart: true,
                 styleOverride: styleOverride, languageOverride: languageOverride,
-                translationTargetLanguage: translationTargetLanguage))
+                translationTargetLanguage: translationTargetLanguage,
+                // The tap was earlier when a start went unanswered first.
+                tappedAt: startSent?.requestId == requestId ? startSent?.at : nil))
         } catch {
             // Writing to the App Group fails without Full Access.
             setPhase(.needsFullAccess)
@@ -412,9 +418,9 @@ public final class KeyboardSessionClient {
         }
     }
 
-    private func stop(_ requestId: UUID) {
+    private func stop(_ requestId: UUID, listeningSince: Date) {
         listenTask?.cancel()
-        send(.stop, requestId: requestId)
+        send(.stop, requestId: requestId, listeningSince: listeningSince)
         setPhase(.processing(requestId))
         waitForResult(requestId)
     }
@@ -558,12 +564,14 @@ public final class KeyboardSessionClient {
 
     // MARK: Helpers
 
+    /// `listeningSince`: with a stop, when this keyboard began listening to the dictation.
     @discardableResult
-    private func send(_ kind: CommandKind, requestId: UUID) -> Bool {
+    private func send(_ kind: CommandKind, requestId: UUID, listeningSince: Date? = nil) -> Bool {
         let command = KeyboardCommand(
             requestId: requestId, kind: kind, createdAt: clock(),
             documentIdentifier: activeDocumentIdentifier, styleOverride: styleOverride,
-            languageOverride: languageOverride, translationTargetLanguage: translationTargetLanguage)
+            languageOverride: languageOverride, translationTargetLanguage: translationTargetLanguage,
+            listeningSince: listeningSince)
         do {
             try transport.payloads.write(command: command)
         } catch {

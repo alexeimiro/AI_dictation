@@ -46,6 +46,7 @@ final class HostReturn {
                     return record("Not in the list: \(host)")
                 }
                 let opened = await UIApplication.shared.open(entry.url)
+                if opened { session.didReturnToHost(for: requestId) }
                 let elapsed = DictationPipeline.milliseconds(since: linkInstant)
                 return record(opened ? "\(entry.name): back in \(elapsed) ms" : "\(entry.name): couldn't open it")
             }

@@ -77,8 +77,10 @@ struct SessionControllerTests {
         let log: TimingsLog
         let history: HistorySpy
 
-        func send(_ kind: CommandKind, _ requestId: UUID, at createdAt: Date = Date()) throws {
-            try transport.payloads.write(command: KeyboardCommand(requestId: requestId, kind: kind, createdAt: createdAt))
+        func send(_ kind: CommandKind, _ requestId: UUID, at createdAt: Date = Date(),
+                  listeningSince: Date? = nil) throws {
+            try transport.payloads.write(command: KeyboardCommand(
+                requestId: requestId, kind: kind, createdAt: createdAt, listeningSince: listeningSince))
             transport.post(.command)
         }
     }
@@ -182,7 +184,8 @@ struct SessionControllerTests {
         #expect(harness.history.checks == [true])
     }
 
-    /// A dictation the app ends itself (the time cap, a lost heartbeat) has no stop command.
+    /// A dictation the app ends itself (the time cap, a lost heartbeat) has no stop command. And
+    /// nobody tapped the keyboard for a note's mic, so it has no start to time either.
     @Test func aDictationTheAppEndsHasNoStopTime() async throws {
         let harness = makeHarness()
         let requestId = try #require(harness.session.beginInAppDictation())
@@ -192,6 +195,104 @@ struct SessionControllerTests {
         let entry = try #require(harness.log.all().first)
         #expect(entry.requestId == requestId)
         #expect(entry.stopRequestedAt == nil && entry.tapToStopMs == nil)
+        #expect(entry.startPath == nil && entry.startRequestedAt == nil && entry.tapToStartMs == nil)
+        #expect(entry.tapToListeningMs == nil && entry.jump == nil)
+    }
+
+    /// The tap on the mic with the session on: when it was, how long the app took to be recording
+    /// and how long the keyboard took to show it, which the keyboard reports with its stop.
+    @Test func theStartOfAHotDictationReachesTheTimingsLog() async throws {
+        let harness = makeHarness()
+        let requestId = UUID()
+        // Whole seconds survive the command file's millisecond encoding exactly.
+        let tappedAt = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down) - 1)
+        let sentAt = Date()
+        try harness.send(.start, requestId, at: tappedAt)
+        #expect(await waitUntil { harness.session.phase == .recording(requestId) })
+        let recordingBy = Date()
+
+        try harness.send(.stop, requestId, listeningSince: tappedAt.addingTimeInterval(0.25))
+        #expect(await waitUntil { !harness.log.all().isEmpty })
+
+        let entry = try #require(harness.log.all().first)
+        #expect(entry.startPath == DictationTimings.StartPath.hot.rawValue)
+        #expect(entry.startRequestedAt == tappedAt)
+        let tapToStart = try #require(entry.tapToStartMs)
+        #expect((sentAt.milliseconds(since: tappedAt)...recordingBy.milliseconds(since: tappedAt)).contains(tapToStart))
+        #expect(entry.tapToListeningMs == 250)
+        #expect(entry.jump == nil)
+    }
+
+    /// A keyboard whose clock reading makes no sense (listening before the tap) isn't believed.
+    @Test func aListeningTimeBeforeTheTapIsLeftOut() async throws {
+        let harness = makeHarness()
+        let requestId = UUID()
+        let tappedAt = Date()
+        try harness.send(.start, requestId, at: tappedAt)
+        #expect(await waitUntil { harness.session.phase == .recording(requestId) })
+        try harness.send(.stop, requestId, listeningSince: tappedAt.addingTimeInterval(-3))
+        #expect(await waitUntil { !harness.log.all().isEmpty })
+
+        let entry = try #require(harness.log.all().first)
+        #expect(entry.tapToStartMs != nil)
+        #expect(entry.tapToListeningMs == nil)
+    }
+
+    /// The keyboard opened the app for a dictation: its timings count from the tap, which was
+    /// before the request when the keyboard first waited for a session that didn't answer, and
+    /// they keep the steps of the start. The session here is already on, so there is no
+    /// microphone to turn on and those steps stay empty.
+    @Test func theStartOfADictationTheAppWasOpenedForReachesTheTimingsLog() async throws {
+        let harness = makeHarness()
+        let createdAt = Date(timeIntervalSince1970: Date().timeIntervalSince1970.rounded(.down))
+        let tappedAt = createdAt.addingTimeInterval(-0.5)
+        let request = PendingStart(requestId: UUID(), documentIdentifier: nil, createdAt: createdAt, autoStart: true,
+                                   tappedAt: tappedAt)
+        try harness.transport.payloads.write(pendingStart: request)
+
+        await harness.session.start(beginning: request)
+
+        #expect(harness.session.phase == .recording(request.requestId))
+        harness.session.didReturnToHost(for: request.requestId)
+        // The keyboard is back and joins the dictation, then stops it.
+        let attachedAt = Date()
+        try harness.send(.stop, request.requestId, listeningSince: attachedAt)
+        #expect(await waitUntil { !harness.log.all().isEmpty })
+
+        let entry = try #require(harness.log.all().first)
+        #expect(entry.startPath == DictationTimings.StartPath.jump.rawValue)
+        #expect(entry.startRequestedAt == tappedAt)
+        let tapToStart = try #require(entry.tapToStartMs)
+        #expect(tapToStart >= 500)
+        let tapToListening = try #require(entry.tapToListeningMs)
+        #expect(abs(tapToListening - attachedAt.milliseconds(since: tappedAt)) <= 1)
+        let jump = try #require(entry.jump)
+        #expect(jump.waitedMs == 500)
+        let link = try #require(jump.linkMs)
+        #expect(link >= 500 && link <= tapToStart)
+        #expect(try #require(jump.appAgeMs) > 0)
+        #expect(try #require(jump.returnMs) >= tapToStart)
+        #expect(jump.audioSessionMs == nil && jump.engineMs == nil && jump.readyMs == nil && jump.liveActivityMs == nil)
+    }
+
+    /// A request the app was opened for and then dropped (the keyboard cancelled it, so its
+    /// pending start is gone) takes its timings with it: the next dictation is timed as its own.
+    @Test func aDroppedRequestTakesItsTimingsWithIt() async throws {
+        let harness = makeHarness()
+        let opened = PendingStart(requestId: UUID(), documentIdentifier: nil, createdAt: Date(), autoStart: true)
+        await harness.session.start(beginning: opened)
+        #expect(harness.session.phase == .ready)
+
+        let next = UUID()
+        try harness.send(.start, next)
+        #expect(await waitUntil { harness.session.phase == .recording(next) })
+        harness.session.endDictation(commit: true)
+        #expect(await waitUntil { !harness.log.all().isEmpty })
+
+        let entry = try #require(harness.log.all().first)
+        #expect(entry.requestId == next)
+        #expect(entry.startPath == DictationTimings.StartPath.hot.rawValue)
+        #expect(entry.jump == nil)
     }
 
     /// The keyboard went off screen with the dictation running (the screen locked): its heartbeats
@@ -283,6 +384,10 @@ struct SessionControllerTests {
         #expect(harness.session.phase == .recording(pending.requestId))
         harness.session.endDictation(commit: true)
         #expect(await waitUntil { harness.transport.payloads.readResult(pending.requestId) != nil })
+        // Nobody tapped the keyboard for it: there is no start to time.
+        #expect(await waitUntil { !harness.log.all().isEmpty })
+        let entry = try #require(harness.log.all().first)
+        #expect(entry.startPath == nil && entry.tapToStartMs == nil && entry.jump == nil)
     }
 
     /// The mic in a note: the result goes to the note, not to the keyboard's files.
