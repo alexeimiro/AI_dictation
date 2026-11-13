@@ -43,13 +43,29 @@ private final class FakeCloud: CloudTranscribing {
 @MainActor
 private final class FakeDictate: Dictating {
     var isAvailable = true
+    /// A deployment that takes Word for word; false for one from before it did.
+    var takesPlain = true
+    var transcribesAlone: Bool { isAvailable && takesPlain }
     var lastReplyAt: ContinuousClock.Instant?
     var failure: CloudTranscriptionError?
+    /// What a Word for word request fails with.
+    var plainFailure: CloudTranscriptionError?
     private(set) var calls: [(audio: Data, language: String?, request: ModelRequest)] = []
+    /// The Word for word requests: the transcript alone.
+    private(set) var plainCalls: [(audio: Data, language: String?, dictationId: UUID)] = []
     /// What the fake heard, as `dictate` reports it.
     var languages = ["ru"]
     /// Each call's `languageHints`.
     private(set) var hints: [[String]] = []
+
+    func transcribe(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
+                    keywords: [String], dictationId: UUID) async throws(CloudTranscriptionError) -> CloudTranscript {
+        plainCalls.append((audio, language, dictationId))
+        hints.append(languageHints)
+        if let plainFailure { throw plainFailure }
+        return CloudTranscript(text: "Привет из облака.", languages: languages,
+                               timing: RequestTiming(function: "dictate", status: 200, totalMs: 900))
+    }
 
     func dictate(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
                  keywords: [String], request: ModelRequest) async throws(CloudTranscriptionError) -> DictateReply {
@@ -221,7 +237,103 @@ struct OpenAITranscriberTests {
         #expect(call.request.style == .grammar)
     }
 
-    /// Word for word has nothing for the model to write: `transcribe` alone.
+    /// Word for word goes through `dictate` as well: one worker checks and transcribes it, and no
+    /// model writes it.
+    @Test func aWordForWordDictationIsTranscribedByDictate() async throws {
+        let cloud = FakeCloud()
+        let dictate = FakeDictate()
+        let transcriber = OpenAITranscriber(client: cloud, dictation: dictate)
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        let id = UUID()
+
+        let output = try await transcriber.finishUtterance(model: nil, dictationId: id)
+
+        #expect(output.transcript == "Привет из облака.")
+        #expect(output.modelReply == nil)
+        #expect(output.detectedLanguage == nil)
+        #expect(cloud.calls.isEmpty && dictate.calls.isEmpty)
+        let call = try #require(dictate.plainCalls.first)
+        #expect(call.dictationId == id)
+        #expect(call.language == "ru-RU")
+        #expect(try seconds(of: call.audio, format: .m4a) > 0.9)
+        let timings = try #require(transcriber.takeTimings())
+        #expect(timings.requests.map(\.function) == ["dictate"])
+        #expect(timings.cloudTranscript)
+
+        // Under Auto-detect the language it heard is the transcript's, as with `transcribe`.
+        dictate.languages = ["tr"]
+        try await transcriber.prepare(micFormat: micFormat, language: automatic)
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        #expect(try await transcriber.finishUtterance(model: nil, dictationId: UUID()).detectedLanguage == "tr")
+        #expect(dictate.plainCalls.last?.language == nil)
+    }
+
+    /// `dictate` can't transcribe alone (a deployment from before it could, or one whose checks
+    /// couldn't run): the very same audio goes to `transcribe`, under the same id.
+    @Test func whenDictateCannotTranscribeAloneTheSameAudioGoesToTranscribe() async throws {
+        let cloud = FakeCloud()
+        let dictate = FakeDictate()
+        dictate.plainFailure = .notDeployed
+        let transcriber = OpenAITranscriber(client: cloud, dictation: dictate)
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        let id = UUID()
+
+        let output = try await transcriber.finishUtterance(model: nil, dictationId: id)
+
+        #expect(output.transcript == "Hello from OpenAI.")
+        #expect(try #require(cloud.calls.first).audio == #require(dictate.plainCalls.first).audio)
+        #expect(cloud.dictationIds == [id])
+        #expect(try #require(transcriber.takeTimings()).cloudTranscript)
+
+        // Known not to take one: it isn't asked.
+        dictate.takesPlain = false
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        _ = try await transcriber.finishUtterance(model: nil, dictationId: UUID())
+        #expect(dictate.plainCalls.count == 1 && cloud.calls.count == 2)
+    }
+
+    /// Its failures are the cloud's, as `transcribe`'s are: the on-device transcript, and a pause.
+    @Test func aFailedWordForWordRequestFallsBackOnDeviceAndPausesTheCloud() async throws {
+        let cloud = FakeCloud()
+        let dictate = FakeDictate()
+        dictate.plainFailure = .unavailable("offline")
+        let onDevice = FakeOnDevice()
+        let transcriber = OpenAITranscriber(client: cloud, dictation: dictate, fallback: onDevice,
+                                            fallbackLanguages: ["ru-RU": russian])
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        await transcriber.prepareFallback()
+        for _ in 0..<2 {
+            transcriber.beginUtterance()
+            feed(transcriber, seconds: 1)
+            let output = try await transcriber.finishUtterance(model: nil, dictationId: UUID())
+            #expect(output.transcript == "Recognized on the iPhone.")
+        }
+        #expect(dictate.plainCalls.count == 1 && cloud.calls.isEmpty)
+    }
+
+    /// The weekly limit is the account's, whichever function says so: the audio isn't sent again.
+    @Test func aWordForWordDictationOverTheLimitIsNotSentToTranscribe() async throws {
+        let cloud = FakeCloud()
+        let dictate = FakeDictate()
+        dictate.plainFailure = .limitReached
+        let transcriber = OpenAITranscriber(client: cloud, dictation: dictate)
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+
+        await #expect(throws: CloudTranscriptionError.limitReached) {
+            try await transcriber.finishUtterance(model: nil, dictationId: UUID())
+        }
+        #expect(cloud.calls.isEmpty)
+    }
+
+    /// Audio that belongs to no dictation has no id for `dictate` to count it under: `transcribe` alone.
     @Test func withoutARequestOnlyTheTranscriptIsAskedFor() async throws {
         let cloud = FakeCloud()
         let dictate = FakeDictate()
@@ -234,7 +346,7 @@ struct OpenAITranscriberTests {
 
         #expect(output.transcript == "Hello from OpenAI.")
         #expect(output.modelReply == nil)
-        #expect(dictate.calls.isEmpty)
+        #expect(dictate.calls.isEmpty && dictate.plainCalls.isEmpty)
         #expect(cloud.calls.count == 1)
     }
 

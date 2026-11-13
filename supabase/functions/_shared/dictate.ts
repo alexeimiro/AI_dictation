@@ -1,5 +1,6 @@
 // The `dictate` function's handler; the contract is in dictate/index.ts. Audio mode transcribes and
-// then translates it, or writes it in a style, on one worker; text mode translates a transcript the app
+// then translates it, or writes it in a style, on one worker (Word for word stops at the
+// transcript); text mode translates a transcript the app
 // already has, and warm mode
 // opens the connections a dictation needs while the user is still speaking. Everything the handler
 // talks to is injected (`DictateDeps`), so the tests drive it offline.
@@ -26,6 +27,7 @@ import {
   type TranscribeRequest,
   type TranscriptionResult,
   transcribeWithOpenAI,
+  transcriptUsage,
 } from "./transcribe.ts";
 import {
   type CleanupRequest,
@@ -49,6 +51,8 @@ export interface AudioBody {
   mode: "audio";
   translation: CleanupRequest;
   transcription: TranscribeRequest;
+  /** Word for word with no target: nothing for the model to write, so the reply is the transcript alone. */
+  transcribeOnly: boolean;
 }
 
 /** Text mode: a translation, with the app's labels for its speculative calls, which are only logged. */
@@ -129,8 +133,8 @@ function settle<T>(work: Promise<T>): Promise<Settled<T>> {
 /**
  * Audio mode's "metadata" part: { dictationId, format: "m4a" | "wav", language: BCP-47 | null,
  * languages?, keywords?, targetLanguage?, style?, dictionary?, snippets? }, with a targetLanguage unless the
- * style is one the model writes. `cleanup`'s and `transcribe`'s own validators check it; `audio` is the
- * "audio" part's bytes.
+ * style is named: one the model writes, or "verbatim", which only transcribes. `cleanup`'s and
+ * `transcribe`'s own validators check it; `audio` is the "audio" part's bytes.
  */
 export function parseDictateMetadata(raw: unknown, audio: Uint8Array<ArrayBuffer>): Parsed<AudioBody> {
   if (typeof raw !== "object" || raw === null) return { ok: false, error: "metadata must be a JSON object" };
@@ -139,10 +143,13 @@ export function parseDictateMetadata(raw: unknown, audio: Uint8Array<ArrayBuffer
   const parsed = parseCleanupRequest({ ...fields, transcript: "" });
   if (!parsed.ok) return parsed;
   const translation = parsed.value;
-  // A Word for word dictation has nothing for the model to write: it goes to `transcribe`.
-  if (!translation.targetLanguage && !writesWithModel(translation.style)) {
+  // Without a target the style says what becomes of the transcript, so it must be named. A request
+  // that names neither is refused, as it always was.
+  if (!translation.targetLanguage && translation.style === undefined) {
     return { ok: false, error: "targetLanguage is required" };
   }
+  // Word for word has nothing for the model to write: the transcript is the whole reply.
+  const transcribeOnly = !translation.targetLanguage && !writesWithModel(translation.style);
   if (fields.format !== "m4a" && fields.format !== "wav") return { ok: false, error: "format must be m4a or wav" };
   if (audio.length === 0) return { ok: false, error: "audio is empty" };
   if (audio.length > TRANSCRIBE_LIMITS.maxAudioBytes) return { ok: false, error: "audio too large" };
@@ -160,6 +167,7 @@ export function parseDictateMetadata(raw: unknown, audio: Uint8Array<ArrayBuffer
         languageHints: cleanLanguageHints(fields.languages),
         keywords: cleanKeywords(fields.keywords),
       },
+      transcribeOnly,
     },
   };
 }
@@ -436,13 +444,15 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
     extra: Record<string, unknown> = {},
   ): void {
     const { body, translation, heard, preflight, caller } = d;
+    // No model is asked for a dictation that stops at the transcript.
+    const asked = body.mode === "audio" && body.transcribeOnly ? null : modelConfig(body.translation);
     log(JSON.stringify({
       event: "dictate",
       mode: body.mode,
       status,
       reason,
-      model: modelConfig(body.translation).model,
-      effort: modelConfig(body.translation).effort,
+      model: asked?.model ?? null,
+      effort: asked?.effort ?? null,
       transcribeModel: body.mode === "audio" ? config.transcribe.model : null,
       languageTag: body.translation.language ?? null,
       sourceTag: translation.language ?? null,
@@ -508,15 +518,16 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
 
   /**
    * Audio mode: transcribe, then translate or write in the style in what is left of the 26 s
-   * budget (the app waits 30 s).
+   * budget (the app waits 30 s). Word for word ends at the transcript.
    */
   async function dictateAudio(d: Dictation & { body: AudioBody }): Promise<Response> {
     // Both keys before the transcription, so a missing one costs no audio upload to OpenAI.
     if (!apiKey) return noKey("OPENAI_API_KEY");
     const { request, phases, body } = d;
     const model = modelConfig(body.translation);
-    const modelKey = keyFor(model.model);
-    if (!modelKey) return noKey(apiKeyName(model.model));
+    // Null for Word for word: it asks no model, so it needs no model's key.
+    const modelKey = body.transcribeOnly ? null : keyFor(model.model);
+    if (modelKey === undefined) return noKey(apiKeyName(model.model));
     const transcribe = config.transcribe;
     phases.ready();
     try {
@@ -552,6 +563,11 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
     const written = body.translation.targetLanguage ?? d.translation.language;
     const words = countWords(transcript, d.translation.language);
     if (words === 0) return reply(d, EMPTY);
+    if (modelKey === null) {
+      // The transcript is the text, whatever its length, and is counted as `transcribe` counts it.
+      const usage = transcriptUsage(body.transcription, request.headers.get("x-murmur-dictation"), d.heard)?.words ?? null;
+      return reply(d, { status: "raw", reason: "transcribed", text: "", usage, outcome: null });
+    }
     if (transcript.length > transcriptLimit(d.caller)) {
       // Longer than `cleanup` would take for this caller; the app keeps the transcript.
       const usage = countWords(transcript, written);

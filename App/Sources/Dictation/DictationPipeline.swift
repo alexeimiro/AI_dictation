@@ -84,7 +84,7 @@ final class DictationPipeline {
         let targetLanguage = dictation.translationTargetLanguage
         let style = dictation.style ?? settings.defaultStyle
         // The model writes a translation, or any style but Word for word, in the request that
-        // transcribes. Word for word is transcribed alone.
+        // transcribes. Word for word asks for the transcript alone, under the dictation's id.
         let request = targetLanguage != nil || style.usesModel
             ? ModelRequest(dictationId: dictation.requestId, targetLanguage: targetLanguage, style: style,
                            dictionary: dictionary, snippets: snippets)
@@ -389,7 +389,8 @@ final class DictationPipeline {
             tapToStopMs: dictation.tapToStopMs, encodeMs: utterance?.encodeMs, audioBytes: utterance?.audioBytes,
             tokenMs: DictationTimings.sum(requests.map(\.tokenMs)), stopToResultMs: metrics.totalMs ?? metrics.asrMs,
             requests: requests, cleanupModel: cleanupModel, status: status.rawValue,
-            insertable: result.isInsertable, cloudTranscript: utterance?.cloudTranscript ?? false)
+            insertable: result.isInsertable, cloudTranscript: utterance?.cloudTranscript ?? false,
+            style: style.rawValue)
         return DictationOutcome(result: result, transcript: transcript, timings: timings, recording: recording)
     }
 

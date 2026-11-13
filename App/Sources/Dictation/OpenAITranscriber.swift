@@ -3,8 +3,9 @@ import Foundation
 import MurmurCore
 import os
 
-/// Cloud recognition with OpenAI, through the `transcribe` function, or `dictate` when the
-/// dictation is translated or its grammar improved: that one request transcribes and writes it.
+/// Cloud recognition with OpenAI, through the `dictate` function: one request that transcribes a
+/// dictation and, when it is translated or written in a style, writes it too. The older
+/// `transcribe` function takes the audio whenever `dictate` can't.
 ///
 /// The dictation's audio is kept as 16 kHz mono samples and sent in one request when it ends,
 /// compressed to AAC. If the language's on-device model is already on the iPhone, an on-device
@@ -53,9 +54,9 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
     /// The last finished dictation's audio as uploaded, until `takeRecording`.
     private var recording: EncodedAudio?
 
-    /// `dictation`: translates in the request that transcribes; without it, translations go to
-    /// `client` like any dictation. `fallbackLanguages`: languages whose on-device model is
-    /// installed and verified.
+    /// `dictation`: transcribes, and translates or writes in a style, in one request; without it
+    /// every dictation goes to `client` for its transcript. `fallbackLanguages`: languages whose
+    /// on-device model is installed and verified.
     init(client: any CloudTranscribing, dictation: (any Dictating)? = nil, fallback: (any Transcriber)? = nil,
          fallbackLanguages: [String: ResolvedLanguage] = [:],
          savesData: @escaping @Sendable () -> Bool = { NetworkConditions.shared.savesData() }) {
@@ -179,8 +180,9 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
         try await finish(model: request, dictationId: request?.dictationId)
     }
 
-    /// As above, naming the dictation to `transcribe` too: Word for word has no model request to
-    /// carry its id, and its words are counted there.
+    /// As above, naming the dictation whatever it asks for: Word for word has no model request to
+    /// carry its id, and its words are counted under it by the function that transcribes it,
+    /// `dictate` when that can, else `transcribe`.
     func finishUtterance(model request: ModelRequest?, dictationId: UUID) async throws -> UtteranceOutput {
         try await finish(model: request, dictationId: dictationId)
     }
@@ -225,9 +227,18 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
                                          detectedLanguage: detected(reply.languages))
                 timing = reply.timing
             } else {
-                let transcript = try await client.transcribe(
-                    audio: audio.data, format: audio.format, language: spoken, languageHints: hints, keywords: keywords,
-                    dictationId: dictationId)
+                // Word for word asks `dictate` for the transcript alone. A dictation the model was
+                // to write, which `dictate` couldn't take, goes to `transcribe` as it always did.
+                let transcript: CloudTranscript
+                if request == nil, let dictationId,
+                   let alone = try await transcribedAlone(audio, language: spoken, hints: hints, keywords: keywords,
+                                                          dictationId: dictationId) {
+                    transcript = alone
+                } else {
+                    transcript = try await client.transcribe(
+                        audio: audio.data, format: audio.format, language: spoken, languageHints: hints,
+                        keywords: keywords, dictationId: dictationId)
+                }
                 output = UtteranceOutput(transcript: transcript.text, detectedLanguage: detected(transcript.languages))
                 timing = transcript.timing
             }
@@ -268,6 +279,23 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
             // implicit rethrow of the other typed errors after `catch .notDeployed`, in Release only.
             guard error == .notDeployed else { throw error }
             logger.notice("dictate isn't deployed; transcribing and writing in two requests")
+            return nil
+        }
+    }
+
+    /// A Word for word dictation's transcript from `dictate`, or nil to send the same audio to
+    /// `transcribe`: `dictate` is unavailable, can't transcribe alone, or couldn't run its checks.
+    private func transcribedAlone(_ audio: EncodedAudio, language: String?, hints: [String], keywords: [String],
+                                  dictationId: UUID) async throws -> CloudTranscript? {
+        guard let dictation, await dictation.transcribesAlone else { return nil }
+        do {
+            return try await dictation.transcribe(
+                audio: audio.data, format: audio.format, language: language, languageHints: hints,
+                keywords: keywords, dictationId: dictationId)
+        } catch {
+            // Rethrown by hand, as in `dictated`.
+            guard error == .notDeployed else { throw error }
+            logger.notice("dictate didn't transcribe alone; sending the audio to transcribe")
             return nil
         }
     }

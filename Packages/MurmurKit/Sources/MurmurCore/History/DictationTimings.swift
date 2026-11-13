@@ -147,7 +147,8 @@ public struct DictationTimings: Codable, Sendable, Hashable {
     /// The app's stop → the result (`DictationMetrics.stopToResultMs`), or → the failure when
     /// there was no transcript.
     public var stopToResultMs: Int?
-    /// In the order they were made: `transcribe`, then `cleanup`; or a translation's one `dictate`.
+    /// In the order they were made: the one `dictate`, then `cleanup` when the app asked for one;
+    /// `transcribe` in place of `dictate` where that couldn't take the audio.
     public var requests: [RequestTiming]
     /// The warm-up sent while the user spoke, when it answered before the result. Its
     /// `server.executionId` against the requests' says whether it warmed the worker they reached.
@@ -165,12 +166,16 @@ public struct DictationTimings: Codable, Sendable, Hashable {
     /// When the keyboard claimed the result: its claim marker's date, copied in by
     /// `TimingsLog.recordClaims` because the markers are pruned after a day.
     public var claimedAt: Date?
+    /// The dictation's `StylePreset`, as stored ("verbatim" for Word for word). Word for word goes
+    /// through `dictate` too now, so the requests no longer tell it from the styles the model
+    /// writes. Nil in entries from builds before that.
+    public var style: String?
 
     public init(requestId: UUID, createdAt: Date, kind: Kind, audioSeconds: Double, stopRequestedAt: Date? = nil,
                 tapToStopMs: Int? = nil, encodeMs: Int? = nil, audioBytes: Int? = nil, tokenMs: Int? = nil,
                 stopToResultMs: Int? = nil, requests: [RequestTiming] = [], warmup: RequestTiming? = nil,
                 cleanupModel: String? = nil, status: String? = nil, insertable: Bool? = nil,
-                cloudTranscript: Bool? = nil, claimedAt: Date? = nil) {
+                cloudTranscript: Bool? = nil, claimedAt: Date? = nil, style: String? = nil) {
         self.requestId = requestId
         self.createdAt = createdAt
         self.kind = kind
@@ -188,6 +193,7 @@ public struct DictationTimings: Codable, Sendable, Hashable {
         self.insertable = insertable
         self.cloudTranscript = cloudTranscript
         self.claimedAt = claimedAt
+        self.style = style
     }
 
     /// The sum of the values that were measured; nil when none was.

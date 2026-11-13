@@ -46,9 +46,11 @@ struct DictationTimingsCodingTests {
             warmup: RequestTiming(function: "dictate", status: 200, tokenMs: 0, totalMs: 480, reused: true,
                                   server: ServerTiming(cold: true, executionId: "e1", authMs: 40, totalMs: 300)),
             cleanupModel: "gpt-6.1-terra", status: "cleaned", insertable: true, cloudTranscript: true,
-            claimedAt: stop.addingTimeInterval(2.8))
+            claimedAt: stop.addingTimeInterval(2.8), style: "concise")
         let (encoder, decoder) = coder()
-        #expect(try decoder.decode(DictationTimings.self, from: encoder.encode(timings)) == timings)
+        let decoded = try decoder.decode(DictationTimings.self, from: encoder.encode(timings))
+        #expect(decoded == timings)
+        #expect(decoded.style == "concise")
     }
 
     @Test func olderJSONWithoutTheNewKeysStillDecodes() throws {
@@ -61,7 +63,7 @@ struct DictationTimingsCodingTests {
         #expect(timings.createdAt == stop.addingTimeInterval(2))
         #expect(timings.stopRequestedAt == nil && timings.tapToStopMs == nil && timings.encodeMs == nil)
         #expect(timings.status == nil && timings.cleanupModel == nil && timings.insertable == nil)
-        #expect(timings.cloudTranscript == nil && timings.claimedAt == nil)
+        #expect(timings.cloudTranscript == nil && timings.claimedAt == nil && timings.style == nil)
         #expect(timings.requests == [RequestTiming(function: "transcribe", totalMs: 800)])
     }
 

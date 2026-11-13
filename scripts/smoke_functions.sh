@@ -125,6 +125,23 @@ if [[ $HAS_KEY == 1 ]]; then
 else
   check "audio mode without an API key → 503" 503 "$code"
 fi
+# Word for word in audio mode is the transcript alone: the style is named, and there is no target.
+ID=$(new_id)
+printf '{"dictationId":"%s","format":"wav","language":null,"keywords":[],"style":"verbatim"}' "$ID" \
+  > /tmp/murmur_smoke_metadata.json
+code=$(dictate_of "$TOKEN" "$ID" -F 'metadata=</tmp/murmur_smoke_metadata.json;type=application/json' \
+  -F 'audio=@/tmp/murmur_smoke_1s.wav;type=audio/wav')
+if [[ $HAS_KEY == 1 ]]; then
+  check "Word for word: transcribes a second of silence" 200 "$code"
+  check "Word for word: silence → reason empty" "empty" "$(json_field reason)"
+  check "Word for word: no model call is timed" NoneType "$(timing_type modelMs)"
+else
+  check "Word for word without an API key → 503" 503 "$code"
+fi
+ID=$(new_id)
+printf '{"dictationId":"%s","format":"wav","language":null,"keywords":[]}' "$ID" > /tmp/murmur_smoke_metadata.json
+check "audio that names neither a target nor a style → 400" 400 "$(dictate_of "$TOKEN" "$ID" \
+  -F 'metadata=</tmp/murmur_smoke_metadata.json;type=application/json' -F 'audio=@/tmp/murmur_smoke_1s.wav;type=audio/wav')"
 # The rate limit counts a dictation once, and the preflight refuses its calls after the sixth.
 ID=$(new_id)
 for _ in 1 2 3 4 5; do dictate_text "$TOKEN" "$ID" "$(dictate_body "$ID" " ")" >/dev/null; done

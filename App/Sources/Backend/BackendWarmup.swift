@@ -14,12 +14,12 @@ protocol SessionRenewing: AnyObject {
 /// - The access token is refreshed if it would expire within `tokenLead`. A dictation lasts at
 ///   most 5 minutes, and in the background, where the hot mic waits, supabase-swift doesn't
 ///   refresh it on its own.
-/// - A translation or an Improve my grammar dictation sends `dictate` a warm-up, which opens the
-///   connection and has a worker check the token and open its own connections. Not when
-///   `dictate` answered within `debounce`, as that worker is likely still up.
+/// - A dictation the cloud transcribes sends `dictate` a warm-up, which opens the connection and
+///   has a worker check the token and open its own connections. Not when `dictate` answered
+///   within `debounce`, as that worker is likely still up.
 ///
-/// Word for word dictations get the token only, until the timings show `transcribe`'s and
-/// `cleanup`'s workers are cold often enough to be worth a ping.
+/// In the November 2026 timings two Word for word dictations in three found their worker cold,
+/// which cost about half a second each; they had no warm-up then.
 @MainActor
 final class BackendWarmup {
     private let session: any SessionRenewing
@@ -39,13 +39,14 @@ final class BackendWarmup {
         self.debounce = debounce
     }
 
-    /// `usesDictate`: the dictation is translated or its grammar improved, with cloud
-    /// transcription, so its request is `dictate`'s. Ignored while a warm-up is still out: one at
-    /// a time is enough.
-    func dictationDidStart(_ requestId: UUID, usesDictate: Bool) {
+    /// `cloud`: the cloud transcribes the dictation, so its request at stop is `dictate`'s whenever
+    /// that can take it. `writesWithModel`: it is translated or written in a style; a Word for word
+    /// one needs `dictate` to transcribe alone. Ignored while a warm-up is still out: one at a time
+    /// is enough.
+    func dictationDidStart(_ requestId: UUID, cloud: Bool, writesWithModel: Bool) {
         guard running == nil else { return }
         running = Task { [weak self] in
-            await self?.warm(requestId, usesDictate: usesDictate)
+            await self?.warm(requestId, cloud: cloud, writesWithModel: writesWithModel)
             self?.running = nil
         }
     }
@@ -62,7 +63,7 @@ final class BackendWarmup {
         await running?.value
     }
 
-    private func warm(_ requestId: UUID, usesDictate: Bool) async {
+    private func warm(_ requestId: UUID, cloud: Bool, writesWithModel: Bool) async {
         do {
             try await session.ensureSession(validFor: tokenLead)
         } catch {
@@ -70,7 +71,8 @@ final class BackendWarmup {
             logger.notice("Warm-up skipped: \(error.localizedDescription, privacy: .public)")
             return
         }
-        guard usesDictate, let dictate, dictate.isAvailable else { return }
+        // Only when the dictation's request will be `dictate`'s: a warm-up warms no other function.
+        guard cloud, let dictate, writesWithModel ? dictate.isAvailable : dictate.transcribesAlone else { return }
         if let last = dictate.lastReplyAt, ContinuousClock.now - last < debounce { return }
         switch await dictate.warm() {
         case .warmed(let timing):

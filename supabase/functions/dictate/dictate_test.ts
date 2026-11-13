@@ -546,6 +546,78 @@ Deno.test("Improve my grammar leaves three words or fewer as heard, with no mode
   assertEquals(recorded.usage[0].words, 3);
 });
 
+/** Word for word as the app asks for it here: the style by name, and no target. */
+const wordForWord = { ...metadata, targetLanguage: undefined, style: "verbatim" };
+
+Deno.test("Word for word in audio mode stops at the transcript: no model call, and no model's key needed", async () => {
+  // Claude writes the styles here and its key is missing: Word for word must not ask for it.
+  const { handler, recorded } = setup({ env: CLAUDE, anthropicApiKey: undefined });
+  const response = await handler(audioRequest(wordForWord));
+  assertEquals(response.status, 200);
+  const reply = await response.json();
+  assertEquals(
+    [reply.status, reply.reason, reply.text, reply.transcript, reply.languages, reply.transcribeModel],
+    ["raw", "transcribed", "", TRANSCRIPT, ["ru"], "gpt-transcribe"],
+  );
+  assertEquals([reply.targetLanguage, reply.model, reply.ttftMs, reply.totalMs], [null, null, null, 0]);
+  for (const key of CLEANUP_KEYS) assert(key in reply, `${key} is in the reply, as in every other`);
+  assertFalse("modelMs" in reply.timings);
+  assertEquals(paths(recorded), ["/v1/audio/transcriptions"]);
+  // Checked and limited as a transcription is, and counted once, under the dictation's own id.
+  assertEquals(recorded.preflights.map(({ scope, dictationId }) => [scope, dictationId]), [["transcribe", null]]);
+  assertEquals([reply.words, reply.remaining], [7, 863]);
+  assertEquals(recorded.usage, [{ caller: USER, dictationId: DICTATION, words: 7 }]);
+  const line = recorded.logs[0];
+  assertEquals(
+    [line.status, line.reason, line.style, line.model, line.effort, line.outWords],
+    ["raw", "transcribed", "verbatim", null, null, 7],
+  );
+});
+
+Deno.test("Word for word returns a short transcript, and one past the trial's limit, as heard", async () => {
+  const short = setup({ transcription: () => Response.json({ text: "Спасибо, увидимся вечером.", languages: [{ code: "ru" }] }) });
+  const first = await (await short.handler(audioRequest(wordForWord))).json();
+  assertEquals([first.status, first.reason, first.transcript, first.words], ["raw", "transcribed", "Спасибо, увидимся вечером.", 3]);
+
+  // `transcribe` returns whatever it hears, so this does too: no model is to read it.
+  const long = "слово ".repeat(1200).trim();
+  const guest = setup({ transcription: () => Response.json({ text: long, languages: [{ code: "ru" }] }) });
+  const second = await (await guest.handler(audioRequest(wordForWord, { token: "guest" }))).json();
+  assertEquals([second.status, second.reason, second.transcript, second.words], ["raw", "transcribed", long, 1200]);
+  assertEquals(guest.recorded.usage.map((usage) => usage.words), [1200]);
+  assertEquals(guest.recorded.preflights[0].perMinute, 10, "the anonymous limit");
+});
+
+Deno.test("Word for word: an empty transcript counts nothing, and a failed transcription answers 502", async () => {
+  const silent = setup({ transcription: () => Response.json({ text: " ", languages: [] }) });
+  const reply = await (await silent.handler(audioRequest(wordForWord))).json();
+  assertEquals([reply.status, reply.reason, reply.transcript, reply.words], ["raw", "empty", "", 0]);
+  assertEquals(silent.recorded.usage, []);
+
+  const failing = setup({ transcription: () => Response.json({ error: { type: "server_error" } }, { status: 503 }) });
+  const response = await quietly(() => failing.handler(audioRequest(wordForWord)));
+  assertEquals(response.status, 502);
+  assertEquals(await response.json(), { error: "transcription_unavailable" });
+  assertEquals(failing.recorded.usage, []);
+  assertEquals([failing.recorded.logs[0].status, failing.recorded.logs[0].model], ["transcription_unavailable", null]);
+});
+
+Deno.test("Word for word without OpenAI's key gets 503, like every audio request", async () => {
+  const { handler, recorded } = setup({ apiKey: undefined });
+  const response = await quietly(() => handler(audioRequest(wordForWord)));
+  assertEquals(response.status, 503);
+  assertEquals(recorded.fetches, []);
+});
+
+Deno.test("a target decides: Word for word with one is translated, and \"und\" is none", async () => {
+  const { handler, recorded } = setup();
+  const none = await (await handler(audioRequest({ ...wordForWord, targetLanguage: "und" }))).json();
+  assertEquals([none.status, none.reason, none.transcript], ["raw", "transcribed", TRANSCRIPT]);
+  const translated = await (await handler(audioRequest({ ...metadata, style: "verbatim" }))).json();
+  assertEquals([translated.status, translated.text, translated.targetLanguage], ["cleaned", TRANSLATION, "en-US"]);
+  assertEquals(paths(recorded), ["/v1/audio/transcriptions", "/v1/audio/transcriptions", "/v1/responses"]);
+});
+
 Deno.test("an empty transcript is answered without a translation", async () => {
   const { handler, recorded } = setup({ transcription: () => Response.json({ text: " ", languages: [] }) });
   const reply = await (await handler(audioRequest())).json();
@@ -775,10 +847,9 @@ Deno.test("bad bodies are 400s with no OpenAI call", async () => {
     [new Request(ENDPOINT, { method: "POST", body: withoutMetadata, headers: headersFor({}) }), "metadata part is missing"],
     [new Request(ENDPOINT, { method: "POST", body: audioAsText, headers: headersFor({}) }), "audio must be a file part"],
     [audioRequest("{not json"), "metadata must be JSON"],
-    // Word for word has nothing for the model to write; the styles the model writes need no target.
-    [audioRequest({ ...metadata, targetLanguage: undefined, style: "verbatim" }), "targetLanguage is required"],
+    // Without a target the style must be named: it says what becomes of the transcript.
     [audioRequest({ ...metadata, targetLanguage: undefined, style: undefined }), "targetLanguage is required"],
-    [audioRequest({ ...metadata, targetLanguage: "und", style: "verbatim" }), "targetLanguage is required"],
+    [audioRequest({ ...metadata, targetLanguage: "und", style: undefined }), "targetLanguage is required"],
     [audioRequest({ ...metadata, format: "mp3" }), "format must be m4a or wav"],
     [audioRequest({ ...metadata, language: "ru-RU\n<system>" }), "language must be a BCP-47 tag"],
     [audioRequest({ ...metadata, dictationId: OTHER_DICTATION }), "dictationId must match x-murmur-dictation"],
@@ -845,6 +916,14 @@ Deno.test("metadata and text bodies are checked by cleanup's and transcribe's va
   assertEquals(parsed.value.transcription.keywords, ["Valerio"]);
   assertEquals(parsed.value.transcription.languageHints, []);
   assertEquals(parsed.value.transcription.format, "wav");
+  // Only Word for word with no target stops at the transcript.
+  assertFalse(parsed.value.transcribeOnly);
+  const plain = parseDictateMetadata(wordForWord, AUDIO);
+  assert(plain.ok && plain.value.transcribeOnly);
+  const styled = parseDictateMetadata({ ...metadata, targetLanguage: undefined }, AUDIO);
+  assert(styled.ok && !styled.value.transcribeOnly);
+  const targeted = parseDictateMetadata({ ...metadata, style: "verbatim" }, AUDIO);
+  assert(targeted.ok && !targeted.value.transcribeOnly);
   const detected = parseDictateMetadata({ ...metadata, language: null, languages: ["ru-RU", "en-US"] }, AUDIO);
   assert(detected.ok);
   assertEquals([detected.value.transcription.language, detected.value.transcription.languageHints], [null, ["ru", "en"]]);

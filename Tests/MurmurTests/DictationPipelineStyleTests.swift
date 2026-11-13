@@ -157,6 +157,17 @@ struct DictationPipelineLanguageTests {
         }
     }
 
+    /// Word for word and the styles the model writes go through the same function, so the timings
+    /// log is told the style: the requests alone no longer say which is which.
+    @Test func theTimingsNameTheDictationsStyle() async {
+        for style in StylePreset.allCases {
+            let transcriber = CloudLikeTranscriber(UtteranceOutput(transcript: "See you at five."))
+            let outcome = await DictationPipeline(cleanup: StyleCleanup()).complete(
+                dictation(style: style), transcriber: transcriber, audioSeconds: 1, stoppedAt: ContinuousClock.now)
+            #expect(outcome.timings?.style == style.rawValue, "\(style)")
+        }
+    }
+
     private func dictation(style: StylePreset, language: String = "en-US") -> ActiveDictation {
         ActiveDictation(requestId: UUID(), documentIdentifier: nil, style: style, language: language,
                         translationTargetLanguage: nil, source: .keyboard, startedAt: Date())
