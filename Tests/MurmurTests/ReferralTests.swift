@@ -55,9 +55,12 @@ struct ReferralTests {
     }
 
     @Test func mapsEveryServerAnswer() {
-        let answers = ["ok", "invalid", "own_code", "already_redeemed", "too_late", "sign_in_required"]
+        let answers = ["ok", "invalid", "own_code", "already_redeemed", "too_late", "sign_in_required",
+                       "device_used", "device_check_required"]
         #expect(answers.compactMap(AccountService.RedeemOutcome.init(rawValue:)).count == answers.count)
         #expect(AccountService.RedeemOutcome.ok.message.contains("a month of Murmur Pro"))
+        // The month is the iPhone's free trial, one per iPhone.
+        #expect(AccountService.RedeemOutcome.deviceUsed.message.contains("already had its free trial"))
     }
 
     /// Open in Murmur on the invite page.

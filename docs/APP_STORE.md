@@ -42,7 +42,7 @@ App Store Connect only takes in its web page). Character limits are App Store Co
 > Red means the microphone is open, and nothing else in Murmur is red. Murmur asks before your first recording leaves your iPhone: OpenAI turns it into text, and Anthropic tidies or translates the text. Neither trains AI models on it. Your history of transcripts and recordings stays on your iPhone.
 >
 > MURMUR PRO
-> Murmur is free with 1,000 words a week, after a 14-day trial of Pro. Murmur Pro has no weekly limit: $9.99 a month or $79.99 a year. Payment is charged to your Apple Account, and the subscription renews automatically unless cancelled at least 24 hours before the end of the period. Manage or cancel it in Settings › Apple Account › Subscriptions.
+> Murmur is free with 1,000 words a week, after a 14-day trial of Pro, one per iPhone. Murmur Pro has no weekly limit: $9.99 a month or $79.99 a year. Payment is charged to your Apple Account, and the subscription renews automatically unless cancelled at least 24 hours before the end of the period. Manage or cancel it in Settings › Apple Account › Subscriptions.
 >
 > Terms of Use: https://simplymurmur.com/terms/
 > Privacy Policy: https://simplymurmur.com/privacy/
@@ -84,13 +84,13 @@ SIM="iPhone 17 Pro Max" DD=build/DerivedData OUT=build/app-store-screenshots scr
 > The keyboard needs Allow Full Access, only to exchange the dictation with the Murmur app through their shared App Group container. It doesn't log keystrokes or send what you type anywhere.
 >
 > TO TRY IT
-> 1. Open Murmur and sign in with Apple.
+> 1. Open Murmur and sign in with Apple. Any Apple ID works, so no demo account is needed. Sign-in is required, because the account holds the plan and the weekly word count.
 > 2. Follow the setup: add the keyboard in Settings › General › Keyboard › Keyboards, and turn on Allow Full Access.
 > 3. On the microphone page, tap Continue. "Before Murmur listens" asks for permission to send recordings to the AI services (see AI below): tap Allow, then allow the microphone.
 > 4. Open Notes, switch to the Murmur keyboard with the globe key, tap the mic and speak.
 >
 > SUBSCRIPTIONS
-> New accounts get a 14-day trial of Pro without payment details. "Upgrade to Pro" in the menu or Settings shows the two auto-renewing subscriptions, Murmur Pro Monthly and Murmur Pro Annual, in the group "Murmur Pro". Restore purchase is on the same screen.
+> The first account on an iPhone gets a 14-day trial of Pro without payment details. Murmur asks Apple's DeviceCheck, through its server, whether the iPhone has had one, so a later account on the same iPhone starts on the free plan (1,000 words a week); if this device already had a Murmur trial, that is why. Either way the subscriptions can be bought. "Upgrade to Pro" in the menu or Settings shows the two auto-renewing subscriptions, Murmur Pro Monthly and Murmur Pro Annual, in the group "Murmur Pro". Restore purchase is on the same screen.
 >
 > AI
 > Recordings are transcribed by OpenAI's API, and the transcript is tidied or translated by Anthropic's Claude API, both through Murmur's server. Before the microphone is first turned on, the page "Before Murmur listens" names both services, says what each receives, and offers Allow and Not now (guideline 5.1.2(i)). Without Allow, Murmur doesn't turn the microphone on, so nothing is recorded or sent. The same permission is a switch in Settings › Data and privacy ("Write with AI services"). Neither service trains its models on the data. The user's words are typed into their own text field and aren't shared with other users.
@@ -98,7 +98,7 @@ SIM="iPhone 17 Pro Max" DD=build/DerivedData OUT=build/app-store-screenshots scr
 > ACCOUNT DELETION
 > Open the menu, tap the account's row at the bottom, then Delete account. It deletes the account and its data on the server and revokes Sign in with Apple.
 
-**Sign-in information**: not needed, since Sign in with Apple works. If Apple asks for a demo account, create one with an email you can read for the 6-digit code.
+**Sign-in information**: leave "Sign-in required" unticked: Sign in with Apple works with any Apple ID (the user decided on 13 Nov 2026 to keep sign-in required, and the notes say so). If Apple asks for a demo account anyway, create one with an email you can read for the 6-digit code.
 
 ## App Privacy answers
 
@@ -139,5 +139,5 @@ No objectionable content. The app isn't made for children. "Unrestricted web acc
 
 - **Returning to the previous app.** After the keyboard opens Murmur, Murmur reads which app the keyboard was in from a private UIKit value, so it can reopen it (`HostReturn.swift`). Review may flag it under guideline 2.5.1. Shipping keyboards rely on the same behavior. If it's rejected, turn off "Return to the app automatically" (Settings › Keyboard) by default; users then swipe back themselves.
 - **Noticing that the keyboard was added.** Onboarding moves on by itself once Murmur's keyboard is in the list of keyboards, which it tells from an undocumented `identifier` of `UITextInputMode` (`SetupStatus.swift`). If review objects, the page can wait for the keyboard's first run instead.
-- **Sign-in during onboarding.** Guideline 5.1.1(v) asks that features that don't need an account work without one. Dictation needs the server, which needs an account. Onboarding's sign-in page offers "Continue without an account" only in a build without a server; someone who has signed out can go on as a guest from the sign-in sheet. Showing the option to everyone is an open decision.
+- **Sign-in during onboarding.** Guideline 5.1.1(v) asks that features that don't need an account work without one. Dictation needs the server, which needs an account. Onboarding's sign-in page offers "Continue without an account" only in a build without a server; someone who has signed out can go on as a guest from the sign-in sheet. On 13 Nov 2026 the user decided to keep sign-in required; the review notes tell App Review to sign in with Apple.
 - **The keyboard opens the app.** Guideline 4.4.1 says keyboards must not launch other apps. iOS gives a keyboard no microphone, so Murmur's keyboard opens its own app to turn it on; the review notes explain it.

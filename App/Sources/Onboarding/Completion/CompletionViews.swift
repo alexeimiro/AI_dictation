@@ -140,7 +140,7 @@ struct TrialOfferView: View {
             BigNumber(number: "\(days)", caption: caption, meter: (segments, segments))
         case .subscriber:
             BigNumber(number: OnboardingCopy.Offer.subscriberBadge, caption: OnboardingCopy.Offer.subscriberCaption)
-        case .free:
+        case .free, .trialUsed:
             BigNumber(number: OnboardingCopy.Offer.freeNumber, caption: OnboardingCopy.Offer.freeCaption)
         }
     }
@@ -149,7 +149,7 @@ struct TrialOfferView: View {
         switch offer {
         case .trial: OnboardingCopy.Offer.trialBadge
         case .subscriber: OnboardingCopy.Offer.subscriberBadge
-        case .free: OnboardingCopy.Offer.freeBadge
+        case .free, .trialUsed: OnboardingCopy.Offer.freeBadge
         }
     }
 
@@ -157,7 +157,7 @@ struct TrialOfferView: View {
         switch offer {
         case .trial(let days): OnboardingCopy.Offer.trialTitle(days: days)
         case .subscriber: OnboardingCopy.Offer.subscriberTitle
-        case .free: OnboardingCopy.Offer.freeTitle
+        case .free, .trialUsed: OnboardingCopy.Offer.freeTitle
         }
     }
 
@@ -166,6 +166,7 @@ struct TrialOfferView: View {
         case .trial(let days): OnboardingCopy.Offer.trialLine(days: days)
         case .subscriber: OnboardingCopy.Offer.subscriberLine
         case .free: OnboardingCopy.Offer.freeLine
+        case .trialUsed: OnboardingCopy.Offer.trialUsedLine
         }
     }
 
@@ -173,7 +174,7 @@ struct TrialOfferView: View {
         switch offer {
         case .trial: OnboardingCopy.Offer.trialFootnote
         case .subscriber: nil
-        case .free: OnboardingCopy.Offer.freeFootnote
+        case .free, .trialUsed: OnboardingCopy.Offer.freeFootnote
         }
     }
 

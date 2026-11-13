@@ -28,6 +28,8 @@ final class Backend: SessionRenewing {
     private let logger = Logger(subsystem: "Murmur", category: "Backend")
     /// Keeps `account` in step with Auth for as long as the backend lives.
     private let authEvents: Task<Void, Never>
+    /// After `ensureSession` signed a guest in anonymously: a new account, whose trial is claimed.
+    var onGuestSession: (() -> Void)?
 
     /// `options`: tests pass in-memory auth storage and a stubbed URLSession; the default is
     /// what `SupabaseClient(supabaseURL:supabaseKey:)` uses, with its Keychain storage cached.
@@ -194,6 +196,7 @@ final class Backend: SessionRenewing {
             }
             logger.info("No session; signing in anonymously")
             _ = try await client.auth.signInAnonymously()
+            onGuestSession?()
         }
     }
 

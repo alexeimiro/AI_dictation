@@ -65,9 +65,13 @@ struct RootView: View {
             SignInAgainView(start: start)
                 .onAppear { signInSheetOnScreen = true }
         }
-        // After a reinstall, signing in brings back the account's style.
+        // After a reinstall, signing in brings back the account's style; a new account's trial is
+        // claimed.
         .onChange(of: model.account?.isSignedIn ?? false) { _, signedIn in
-            if signedIn { model.syncStyle() }
+            if signedIn {
+                model.syncStyle()
+                model.claimTrial()
+            }
         }
     }
 }

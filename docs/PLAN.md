@@ -273,7 +273,7 @@ Every `-route` name still opens its screen; `menu` opens the menu.
   - `issue_reports`
   - `referrals`
 - **Server-only tables (users can at most read them):**
-  - `entitlements`: plan, `trial_ends_at`, source, `expires_at`. Users have SELECT only. A trigger on `auth.users` grants the 14-day trial.
+  - `entitlements`: plan, `trial_ends_at`, source, `expires_at`. Users have SELECT only. A trigger on `auth.users` creates it on Basic; `claim-trial` grants the 14-day trial once per iPhone (DeviceCheck, `trial_check`; since 2026-11-13).
   - `usage_events`: `(user_id, dictation_id unique, words)`. Written only by the service role, so usage can't be double-counted.
 - **Functions:** quota and rate-limit SQL functions are `security definer`, with `revoke execute … from anon, authenticated`.
 - **Transcript history** stays on the device. Sync is backup and restore, last write wins.

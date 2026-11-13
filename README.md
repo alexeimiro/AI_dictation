@@ -208,6 +208,31 @@ spoken language, shows "Translation isn't available right now" instead of insert
 language. Redeploy the function together with an app build that translates:
 `supabase functions deploy cleanup`.
 
+**One free trial per iPhone.** A new account starts on Basic. Right after sign-in (and whenever
+Murmur comes to the front until it's decided) the app calls `claim-trial` with a DeviceCheck token
+(`TrialClaim`). The function asks Apple whether this iPhone's bit 0 is set: if not, the account gets
+14 days of Pro and the bit is set; if it is, the account stays on Basic (`device_used`). An invite's
+month needs the same check (`redeem_referral` answers `device_used` or `device_check_required`).
+Apple's errors and a server without the key grant the trial unchecked; a missing or refused token
+decides nothing, and the app asks again later. Accounts from before the check are `legacy`.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `DEVICECHECK_KEY_ID`, `DEVICECHECK_PRIVATE_KEY` | — | A key with DeviceCheck ticked (the .p8, PEM). Without them every trial is granted unchecked. |
+| `APPLE_TEAM_ID` | `DMC53DDZQV` | The team the key belongs to. |
+| `DEVICECHECK_HOST` | production | `https://api.development.devicecheck.apple.com` for tests; its bits don't last. |
+
+**Support messages.** The app sends Report an issue and Leave feedback to `support`, which saves
+them to `issue_reports` (10 an hour per account) and then emails each one through Resend, with the
+account's email as Reply-To. A server without the function gets them written to the table directly,
+as builds before it did, and no email goes out.
+
+| Variable | Default | What it does |
+|---|---|---|
+| `RESEND_API_KEY` | — | A Resend key with sending access. Without it, or without an address, messages are only saved. |
+| `SUPPORT_EMAIL_TO` | — | Where support messages go; several addresses separated by commas. |
+| `SUPPORT_EMAIL_FROM` | `Murmur <no-reply@simplymurmur.com>` | The sender; its domain must be verified at Resend. |
+
 Anonymous (trial) users are limited to 10 cleanups and 10 transcriptions per minute and 6 000-character
 transcripts. On the free plan, once the week's words are used up, `transcribe` answers 402 too.
 

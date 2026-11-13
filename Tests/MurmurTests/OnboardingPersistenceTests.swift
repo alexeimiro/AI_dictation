@@ -188,6 +188,18 @@ struct OnboardingHelperTests {
                                               expiresAt: now.addingTimeInterval(-day), now: now) == .free)
     }
 
+    /// Basic on an iPhone that has had its trial says why; anything the account does have stands.
+    @Test @MainActor func aUsedTrialIsExplained() {
+        #expect(SupabaseOfferProvider.explained(.free, decision: .deviceUsed) == .trialUsed)
+        #expect(SupabaseOfferProvider.explained(.free, decision: nil) == .free)
+        #expect(SupabaseOfferProvider.explained(.free, decision: .granted) == .free)
+        #expect(SupabaseOfferProvider.explained(.subscriber, decision: .deviceUsed) == .subscriber)
+        #expect(SupabaseOfferProvider.explained(.trial(days: 30), decision: .deviceUsed) == .trial(days: 30))
+        #expect(TrialOfferView.subtitle(for: .trialUsed).contains("already had its free trial"))
+        #expect(TrialOfferView.badge(for: .trialUsed) == TrialOfferView.badge(for: .free))
+        #expect(OnboardingFixtures.offer(variant: "trialUsed") == .trialUsed)
+    }
+
     @Test @MainActor func trialLengthReadsNaturally() {
         #expect(TrialOfferView.duration(14) == "2 weeks")
         #expect(TrialOfferView.duration(7) == "1 week")

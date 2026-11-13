@@ -1,8 +1,9 @@
 -- pgTAP tests for RLS, quota, the dictation preflight and sign-up helpers. Run with `supabase test db`.
 begin;
-select plan(68);
+select plan(69);
 
--- Two users (the auth trigger creates their profile, trial entitlement and referral code).
+-- Two users (the auth trigger creates their profile, an entitlement on Basic and a referral code;
+-- claim-trial decides the trial, through decide_trial).
 insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at, aud, role)
 values
   ('11111111-1111-1111-1111-111111111111', 'alice@example.com', '{"full_name":"Alice"}', now(), 'authenticated', 'authenticated'),
@@ -10,9 +11,15 @@ values
 
 select is((select full_name from public.profiles where id = '11111111-1111-1111-1111-111111111111'),
           'Alice', 'profile created from sign-up metadata');
+select results_eq(
+  $$ select trial_ends_at, trial_started_at, trial_check from public.entitlements
+     where user_id = '11111111-1111-1111-1111-111111111111' $$,
+  $$ values (null::timestamptz, null::timestamptz, null::text) $$,
+  'new users start without a trial until claim-trial decides it');
+select public.decide_trial('11111111-1111-1111-1111-111111111111', 'granted');
 select ok((select trial_ends_at between now() + interval '13 days 23 hours' and now() + interval '14 days 1 hour'
            from public.entitlements where user_id = '11111111-1111-1111-1111-111111111111'),
-          'new users get a 14-day trial');
+          'a granted trial is 14 days');
 select is((select count(*)::int from public.referrals
            where user_id in ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222')),
           2, 'each user gets a referral code');
@@ -92,6 +99,7 @@ insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at, aud, 
 values
   ('33333333-3333-3333-3333-333333333333', 'carol@example.com', '{}', now(), 'authenticated', 'authenticated'),
   ('44444444-4444-4444-4444-444444444444', 'dave@example.com', '{}', now(), 'authenticated', 'authenticated');
+select public.decide_trial('33333333-3333-3333-3333-333333333333', 'granted');
 update public.entitlements set trial_ends_at = now() - interval '1 day'
 where user_id = '44444444-4444-4444-4444-444444444444';
 

@@ -92,6 +92,8 @@ enum OfferVariant: Codable, Equatable, Sendable {
     case trial(days: Int)
     case subscriber
     case free
+    /// Basic, because this iPhone has had its free trial (one per iPhone).
+    case trialUsed
 }
 
 /// The answers the user gave. Authentication state lives in `Backend`, not here.

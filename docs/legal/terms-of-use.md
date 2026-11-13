@@ -1,6 +1,6 @@
 # Murmur Terms of Use
 
-Effective November 9, 2026
+Effective November 13, 2026
 
 These terms are between you and OKNENOR L.L.C-FZ ("we"), the maker of Murmur. By using Murmur you
 agree to them, and to Apple's Licensed Application End User License Agreement
@@ -13,14 +13,15 @@ at any time in the app.
 
 ## Murmur Pro
 
-- Murmur is free with a weekly word limit, after a free trial of Murmur Pro. Murmur Pro has no
+- Murmur is free with a weekly word limit, after a free trial of Murmur Pro. The trial is one
+  per iPhone: a later account on the same iPhone starts on the free plan. Murmur Pro has no
   weekly limit.
 - Murmur Pro is an auto-renewing subscription, monthly or yearly, bought through the App Store.
   Payment is charged to your Apple Account when you confirm the purchase. It renews
   automatically, at the same price and for the same period, unless you cancel it at least 24
   hours before the period ends. Manage or cancel it in Settings › Apple Account › Subscriptions.
-- Invites: a friend who enters your invite code within 14 days of creating their Murmur account
-  gets a month of Murmur Pro, and you get a month once they finish their first dictation, up to
+- Invites: a friend who enters your invite code within 14 days of creating their Murmur account,
+  on an iPhone that hasn't had a free trial, gets a month of Murmur Pro, and you get a month once they finish their first dictation, up to
   12 months in total. Free months start when they're given, alongside any subscription. They
   have no cash value, and we may withhold them if invites are abused, for example with fake
   accounts.

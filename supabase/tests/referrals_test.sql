@@ -1,7 +1,7 @@
 -- pgTAP tests for invites: entering a code, the friend's month, the owner's month on the friend's
 -- first dictation, the 12-month cap, and who may call what. Run with `supabase test db`.
 begin;
-select plan(27);
+select plan(30);
 
 -- Ann shares her code. Fred and Dan are new; Lea signed up 20 days ago; the guest has no account.
 insert into auth.users (id, email, aud, role, created_at, is_anonymous)
@@ -11,12 +11,16 @@ values
   ('aaaaaaaa-0000-0000-0000-000000000003', 'lea@example.com', 'authenticated', 'authenticated', now() - interval '20 days', false),
   ('aaaaaaaa-0000-0000-0000-000000000004', null, 'authenticated', 'authenticated', now(), true),
   ('aaaaaaaa-0000-0000-0000-000000000005', 'dan@example.com', 'authenticated', 'authenticated', now(), false);
+-- claim-trial gives each of them their iPhone's first trial after sign-up, as the app asks it to.
+select public.decide_trial(id, 'granted') from auth.users
+where id in ('aaaaaaaa-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000002',
+             'aaaaaaaa-0000-0000-0000-000000000003', 'aaaaaaaa-0000-0000-0000-000000000005');
 select set_config('test.ann', (select code from public.referrals where user_id = 'aaaaaaaa-0000-0000-0000-000000000001'), true);
 select set_config('test.ann_ends',
   (select trial_ends_at::text from public.entitlements where user_id = 'aaaaaaaa-0000-0000-0000-000000000001'), true);
 
 select ok((select trial_started_at = now() from public.entitlements where user_id = 'aaaaaaaa-0000-0000-0000-000000000002'),
-          'a new trial records when it started');
+          'a granted trial records when it started');
 
 -- Fred enters Ann's code.
 set local role authenticated;
@@ -57,6 +61,32 @@ reset role;
 set local role anon;
 select throws_ok($$ select public.redeem_referral('x') $$, '42501', null, 'the anon key cannot enter codes');
 reset role;
+
+-- The month is the iPhone's free trial: none on an iPhone that already had one (Gus), and none
+-- before claim-trial has asked Apple (Hal).
+insert into auth.users (id, email, aud, role, created_at, is_anonymous)
+values
+  ('aaaaaaaa-0000-0000-0000-000000000006', 'gus@example.com', 'authenticated', 'authenticated', now(), false),
+  ('aaaaaaaa-0000-0000-0000-000000000007', 'hal@example.com', 'authenticated', 'authenticated', now(), false);
+select public.decide_trial('aaaaaaaa-0000-0000-0000-000000000006', 'device_used');
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-0000-0000-000000000006","role":"authenticated"}';
+select is(public.redeem_referral(current_setting('test.ann')), 'device_used',
+          'no month on an iPhone that already had its trial');
+reset role;
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"aaaaaaaa-0000-0000-0000-000000000007","role":"authenticated"}';
+select is(public.redeem_referral(current_setting('test.ann')), 'device_check_required',
+          'no month before the iPhone is checked');
+reset role;
+select results_eq(
+  $$ select (select count(*)::int from public.referral_redemptions
+             where user_id in ('aaaaaaaa-0000-0000-0000-000000000006', 'aaaaaaaa-0000-0000-0000-000000000007')),
+            (select count(*)::int from public.entitlements
+             where user_id in ('aaaaaaaa-0000-0000-0000-000000000006', 'aaaaaaaa-0000-0000-0000-000000000007')
+               and trial_ends_at is not null) $$,
+  $$ values (0, 0) $$,
+  'neither is recorded as a friend or given Pro');
 
 -- Fred's first dictation earns Ann a month; later ones don't.
 select public.record_usage('aaaaaaaa-0000-0000-0000-000000000002', gen_random_uuid(), 0);

@@ -28,10 +28,10 @@ final class OnboardingServices {
         self.languages = languages
     }
 
-    static func production(backend: Backend?) -> OnboardingServices {
+    static func production(backend: Backend?, trial: TrialClaim? = nil) -> OnboardingServices {
         OnboardingServices(
             auth: SupabaseOnboardingAuth(backend: backend),
-            offers: SupabaseOfferProvider(backend: backend),
+            offers: SupabaseOfferProvider(backend: backend, trial: trial),
             notifications: SystemNotificationAuthorizer(),
             profile: SupabaseProfileSync(backend: backend),
             languages: SystemDictationLanguages())
@@ -269,9 +269,11 @@ final class SupabaseOfferProvider: OfferProviding {
     }
 
     private let backend: Backend?
+    private let trial: TrialClaim?
 
-    init(backend: Backend?) {
+    init(backend: Backend?, trial: TrialClaim? = nil) {
         self.backend = backend
+        self.trial = trial
     }
 
     func currentOffer() async throws -> OfferVariant {
@@ -279,6 +281,8 @@ final class SupabaseOfferProvider: OfferProviding {
         guard let backend else { return .free }
         try await backend.ensureSession()
         guard let userID = backend.client.auth.currentUser?.id else { return .free }
+        // The trial is decided after sign-in; usually it already is, and this returns at once.
+        let decision = await trial?.claimIfNeeded()
         let rows: [Entitlement] = try await backend.client.from("entitlements")
             .select("plan,source,trial_ends_at,expires_at")
             .eq("user_id", value: userID)
@@ -286,8 +290,14 @@ final class SupabaseOfferProvider: OfferProviding {
             .execute()
             .value
         guard let row = rows.first else { return .free }
-        return Self.variant(plan: row.plan, source: row.source, trialEndsAt: row.trialEndsAt,
-                            expiresAt: row.expiresAt, now: Date())
+        let offer = Self.variant(plan: row.plan, source: row.source, trialEndsAt: row.trialEndsAt,
+                                 expiresAt: row.expiresAt, now: Date())
+        return Self.explained(offer, decision: decision)
+    }
+
+    /// Basic on an iPhone that has had its trial says so.
+    nonisolated static func explained(_ offer: OfferVariant, decision: TrialClaim.Outcome?) -> OfferVariant {
+        offer == .free && decision == .deviceUsed ? .trialUsed : offer
     }
 
     /// The trial is the `entitlements.trial_ends_at` the signup trigger grants; a paid plan is

@@ -165,6 +165,10 @@ final class AccountService: StyleRemote {
         case alreadyRedeemed = "already_redeemed"
         case tooLate = "too_late"
         case signInRequired = "sign_in_required"
+        /// The month is this iPhone's free trial, and it has had one.
+        case deviceUsed = "device_used"
+        /// The iPhone isn't checked yet (`TrialClaim`); the code waits and is tried again.
+        case deviceCheckRequired = "device_check_required"
 
         var message: String {
             switch self {
@@ -174,6 +178,8 @@ final class AccountService: StyleRemote {
             case .alreadyRedeemed: "You've already used an invite code."
             case .tooLate: "Invite codes work within 14 days of creating your account."
             case .signInRequired: "Sign in to use an invite code."
+            case .deviceUsed: "Invite codes work for an iPhone’s first Murmur account. This iPhone has already had its free trial."
+            case .deviceCheckRequired: "Couldn’t check this iPhone yet. Try again in a minute."
             }
         }
     }
@@ -217,11 +223,14 @@ final class AccountService: StyleRemote {
 
     private let backend: Backend?
     private let functions: EdgeFunctionClient?
+    /// An invite's month is the iPhone's free trial, so the trial is decided before a code is used.
+    private let trial: TrialClaim?
     private let logger = Logger(subsystem: "Murmur", category: "Account")
 
-    init(backend: Backend?, functions: EdgeFunctionClient?) {
+    init(backend: Backend?, functions: EdgeFunctionClient?, trial: TrialClaim? = nil) {
         self.backend = backend
         self.functions = functions
+        self.trial = trial
     }
 
     /// The plan and this week's words; nil without a backend or a stored session. It never starts
@@ -249,6 +258,7 @@ final class AccountService: StyleRemote {
         guard backend.client.auth.currentSession != nil else { return .signInRequired }
         do {
             try await backend.ensureSession()
+            await trial?.claimIfNeeded()
             let answer: String = try await backend.client.rpc("redeem_referral", params: ["p_code": code])
                 .execute().value
             return RedeemOutcome(rawValue: answer) ?? .invalid
@@ -258,21 +268,37 @@ final class AccountService: StyleRemote {
         }
     }
 
-    /// Writes a support message to `issue_reports`, with what's needed to look into it.
-    func send(_ message: SupportMessage) async throws {
-        struct Insert: Encodable {
-            let message: String
-            let diagnostics: [String: String]
-        }
-        guard let backend else { throw Failure.notConfigured }
-        try await backend.ensureSession()
-        var diagnostics = Self.diagnostics()
+    /// A support message with what's needed to look into it, as `support` and `issue_reports` take it.
+    struct SupportPayload: Encodable, Equatable {
+        let message: String
+        let diagnostics: [String: String]
+    }
+
+    nonisolated static func payload(_ message: SupportMessage, diagnostics base: [String: String]) -> SupportPayload {
+        var diagnostics = base
         diagnostics["kind"] = message.kind.rawValue
         if let topic = message.topic { diagnostics["topic"] = topic }
         let text = String(message.message.trimmingCharacters(in: .whitespacesAndNewlines).prefix(5000))
-        try await backend.client.from("issue_reports")
-            .insert(Insert(message: text, diagnostics: diagnostics))
-            .execute()
+        return SupportPayload(message: text, diagnostics: diagnostics)
+    }
+
+    /// Sends a support message to `support`, which saves it and emails it to us. A server without
+    /// that function gets it written to `issue_reports` directly, as before.
+    func send(_ message: SupportMessage) async throws {
+        guard let backend else { throw Failure.notConfigured }
+        try await backend.ensureSession()
+        let payload = Self.payload(message, diagnostics: Self.diagnostics())
+        if let functions {
+            do {
+                _ = try await functions.post("support", body: payload, timeout: 20)
+                return
+            } catch .httpError(code: 404) {
+                // Not deployed: saved the old way below, without the email.
+            } catch .httpError(code: 429) {
+                throw Failure.unavailable("You've sent several messages in the last hour. Please try again later.")
+            }
+        }
+        try await backend.client.from("issue_reports").insert(payload).execute()
     }
 
     /// 👍 or 👎 on a dictation, to `feedback`. Its text goes along only when the user agreed to

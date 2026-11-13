@@ -301,6 +301,8 @@ enum OnboardingCopy {
         static let freeTitle = "You’re on Basic. Start dictating."
         static let freeLine = "Basic includes 1,000 words of dictation every week."
         static let freeFootnote = "Your words reset every Sunday."
+        /// Basic because the free trial is one per iPhone.
+        static let trialUsedLine = "This iPhone has already had its free trial. Basic includes 1,000 words of dictation every week."
         static let freeNumber = "1,000"
         static let freeCaption = "words a week, free"
 

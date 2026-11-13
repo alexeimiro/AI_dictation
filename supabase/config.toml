@@ -453,3 +453,9 @@ verify_jwt = false
 
 [functions.app-store-notifications]
 verify_jwt = false
+
+[functions.claim-trial]
+verify_jwt = false
+
+[functions.support]
+verify_jwt = false

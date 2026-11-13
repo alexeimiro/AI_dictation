@@ -1,6 +1,6 @@
 # Murmur Privacy Policy
 
-Effective November 12, 2026
+Effective November 13, 2026
 
 Murmur is a voice keyboard for iPhone made by OKNENOR L.L.C-FZ ("we"). This policy explains what
 Murmur collects, why, and the choices you have. Questions: miralex13@gmail.com.
@@ -30,13 +30,19 @@ Murmur collects, why, and the choices you have. Questions: miralex13@gmail.com.
   get your month of Murmur Pro. Your friend sees how many people joined with their code, not who.
 - **How much you dictate:** the number of words in each dictation, to apply the free plan's weekly
   limit. Not the words themselves.
+- **Whether your iPhone has had a free trial:** Murmur Pro's free trial, and an invite's free
+  month, is one per iPhone. To tell, Murmur asks Apple's DeviceCheck service, through our server,
+  whether this iPhone has had one, and marks it when it gets one. Apple keeps that mark for us. It
+  doesn't tell us who you are or give us an identifier for your iPhone, and we don't keep the token
+  the app sends to ask.
 - **Purchases:** if you subscribe to Murmur Pro, Apple tells us which plan you bought and when it
   renews, expires or is refunded, so we can grant Pro. We never see your payment details.
 - **Your answers during setup:** what you plan to use Murmur for, how you heard about it, your
   languages and default style, your data-sharing choice and, if you ask for the link to Murmur for
   Mac and PC, the email address to send it to.
 - **Feedback and support messages:** what you write to us, with the app version, iOS version,
-  device model and language, to look into the problem. When you rate a dictation and have turned
+  device model and language, to look into the problem. Each message is also emailed to us, with
+  your account's email address so we can reply. When you rate a dictation and have turned
   on "Improve Murmur for everyone", the rating can include that dictation's text.
 
 We don't track you across apps and websites, show ads, or sell or rent your data.
@@ -46,8 +52,9 @@ We don't track you across apps and websites, show ads, or sell or rent your data
 - **Supabase** hosts our server, database and sign-in, in the European Union (Frankfurt).
 - **OpenAI** transcribes dictations.
 - **Anthropic** tidies and translates the text of dictations.
-- **Apple** handles Sign in with Apple and App Store purchases. **Google** handles Sign in with
-  Google.
+- **Apple** handles Sign in with Apple, App Store purchases and the free-trial check
+  (DeviceCheck). **Google** handles Sign in with Google.
+- **Resend** sends our emails: sign-in codes, and your support messages to us.
 
 Each processes data only to provide its service to us.
 

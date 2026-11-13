@@ -56,6 +56,7 @@ enum OnboardingFixtures {
         switch variant {
         case "subscriber": .subscriber
         case "free": .free
+        case "trialUsed": .trialUsed
         case "offline": nil
         default: .trial(days: 14)
         }

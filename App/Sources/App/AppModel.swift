@@ -43,6 +43,8 @@ final class AppModel {
     let account: AccountModel?
     /// The plan, support messages and account deletion.
     let accountService: AccountService
+    /// One free trial per iPhone: the server decides each new account's trial (`claim-trial`).
+    let trial: TrialClaim
     /// The plan and this week's words, refreshed when the app becomes active; nil until the
     /// first answer, and without a backend.
     var quota: AccountService.Quota?
@@ -98,7 +100,13 @@ final class AppModel {
         let cleanup = CleanupClient(functions: functions)
         let pipeline = DictationPipeline(cleanup: cleanup)
         self.pipeline = pipeline
-        accountService = AccountService(backend: backend, functions: functions)
+        // Fake services and faked accounts claim nothing.
+        let claimsTrial = !launchOptions.useFixtures && !launchOptions.usesOnboardingFixtures
+            && launchOptions.accountState == nil
+        let trial = TrialClaim(functions: claimsTrial ? functions : nil,
+                               currentUser: { backend?.client.auth.currentSession?.user.id })
+        self.trial = trial
+        accountService = AccountService(backend: backend, functions: functions, trial: trial)
         if let backend, !launchOptions.useFixtures, !launchOptions.usesOnboardingFixtures {
             let account = backend.account
             librarySync = LibrarySync(library: library, remote: SupabaseLibraryRemote(backend: backend),
@@ -137,7 +145,7 @@ final class AppModel {
                 state: OnboardingFixtures.practiceState(step: launchOptions.onboardingStep,
                                                         variant: launchOptions.onboardingVariant))
         } else {
-            onboardingServices = .production(backend: backend)
+            onboardingServices = .production(backend: backend, trial: trial)
             practice = SessionPracticeClient(session: session, buffer: practiceBuffer)
         }
         onboarding = Self.makeOnboardingStore(
@@ -183,6 +191,8 @@ final class AppModel {
         dataSharing = UserDefaults.standard.object(forKey: Self.dataSharingKey) as? Bool
             ?? (onboarding.answers.dataChoice?.choice == .improveModel)
         pro.onSynced = { [weak self] in self?.refreshQuota() }
+        trial.onGranted = { [weak self] in self?.refreshQuota() }
+        backend?.onGuestSession = { [weak self] in self?.claimTrial() }
         if !launchOptions.useFixtures && !launchOptions.usesOnboardingFixtures { pro.start() }
         if launchOptions.route == .paywall { showsPaywall = true }
         LiveActivityActions.model = self
@@ -350,7 +360,9 @@ final class AppModel {
         redeemingInvite = true
         Task {
             defer { redeemingInvite = false }
-            guard let outcome = try? await accountService.redeem(code: code), outcome != .signInRequired else { return }
+            // Kept for later: no account yet, or this iPhone not checked yet.
+            guard let outcome = try? await accountService.redeem(code: code),
+                  outcome != .signInRequired, outcome != .deviceCheckRequired else { return }
             forgetPendingInvite()
             inviteMessage = outcome.message
             if outcome == .ok { refreshQuota() }
@@ -400,6 +412,12 @@ final class AppModel {
             aiConsent.withdraw()
             session.stop()
         }
+    }
+
+    /// Asks the server for this account's free trial until it has decided (`TrialClaim`): after a
+    /// sign-in, when a guest's session starts, and whenever Murmur comes to the front.
+    func claimTrial() {
+        Task { await trial.claimIfNeeded() }
     }
 
     func refreshQuota() {
@@ -649,6 +667,7 @@ final class AppModel {
             history.applyRetention()
             history.reconcileInsertions(payloads: transport.payloads)
             importKeyboardAdditions()
+            claimTrial()
             refreshQuota()
             redeemPendingInvite()
             librarySync?.syncSoon(after: .milliseconds(500))

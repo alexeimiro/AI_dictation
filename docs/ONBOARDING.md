@@ -101,7 +101,7 @@ scrolls under its buttons when it doesn't fit.
   - `microphonePrimer`: `denied`
   - the exercises: `guide`, `listening`, `result`
   - `dataChoice`: `improve`, `doNotShare`
-  - `trialOffer`: `trial`, `subscriber`, `free`, `offline`
+  - `trialOffer`: `trial`, `subscriber`, `free`, `trialUsed` (Basic: this iPhone has had its trial), `offline`
 - `-permission-fixtures keyboard,fullAccess,mic=granted,notifications=denied` fixes the setup state.
 - `-onboarding-fixtures` runs the whole journey on fake services with its own checkpoint, and
   `-onboarding-reset` starts it over.
