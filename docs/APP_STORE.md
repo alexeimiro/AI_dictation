@@ -61,17 +61,22 @@ App Store Connect only takes in its web page). Character limits are App Store Co
 
 The 6.9" set (1320 × 2868) is taken on an iPhone 17 Pro Max simulator from a Debug build with sample
 data, into `build/app-store-screenshots`, which `scripts/fill_app_store_listing.mjs` uploads in
-file name order:
+file name order. Home's history is `-history-fixture showcase`: only dictations that went through,
+so no row has a "Failed" or "Limit reached" badge. The paywall shot, at 1290 × 2796, is also each
+subscription's review screenshot: App Store Connect has taken that size for them, and refused a
+1178 × 2556 one.
 
 ```sh
 SIM="iPhone 17 Pro Max" DD=build/DerivedData OUT=build/app-store-screenshots scripts/screenshots.sh \
-  "1-home=-route home -session-fixture on" \
+  "1-home=-route home -session-fixture on -history-fixture showcase" \
   "2-note=-route note -session-fixture listening" \
   "3-dictionary=-route dictionary" \
   "4-snippets=-route snippets" \
   "5-style=-route style" \
   "6-paywall=-route paywall" \
   "7-welcome=-onboarding-step welcome"
+mkdir -p build/app-store-screenshots/review
+sips -z 2796 1290 build/app-store-screenshots/6-paywall.png --out build/app-store-screenshots/review/paywall.png
 ```
 
 ## App Review notes
@@ -79,15 +84,15 @@ SIM="iPhone 17 Pro Max" DD=build/DerivedData OUT=build/app-store-screenshots scr
 > Murmur is a keyboard extension with a companion app.
 >
 > HOW DICTATION WORKS
-> iOS doesn't let keyboard extensions use the microphone. So the Murmur app records, and the keyboard asks it to. The first time you tap the mic in the keyboard (or when Murmur has been off a while), the keyboard opens the Murmur app, which starts listening and takes you back to the app you were typing in. After that, the microphone stays ready in the background (shown by the orange dot and a Live Activity) until it times out ("Turn off after" in Settings), and each tap of the mic dictates without leaving your app.
+> iOS doesn't let keyboard extensions use the microphone. So the Murmur app records, and the keyboard asks it to. The first time you tap the mic in the keyboard (or when Murmur has been off a while), the keyboard opens the Murmur app on its Home screen, which starts listening and takes you back to the app you were typing in: Notes, Messages, Mail and common chat and email apps. Where Murmur can't reopen the app (Safari, for example), Home shows one line saying to swipe right along the bottom edge to go back, and the keyboard is listening when you get there. After that, the microphone stays ready in the background (shown by the orange dot and a Live Activity) until it times out ("Turn off after" in Settings), and each tap of the mic dictates without leaving your app.
 >
 > The keyboard needs Allow Full Access, only to exchange the dictation with the Murmur app through their shared App Group container. It doesn't log keystrokes or send what you type anywhere.
 >
 > TO TRY IT
-> 1. Open Murmur and sign in with Apple. Any Apple ID works, so no demo account is needed. Sign-in is required, because the account holds the plan and the weekly word count.
+> 1. Open Murmur, tap Get started and answer the first questions. On "Sign in to start", tap Continue with Apple. Any Apple ID works, so no demo account is needed. Sign-in is required, because the account holds the plan and the weekly word count.
 > 2. Follow the setup: add the keyboard in Settings › General › Keyboard › Keyboards, and turn on Allow Full Access.
 > 3. On the microphone page, tap Continue. "Before Murmur listens" asks for permission to send recordings to the AI services (see AI below): tap Allow, then allow the microphone.
-> 4. Open Notes, switch to the Murmur keyboard with the globe key, tap the mic and speak.
+> 4. Open Notes, switch to the Murmur keyboard with the globe key and tap the mic. Murmur opens, starts listening and brings you back to Notes by itself. Speak, then tap the check mark.
 >
 > SUBSCRIPTIONS
 > The first account on an iPhone gets a 14-day trial of Pro without payment details. Murmur asks Apple's DeviceCheck, through its server, whether the iPhone has had one, so a later account on the same iPhone starts on the free plan (1,000 words a week); if this device already had a Murmur trial, that is why. Either way the subscriptions can be bought. "Upgrade to Pro" in the menu or Settings shows the two auto-renewing subscriptions, Murmur Pro Monthly and Murmur Pro Annual, in the group "Murmur Pro". Restore purchase is on the same screen.
@@ -113,7 +118,7 @@ These match `App/Resources/PrivacyInfo.xcprivacy`. Murmur doesn't track, show ad
 | User Content › Audio Data | Yes | No | App Functionality | Transcription by OpenAI; not kept by Murmur's server |
 | User Content › Other User Content | Yes | Yes | App Functionality, Analytics | Dictionary, snippets and notes synced to the account; a dictation's text sent to Anthropic to be tidied or translated; feedback text when the user turns on "Improve Murmur for everyone" |
 | User Content › Customer Support | Yes | Yes | App Functionality | Support messages from the app |
-| Usage Data › Product Interaction | Yes | Yes | App Functionality | The number of words in each dictation, for the free plan's weekly limit |
+| Usage Data › Product Interaction | Yes | Yes | App Functionality | The number of words in each dictation, for the free plan's weekly limit; and what each dictation cost to serve (seconds of audio, tokens, which service), never its words |
 | Diagnostics › Other Diagnostic Data | Yes | Yes | App Functionality | App version, iOS version, device model and language with a support message |
 | Other Data › Other Data Types | Yes | Yes | Analytics | The answers given during setup (what Murmur is for, how the user found it) |
 
@@ -128,9 +133,9 @@ No objectionable content. The app isn't made for children. "Unrestricted web acc
 ## Before submitting
 
 - [ ] Paid Apps agreement signed by the account holder (Business › Agreements), with banking and tax.
-- [x] Privacy Policy, Terms of Use and support page hosted on GitHub Pages (`scripts/publish_site.sh`), and in the build settings `MURMUR_PRIVACY_URL`, `MURMUR_TERMS_URL` and `MURMUR_SUPPORT_URL`.
+- [ ] Privacy Policy, Terms of Use and support page of 13 Nov 2026 published to GitHub Pages (`scripts/publish_site.sh`); the build settings `MURMUR_PRIVACY_URL`, `MURMUR_TERMS_URL` and `MURMUR_SUPPORT_URL` point there. The live ones are from 9 Nov and name only OpenAI.
 - [x] URLs, category and age rating in App Store Connect (`scripts/fill_app_store_listing.mjs`).
-- [ ] The listing text, the review notes and the 6.9" screenshots (1320 × 2868) of the November 2026 redesign uploaded with the same script. What is in App Store Connect now shows the earlier design.
+- [ ] The listing text, the review notes, the 6.9" screenshots (1320 × 2868), the review build and each subscription's review screenshot, with the same script: `node scripts/fill_app_store_listing.mjs --build <build number>`. Run it with `--dry-run` first to see what changes.
 - [ ] App Privacy answers (below), entered in App Store Connect › App Privacy.
 - [ ] App Review contact: name, phone and email, in the version's App Review Information.
 - [ ] The two subscriptions attached to version 1.0 under "In-App Purchases and Subscriptions", so they're reviewed with the app.

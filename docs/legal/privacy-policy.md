@@ -29,7 +29,8 @@ Murmur collects, why, and the choices you have. Questions: miralex13@gmail.com.
 - **Invites:** if you join with a friend's invite code, we record whose code it was, so you each
   get your month of Murmur Pro. Your friend sees how many people joined with their code, not who.
 - **How much you dictate:** the number of words in each dictation, to apply the free plan's weekly
-  limit. Not the words themselves.
+  limit, and what each dictation cost us to serve: how many seconds of audio and how much text the
+  AI services handled, and which service did it. Not the words themselves.
 - **Whether your iPhone has had a free trial:** Murmur Pro's free trial, and an invite's free
   month, is one per iPhone. To tell, Murmur asks Apple's DeviceCheck service, through our server,
   whether this iPhone has had one, and marks it when it gets one. Apple keeps that mark for us. It
@@ -62,7 +63,8 @@ Each processes data only to provide its service to us.
 
 We keep your account data until you delete your account. Deleting it (Menu › Account › Delete
 account) erases your account, library, usage and purchase records from our server, and revokes
-Sign in with Apple. Signing out deletes Murmur's data from that iPhone. Deleting the account
+Sign in with Apple. The records of what your dictations cost us to serve stay, no longer tied to
+your account. Signing out deletes Murmur's data from that iPhone. Deleting the account
 doesn't cancel an App Store subscription: manage that in Settings › Apple Account ›
 Subscriptions.
 

@@ -107,6 +107,17 @@ struct HistoryStoreTests {
         #expect(store.recoverInterrupted().isEmpty)
     }
 
+    /// The App Store's Home shot (`-history-fixture showcase`): every row written and typed in, so
+    /// none carries a badge.
+    @Test func showcaseHistoryHasNoBadgedRows() {
+        let now = Date()
+        let rows = HistoryFixtures.showcaseSample(now: now)
+        #expect(rows.count == 5)
+        #expect(rows.allSatisfy { $0.status == .cleaned && $0.errorReason == nil })
+        #expect(rows.allSatisfy { !($0.cleanedText ?? "").isEmpty })
+        #expect(rows.allSatisfy { $0.insertState(now: now, claimed: false) == .inserted })
+    }
+
     @Test func metricsSummaryUsesStoredLatencies() {
         for ms in [100, 200, 300] {
             store.record(Transcript(id: UUID(), rawText: "x", status: .cleaned,

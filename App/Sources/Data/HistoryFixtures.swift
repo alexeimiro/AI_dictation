@@ -2,16 +2,40 @@ import Foundation
 import MurmurCore
 
 /// Sample history for screenshots and previews (`-fixtures`): English and Russian items, every
-/// status, one still pending insertion.
+/// status, one still pending insertion. `showcase` seeds `showcaseSample` instead.
 enum HistoryFixtures {
     @MainActor
-    static func seed(_ store: HistoryStore, now: Date = Date()) {
-        for transcript in sample(now: now) {
+    static func seed(_ store: HistoryStore, now: Date = Date(), showcase: Bool = false) {
+        let items = showcase ? showcaseSample(now: now) : sample(now: now)
+        for transcript in items {
             store.upsert(transcript)
         }
         // The newest one has a recording to play (`-route transcript`).
-        if let first = sample(now: now).first, let audio = try? EncodedAudio(samples: tone(seconds: 6.2), sampleRate: 16_000) {
+        if let first = items.first, let audio = try? EncodedAudio(samples: tone(seconds: 6.2), sampleRate: 16_000) {
             store.recordings.save(audio, for: first.id)
+        }
+    }
+
+    /// The App Store's Home shot (`-history-fixture showcase`): the sample's dictations that went
+    /// through, all typed in, so no row carries a "Failed", "Limit reached", "Not cleaned" or
+    /// "Pending" badge. The newest is from a minute before the status bar's 9:41.
+    static func showcaseSample(now: Date = Date()) -> [Transcript] {
+        let morning = Calendar.current.date(bySettingHour: 9, minute: 41, second: 0, of: now) ?? now
+        // The two the sample leaves unwritten (offline, over the limit), as Word for word writes them.
+        let written = [
+            "11111111-1111-1111-1111-111111111103": "Короче, дедлайн по пулл-реквесту в гитхабе перенесли на семь вечера.",
+            "11111111-1111-1111-1111-111111111106": "Напомни Светлане Юрьевне про Сбербанк.",
+        ]
+        return sample(now: morning).compactMap { transcript in
+            var item = transcript
+            if let text = written[item.id.uuidString] {
+                item.cleanedText = text
+                item.status = .cleaned
+                item.errorReason = nil
+            }
+            guard item.status == .cleaned else { return nil }
+            item.insertedAt = item.insertedAt ?? item.createdAt.addingTimeInterval(3)
+            return item
         }
     }
 

@@ -13,7 +13,9 @@ comes with its version and your iOS version, which helps us look into it.
 
 iOS doesn't let keyboards use the microphone, so the Murmur app does the listening. The first tap,
 or the first after Murmur has been off for a while, opens Murmur, which starts listening and takes
-you back to your app. After that the microphone stays ready in the background, shown by the orange
+you back to your app. From an app Murmur can't reopen, like Safari, swipe right along the bottom
+edge of the screen to go back, as Murmur's Home says; the keyboard is listening when you get there.
+After that the microphone stays ready in the background, shown by the orange
 dot and Murmur's Live Activity, and each tap dictates without leaving your app. Choose how long it
 stays ready in Murmur › Settings › Turn off after.
 

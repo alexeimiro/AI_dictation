@@ -100,7 +100,9 @@ final class AppModel {
         #endif
         let history = HistoryStore.open(inMemory: launchOptions.useFixtures || launchOptions.isOnboardingScreenshot)
         self.history = history
-        if launchOptions.useFixtures, !launchOptions.emptyHistory { HistoryFixtures.seed(history) }
+        if launchOptions.useFixtures, !launchOptions.emptyHistory {
+            HistoryFixtures.seed(history, showcase: launchOptions.showcaseHistory)
+        }
         if launchOptions.onboardingStep == .complete { OnboardingFixtures.seedCompletedHistory(history) }
         let library = LibraryStore.open(inMemory: launchOptions.useFixtures || launchOptions.isOnboardingScreenshot)
         self.library = library
@@ -853,8 +855,9 @@ enum LaunchRoute: String {
 /// Home can be shot in every state.
 ///
 /// Other states (screenshots, DEBUG builds only, with `-fixtures`): `-quota-fixture
-/// trial|basic|limit|pro` picks the plan, `-history-fixture empty` leaves the history empty and
-/// `-library-fixture empty` leaves out the words, snippets and notes.
+/// trial|basic|limit|pro` picks the plan, `-history-fixture empty` leaves the history empty,
+/// `-history-fixture showcase` keeps only dictations that went through (the App Store's Home shot)
+/// and `-library-fixture empty` leaves out the words, snippets and notes.
 ///
 /// The AI question (UI tests and screenshots, DEBUG builds only): a run on fake services is
 /// allowed without asking; `-ai-consent` has it ask "Before Murmur listens" when a real run would,
@@ -877,6 +880,7 @@ struct LaunchOptions: Equatable {
     var sessionFixture: SessionController.Phase?
     var quotaFixture: AccountService.Quota?
     var emptyHistory = false
+    var showcaseHistory = false
     var emptyLibrary = false
     var asksAIConsent = false
     var showsAIConsent = false
@@ -900,6 +904,7 @@ struct LaunchOptions: Equatable {
         sessionFixture = Self.value(after: "-session-fixture", in: arguments).flatMap(SessionController.Phase.init(fixture:))
         quotaFixture = Self.value(after: "-quota-fixture", in: arguments).flatMap(AccountService.Quota.fixture(named:))
         emptyHistory = Self.value(after: "-history-fixture", in: arguments) == "empty"
+        showcaseHistory = Self.value(after: "-history-fixture", in: arguments) == "showcase"
         emptyLibrary = Self.value(after: "-library-fixture", in: arguments) == "empty"
         asksAIConsent = arguments.contains("-ai-consent")
         showsAIConsent = Self.value(after: "-ai-consent", in: arguments) == "show"

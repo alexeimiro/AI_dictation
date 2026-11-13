@@ -155,6 +155,9 @@ struct DeepLinkTests {
         #expect(LaunchOptions(arguments: ["Murmur", "-fixtures"]).quotaFixture == nil)
         #expect(LaunchOptions(arguments: ["Murmur", "-fixtures", "-history-fixture", "empty"]).emptyHistory)
         #expect(!LaunchOptions(arguments: ["Murmur", "-fixtures"]).emptyHistory)
+        #expect(LaunchOptions(arguments: ["Murmur", "-fixtures", "-history-fixture", "showcase"]).showcaseHistory)
+        #expect(!LaunchOptions(arguments: ["Murmur", "-fixtures", "-history-fixture", "showcase"]).emptyHistory)
+        #expect(!LaunchOptions(arguments: ["Murmur", "-fixtures"]).showcaseHistory)
         #expect(LaunchOptions(arguments: ["Murmur", "-fixtures", "-library-fixture", "empty"]).emptyLibrary)
         #expect(!LaunchOptions(arguments: ["Murmur", "-fixtures"]).emptyLibrary)
     }
