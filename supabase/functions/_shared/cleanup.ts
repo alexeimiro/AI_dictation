@@ -12,7 +12,7 @@ import {
   TRANSLATION_RULES,
   VERBATIM_RULES,
 } from "./prompt.ts";
-import { guardOutput, guardTranslation, tidyOutput } from "./text.ts";
+import { countWords, guardOutput, guardTranslation, tidyOutput } from "./text.ts";
 import { type CleanupRequest, writesWithModel } from "./types.ts";
 
 /** OpenAI's flagship; override with the CLEANUP_MODEL secret without shipping an app update. */
@@ -257,12 +257,13 @@ export function buildMessagesRequest(
 async function runClaude(request: CleanupRequest, options: CleanupOptions): Promise<CleanupOutcome> {
   const language = resolveLanguage(request.language);
   const started = performance.now();
-  // One retry (429, 5xx, connection) if the deadline leaves room for it.
+  // One retry (429, 5xx, connection) if the deadline leaves room for it. The SDK refuses a
+  // timeout that isn't a whole number of milliseconds, before sending anything.
   const client = new Anthropic({
     apiKey: options.apiKey,
     fetch: options.fetcher,
     maxRetries: 1,
-    timeout: options.deadlineMs,
+    timeout: Math.floor(options.deadlineMs),
   });
   let message: Anthropic.Message;
   try {
@@ -302,6 +303,17 @@ async function runClaude(request: CleanupRequest, options: CleanupOptions): Prom
   }
   const text = message.content.flatMap((block) => block.type === "text" ? [block.text] : []).join("");
   return judged(request, language, base, text);
+}
+
+/**
+ * The words a reply to `request` counts against the plan: those of the text the app inserts. A
+ * cleaned reply counts as written, in the language it is written in. A raw style counts as the
+ * transcript it kept, which the app inserts instead. A raw translation counts nothing (null): the
+ * app inserts no translation it didn't get.
+ */
+export function countedWords(outcome: Pick<CleanupOutcome, "status" | "text">, request: CleanupRequest): number | null {
+  if (outcome.status === "raw" && request.targetLanguage) return null;
+  return countWords(outcome.text, request.targetLanguage ?? request.language);
 }
 
 /** Either provider's reply text through the output guards: one that fails them keeps the transcript. */

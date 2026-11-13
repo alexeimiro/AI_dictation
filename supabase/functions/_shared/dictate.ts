@@ -8,6 +8,7 @@ import { audioDurationMs } from "./audio_duration.ts";
 import {
   apiKeyName,
   type CleanupOutcome,
+  countedWords,
   describeCleanupError,
   failureReason,
   isClaudeModel,
@@ -339,21 +340,19 @@ interface Translated {
 /** An empty transcript: nothing to translate and nothing to count, as in `cleanup`. */
 const EMPTY: Translated = { status: "raw", reason: "empty", text: "", usage: null, outcome: null };
 
-function unavailableResult(reason: string): Translated {
-  return { status: "unavailable", reason, text: "", usage: null, outcome: null };
+/** The model wrote nothing; `usage` is what the app inserts instead (see `dictateAudio`). */
+function unavailableResult(reason: string, usage: number | null): Translated {
+  return { status: "unavailable", reason, text: "", usage, outcome: null };
 }
 
-/**
- * The model's answer, or the transcript it kept as "raw" when the output was unusable. `written`:
- * the language the output is in (the target, else the spoken language).
- */
-function translated(outcome: CleanupOutcome, written: string | undefined): Translated {
+/** The model's answer to `request`, or the transcript it kept as "raw" when the output was unusable. */
+function translated(outcome: CleanupOutcome, request: CleanupRequest): Translated {
   return {
     status: outcome.status,
     reason: outcome.reason ?? null,
     text: outcome.status === "cleaned" ? outcome.text : "",
-    // What `cleanup` counts: the output, or the transcript it fell back to.
-    usage: countWords(outcome.text, written),
+    // As `cleanup` counts it: what the app inserts.
+    usage: countedWords(outcome, request),
     outcome,
   };
 }
@@ -592,8 +591,6 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
       transcript,
       language: automatic ? detectedLanguage(d.heard.languages) ?? declared : declared,
     };
-    // Words are counted in the language the output is written in.
-    const written = body.translation.targetLanguage ?? d.translation.language;
     const words = countWords(transcript, d.translation.language);
     if (words === 0) return reply(d, EMPTY);
     if (modelKey === null) {
@@ -601,17 +598,21 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
       const usage = transcriptUsage(body.transcription, request.headers.get("x-murmur-dictation"), d.heard)?.words ?? null;
       return reply(d, { status: "raw", reason: "transcribed", text: "", usage, outcome: null });
     }
+    // What the app inserts when no model writes the text here, which is what counts: a style's
+    // transcript, in the language it was spoken in (the app never asks again for a style), and
+    // no translation at all (the app asks `cleanup` again, which counts the one it gets).
+    const unwritten = body.translation.targetLanguage ? null : words;
     if (transcript.length > transcriptLimit(d.caller)) {
-      // Longer than `cleanup` would take for this caller; the app keeps the transcript.
-      const usage = countWords(transcript, written);
-      return reply(d, { status: "raw", reason: "transcript_too_long", text: "", usage, outcome: null });
+      // Longer than `cleanup` would take for this caller.
+      return reply(d, { status: "raw", reason: "transcript_too_long", text: "", usage: unwritten, outcome: null });
     }
     if (!body.translation.targetLanguage && words <= SHORT_WORDS) {
       return reply(d, { status: "raw", reason: "short", text: "", usage: words, outcome: null });
     }
 
-    const budgetMs = Math.min(model.deadlineMs, config.deadlineMs - (now() - d.startedAt));
-    if (budgetMs < MIN_MODEL_MS) return reply(d, unavailableResult("deadline"), { budgetMs });
+    // Whole milliseconds: the clock has fractions, and Anthropic's SDK refuses a timeout with one.
+    const budgetMs = Math.floor(Math.min(model.deadlineMs, config.deadlineMs - (now() - d.startedAt)));
+    if (budgetMs < MIN_MODEL_MS) return reply(d, unavailableResult("deadline", unwritten), { budgetMs });
     try {
       const outcome = await phases.mark(
         "modelMs",
@@ -623,18 +624,18 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
           fetcher,
         }),
       );
-      return reply(d, translated(outcome, written), { budgetMs });
+      return reply(d, translated(outcome, d.translation), { budgetMs });
     } catch (error) {
-      // The transcript is kept, so the app can retry the translation alone; nothing is counted.
+      // The transcript is kept: the app retries a translation alone, and inserts a style's transcript.
       const label = describeCleanupError(error);
       console.error(label, errorName(error));
-      return reply(d, unavailableResult(failureReason(error)), { budgetMs, error: label });
+      return reply(d, unavailableResult(failureReason(error), unwritten), { budgetMs, error: label });
     }
   }
 
   /** Text mode: one translation within the translation deadline (9 s; the app waits 11 s). */
   async function dictateText(d: Dictation & { body: TextBody }): Promise<Response> {
-    const { request, phases, translation, body } = d;
+    const { request, phases, translation } = d;
     if (countWords(translation.transcript, translation.language) === 0) return reply(d, EMPTY);
     const settings = config.translation;
     const modelKey = keyFor(settings.model);
@@ -650,7 +651,7 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
           fetcher,
         }),
       );
-      return reply(d, translated(outcome, body.translation.targetLanguage));
+      return reply(d, translated(outcome, translation));
     } catch (error) {
       const label = describeCleanupError(error);
       if (label === "cleanup failed") console.error(label, errorName(error));

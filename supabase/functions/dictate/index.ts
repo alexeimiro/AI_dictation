@@ -25,8 +25,11 @@
 //   200 { transcript, languages, transcribeModel, text, status: "cleaned" | "raw" | "unavailable",
 //         reason, targetLanguage, words, model, ttftMs, totalMs, remaining, timings }
 //       `cleanup`'s reply plus the transcription (`transcript` is null in text mode). `text` is ""
-//       unless "cleaned"; "unavailable" (the translation failed or ran out of time) keeps the
-//       transcript, and nothing is counted for it.
+//       unless "cleaned"; "unavailable" (the model failed or ran out of time) keeps the
+//       transcript. `words` is what counts against the plan, the words of what the app inserts:
+//       a style's transcript when the model's text is "raw" or "unavailable", and nothing for a
+//       translation that isn't "cleaned" (the app inserts none, and asks `cleanup` again when
+//       "unavailable").
 //   200 { warm: true, cold, region, workerAgeMs, executionId, timings: { authMs, openaiMs?, anthropicMs?, dbMs?, totalMs } }
 //   400 bad_request · 401 unauthorized · 402 limit_reached · 429 rate_limited | too_many_attempts
 //   404 dictate_disabled (kill switch) → the app goes back to transcribe + cleanup.

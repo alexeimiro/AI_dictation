@@ -244,22 +244,28 @@ decides nothing, and the app asks again later. Accounts from before the check ar
 | `DEVICECHECK_HOST` | production | `https://api.development.devicecheck.apple.com` for tests; its bits don't last. |
 
 **Support messages.** The app sends Report an issue and Leave feedback to `support`, which saves
-them to `issue_reports` (10 an hour per account) and then emails each one through Resend, with the
-account's email as Reply-To. A server without the function gets them written to the table directly,
-as builds before it did, and no email goes out.
+them to `issue_reports` (10 an hour per account) and then emails each one from a signed-in account
+through Resend, with the account's email as Reply-To. A guest's message is only saved, and so is
+every message past the daily limit: Resend's free plan sends 100 emails a day, shared with the
+sign-in codes. The limit is counted from the table, where the function adds `account`
+(`signed_in` or `guest`) to each message's diagnostics. A server without the function gets them
+written to the table directly, as builds before it did, and no email goes out.
 
 | Variable | Default | What it does |
 |---|---|---|
 | `RESEND_API_KEY` | — | A Resend key with sending access. Without it, or without an address, messages are only saved. |
 | `SUPPORT_EMAIL_TO` | — | Where support messages go; several addresses separated by commas. |
 | `SUPPORT_EMAIL_FROM` | `Murmur <no-reply@simplymurmur.com>` | The sender; its domain must be verified at Resend. |
+| `SUPPORT_EMAIL_DAILY_LIMIT` | `20` | The most support emails in any 24 hours; `0` sends none. |
 
 Anonymous (trial) users are limited to 10 cleanups and 10 transcriptions per minute and 6 000-character
 transcripts. On the free plan, once the week's words are used up, `transcribe` answers 402 too.
 
 **The free plan's words.** Each dictation is counted once, under its own id (`record_usage` keeps the
 largest count for a user and a dictation): `transcribe` counts the transcript's words, and `cleanup` or
-`dictate` the words they wrote. `transcribe` counts only when the request carries
+`dictate` the words of what the app inserts: what the model wrote, or for a style the transcript when
+the model's text was unusable or never came. A translation the model didn't write counts nothing,
+since the app inserts none. `transcribe` counts only when the request carries
 `x-murmur-dictation: <dictationId>`, which the app sends with the dictation's own id; builds before
 that sent a random id and are counted by `cleanup` alone.
 

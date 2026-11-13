@@ -772,11 +772,75 @@ Deno.test("an anonymous transcript over the trial limit comes back raw, untransl
   assertEquals([reply.status, reply.reason, reply.text, reply.transcript], ["raw", "transcript_too_long", "", long]);
   assertEquals(paths(recorded), ["/v1/audio/transcriptions"]);
   assertEquals(recorded.preflights[0].perMinute, 10, "the anonymous limit");
-  assertEquals(recorded.usage.map((usage) => usage.words), [1200], "counted like cleanup's raw replies");
+  assertEquals(recorded.usage, [], "the app inserts no translation it didn't get, so nothing counts");
+
+  // A style's transcript is what the app inserts instead, so it counts.
+  const styled = setup({ transcription });
+  const kept = await (await styled.handler(audioRequest({ ...metadata, targetLanguage: undefined }, { token: "guest" }))).json();
+  assertEquals([kept.status, kept.reason, kept.words], ["raw", "transcript_too_long", 1200]);
+  assertEquals(styled.recorded.usage.map((usage) => usage.words), [1200]);
 
   const signedIn = setup({ transcription });
   assertEquals((await (await signedIn.handler(audioRequest())).json()).status, "cleaned");
   assertEquals(paths(signedIn.recorded), ["/v1/audio/transcriptions", "/v1/responses"]);
+});
+
+Deno.test("a style the model couldn't write counts as the transcript, which the app inserts instead", async () => {
+  // The app never asks again for a style: it inserts the transcript, so that is what counts.
+  const grammar = { ...metadata, targetLanguage: undefined };
+  const failing = setup({ responses: () => Response.json({ error: { code: "server_error" } }, { status: 500 }) });
+  const failed = await quietly(async () => await (await failing.handler(audioRequest(grammar))).json());
+  assertEquals([failed.status, failed.reason, failed.text, failed.transcript], ["unavailable", "openai_error", "", TRANSCRIPT]);
+  assertEquals(failing.recorded.usage, [{ caller: USER, dictationId: DICTATION, words: 7 }]);
+
+  // Out of time before the model was asked: the same.
+  const late = setup({
+    transcription: (_, clock) => {
+      clock.advance(25_500);
+      return Response.json({ text: TRANSCRIPT, languages: [{ code: "ru" }] });
+    },
+  });
+  const timedOut = await (await late.handler(audioRequest(grammar))).json();
+  assertEquals([timedOut.status, timedOut.reason], ["unavailable", "deadline"]);
+  assertEquals(late.recorded.usage.map((usage) => usage.words), [7]);
+});
+
+Deno.test("a translation that fails its check counts nothing, in audio and in text mode", async () => {
+  // The model left it in the spoken language: the app shows an error and inserts nothing.
+  const untranslated = () => Response.json(responsesReply("Можешь скинуть отчёт до пятницы? Спасибо большое!"));
+  const audio = setup({ responses: untranslated });
+  const heard = await (await audio.handler(audioRequest())).json();
+  assertEquals([heard.status, heard.reason, heard.text, heard.words, heard.remaining], ["raw", "untranslated", "", 0, 870]);
+  assertEquals(audio.recorded.usage, []);
+  assertEquals(audio.recorded.logs[0].outWords, 0);
+
+  const text = setup({ responses: untranslated });
+  const typed = await (await text.handler(textRequest())).json();
+  assertEquals([typed.status, typed.reason, typed.words], ["raw", "untranslated", 0]);
+  assertEquals(text.recorded.usage, []);
+
+  // A style the guard turned down is still the transcript the app inserts, and counts.
+  const answered = setup({ responses: () => Response.json(responsesReply("Конечно! Вот исправленный текст: отчёт будет к пятнице.")) });
+  const styled = await (await answered.handler(audioRequest({ ...metadata, targetLanguage: undefined }))).json();
+  assertEquals([styled.status, styled.reason, styled.words], ["raw", "assistant_reply", 7]);
+  assertEquals(answered.recorded.usage.map((usage) => usage.words), [7]);
+});
+
+Deno.test("a budget with a fraction reaches Claude in whole milliseconds", async () => {
+  // Over 17 s before the model step, the budget comes from the clock with its fraction, and
+  // Anthropic's SDK refuses a timeout that isn't a whole number before sending anything.
+  const { handler, recorded } = setup({
+    env: CLAUDE,
+    transcription: (_, clock) => {
+      clock.advance(17_000.4);
+      return Response.json({ text: TRANSCRIPT, languages: [{ code: "ru" }] });
+    },
+  });
+  const reply = await quietly(async () => await (await handler(audioRequest())).json());
+  assertEquals([reply.status, reply.text, reply.model], ["cleaned", TRANSLATION, "claude-haiku-5-5"]);
+  assertEquals(paths(recorded), ["/v1/audio/transcriptions", "anthropic/v1/messages"]);
+  assertEquals(recorded.signals, [20000, 8999], "26 s − 17,000.4 ms, rounded down");
+  assertEquals(recorded.logs[0].budgetMs, 8999);
 });
 
 Deno.test("audio mode translates within what is left of its budget, and skips under a second", async () => {

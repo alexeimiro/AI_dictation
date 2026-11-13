@@ -235,6 +235,16 @@ Deno.test("an output the guard rejects comes back raw, counted as the transcript
   assertEquals(recorded.costs.length, 1);
 });
 
+Deno.test("a translation the guard rejects counts nothing, since the app inserts nothing", async () => {
+  // Left in the spoken language: the app shows an error instead of inserting it.
+  const { handler, recorded } = setup({ model: (body) => Response.json(responsesReply(CLEANED, String(body.model))) });
+  const reply = await (await handler(request(translationBody))).json();
+  assertEquals([reply.status, reply.reason, reply.words, reply.remaining], ["raw", "untranslated", 0, 870]);
+  assertEquals(rpcNames(recorded), ["cleanup_preflight"], "no record_usage");
+  assertEquals(recorded.logs[0].outWords, 0);
+  assertEquals(recorded.costs.length, 1, "its tokens are still paid for");
+});
+
 Deno.test("OPTIONS answers with the CORS headers; any other method but POST gets 405", async () => {
   const { handler, recorded } = setup();
   const preflight = await handler(request(cleanupBody, "user", "OPTIONS"));

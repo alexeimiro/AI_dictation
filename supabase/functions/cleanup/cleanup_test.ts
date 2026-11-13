@@ -501,6 +501,18 @@ Deno.test("Claude refusals, truncation and answers fall back to the transcript",
   assertEquals([answer.status, answer.reason], ["raw", "assistant_reply"]);
 });
 
+Deno.test("a deadline with a fraction reaches Anthropic's SDK in whole milliseconds", async () => {
+  // SDK 1.2.0 refuses a timeout that isn't a whole number ("timeout must be an integer") before
+  // sending anything; `dictate`'s budget comes from a clock with fractions.
+  const captured: Captured = {};
+  const outcome = await runCleanup(request, {
+    ...claude(fakeFetch(message("Can you send me the report by Friday?"), captured)),
+    deadlineMs: 8999.6,
+  });
+  assertEquals(captured.url, "https://api.anthropic.com/v1/messages");
+  assertEquals([outcome.status, outcome.text], ["cleaned", "Can you send me the report by Friday?"]);
+});
+
 Deno.test("Claude thinking: OpenAI's none turns it off where the model allows; Claude's levels keep it adaptive", () => {
   const off = { thinking: { type: "disabled" as const }, output_config: { effort: "low" as const } };
   assertEquals(claudeThinking("claude-haiku-5-5", "none"), off);
@@ -960,6 +972,28 @@ Deno.test("Russian assistant replies are rejected without relying on \\b", () =>
   assert(guardOutput("конечно приду", "Конечно, приду.", "ru-RU").ok);
   assert(guardOutput("вот список покупок молоко хлеб и сыр", "Вот список покупок: молоко, хлеб и сыр.", "ru-RU").ok);
   assert(guardOutput("я не могу прийти завтра извини", "Я не могу прийти завтра, извини.", "ru-RU").ok);
+});
+
+Deno.test("an opener after the speaker's fillers is the speaker's: the cleanup dropped the fillers", () => {
+  assert(guardOutput("so here's the plan for tomorrow we start at nine", "Here's the plan for tomorrow: we start at nine.").ok);
+  assert(guardOutput("um, sure, let's meet at five then", "Sure, let's meet at five then.").ok);
+  assert(guardOutput("okay so I'm sorry I missed your call", "I'm sorry I missed your call.").ok);
+  assert(guardOutput("Well, uh, I can't make it on Friday", "I can't make it on Friday.").ok);
+  assert(guardOutput("ну, я не могу прийти завтра на встречу", "Я не могу прийти завтра на встречу.", "ru-RU").ok);
+  assert(guardOutput("э-э короче я не могу найти ключи от машины", "Я не могу найти ключи от машины.", "ru-RU").ok);
+  assert(guardOutput("Слушай, конечно, вот твой билет на поезд", "Конечно, вот твой билет на поезд.", "ru-RU").ok);
+  // «Вот» is both a filler and an opener: each start after a filler is tried, not only the last.
+  assert(guardOutput("ну вот ваш отчёт за прошлую неделю", "Вот ваш отчёт за прошлую неделю.", "ru-RU").ok);
+});
+
+Deno.test("fillers before the request don't let a refusal or an answer through", () => {
+  const refused = { ok: false, reason: "assistant_reply" } as const;
+  assertEquals(guardOutput("so can you write me a poem about the sea", "I can't write poems, but I can help with an email."), refused);
+  assertEquals(guardOutput("um, what's the capital of France", "Here's the answer: it's Paris."), refused);
+  assertEquals(guardOutput("so um tell me a joke about cats", "Sure! A cat walks into a bar."), refused);
+  assertEquals(guardOutput("ну, напиши стих про море", "Я не могу писать стихи.", "ru-RU"), refused);
+  assertEquals(guardOutput("короче, расскажи анекдот про кота", "Конечно, вот анекдот: кот заходит в бар.", "ru-RU"), refused);
+  assertEquals(guardOutput("ну вот как бы это сказать", "Извините, но я не могу помочь с этим.", "ru-RU"), refused);
 });
 
 Deno.test("a script change is rejected in both directions; mixed-script output passes", () => {

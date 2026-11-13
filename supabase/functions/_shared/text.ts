@@ -36,6 +36,41 @@ const ASSISTANT_OPENERS = [
   /^отличный вопрос(?![\p{L}\p{N}_])/iu,
 ];
 
+/** Words a speaker may open with that a cleanup drops, as patterns: hesitations, then the rest. */
+const FILLERS = [
+  // English
+  "u+m+", "u+h+m*", "e+r+m*", "a+h+", "e+h+", "h+m+", "m{2,}", "o+h+",
+  "so", "well", "okay", "ok", "like", "and", "but", "yeah", "yes", "yep", "right", "alright", "all\\s+right",
+  "now", "basically", "actually", "anyway", "anyways", "look", "listen", "you\\s+know", "i\\s+mean",
+  // Russian
+  "э+", "э+м+", "м{2,}", "х+м+",
+  "ну", "так", "вот", "значит", "короче", "типа", "слушай(?:те)?", "смотри(?:те)?", "в\\s+общем", "ладно",
+  "итак", "кстати", "как\\s+бы", "в\\s+смысле", "блин", "ой", "окей", "ок", "а", "и", "да",
+];
+
+/** One leading filler, a whole word in any case, with the spaces and punctuation around it. */
+const LEADING_FILLER = new RegExp(`^[\\s\\p{P}]*(?:${FILLERS.join("|")})(?![\\p{L}\\p{N}_])[\\s\\p{P}]*`, "iu");
+
+/** At most this many leading fillers are looked past. */
+const MAX_FILLERS = 8;
+
+/**
+ * The transcript's start, then its start after each leading filler: "so, um, here's the plan"
+ * gives "so, um, here's the plan", "um, here's the plan" and "here's the plan". A cleanup that
+ * drops the fillers opens with whichever words came after them.
+ */
+function spokenStarts(transcript: string): string[] {
+  const starts = [transcript.trimStart()];
+  let rest = starts[0];
+  while (starts.length <= MAX_FILLERS) {
+    const filler = LEADING_FILLER.exec(rest);
+    if (!filler) break;
+    rest = rest.slice(filler[0].length);
+    starts.push(rest);
+  }
+  return starts;
+}
+
 export type GuardReason = "empty" | "too_long" | "assistant_reply" | "script_changed" | "untranslated";
 export type GuardResult = { ok: true } | { ok: false; reason: GuardReason };
 
@@ -58,10 +93,12 @@ export function guardOutput(transcript: string, output: string, locale = "en"): 
   if (outputWords === 0 && inputWords >= 3) return { ok: false, reason: "empty" };
   if (outputWords > Math.max(12, Math.ceil(inputWords * 1.8))) return { ok: false, reason: "too_long" };
 
+  // An opener the speaker said is theirs, also after the fillers a cleanup removes: "so here's
+  // the plan" may come back as "Here's the plan", «ну, я не могу» as «Я не могу».
   const trimmedOutput = output.trimStart();
-  const trimmedInput = transcript.trimStart();
+  const starts = spokenStarts(transcript);
   for (const opener of ASSISTANT_OPENERS) {
-    if (opener.test(trimmedOutput) && !opener.test(trimmedInput)) {
+    if (opener.test(trimmedOutput) && !starts.some((start) => opener.test(start))) {
       return { ok: false, reason: "assistant_reply" };
     }
   }

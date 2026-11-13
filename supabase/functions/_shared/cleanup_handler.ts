@@ -2,7 +2,7 @@
 // injected (`CleanupDeps`), so the Supabase function and the dictation server serve the same code,
 // and the tests drive it offline.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
-import { apiKeyName, describeCleanupError, runCleanup } from "./cleanup.ts";
+import { apiKeyName, countedWords, describeCleanupError, runCleanup } from "./cleanup.ts";
 import type { ModelConfig } from "./config.ts";
 import { type CostCall, textCall } from "./cost.ts";
 import { type Caller, clientInfo, corsHeaders, json } from "./http.ts";
@@ -112,12 +112,16 @@ export function createCleanupHandler(deps: CleanupDeps): (request: Request) => P
     phases.ready();
     try {
       const outcome = await phases.mark("modelMs", runCleanup(body, { model, effort, apiKey, deadlineMs, fetcher }));
-      const words = countWords(outcome.text, body.targetLanguage ?? body.language);
-      deps.background(admin.rpc("record_usage", {
-        p_user: caller.userId,
-        p_dictation: body.dictationId,
-        p_words: words,
-      }));
+      // What the app inserts: a raw translation is nothing, so it isn't counted.
+      const counted = countedWords(outcome, body);
+      const words = counted ?? 0;
+      if (counted !== null) {
+        deps.background(admin.rpc("record_usage", {
+          p_user: caller.userId,
+          p_dictation: body.dictationId,
+          p_words: counted,
+        }));
+      }
       if (deps.recordCost) {
         // What the model call cost, by its tokens.
         deps.background(

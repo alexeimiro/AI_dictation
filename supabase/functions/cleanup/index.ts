@@ -4,8 +4,9 @@
 // Responses:
 //   200 { text, status: "cleaned" | "raw", reason, targetLanguage, words, model, ttftMs, totalMs, remaining, timings }
 //       `reason` says why a reply is "raw" (refusal, guard such as "untranslated"); `targetLanguage`
-//       echoes the language a translation was written in, null for a cleanup. `totalMs` is the
-//       model call alone; `timings` splits the whole request (_shared/timing.ts).
+//       echoes the language a translation was written in, null for a cleanup. `words` is what
+//       counts against the plan: 0 for a "raw" translation, which the app doesn't insert. `totalMs`
+//       is the model call alone; `timings` splits the whole request (_shared/timing.ts).
 //   400 bad_request · 401 unauthorized · 402 limit_reached · 429 rate_limited
 //   502/503 cleanup_unavailable → the app inserts its locally formatted transcript instead.
 // Env: CLEANUP_MODEL (default gpt-6-astra; a `claude-` model runs on Anthropic), CLEANUP_EFFORT
