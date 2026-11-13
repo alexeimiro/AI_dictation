@@ -244,13 +244,14 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
-# The app signs in with the six-digit code from these emails (or their link).
+# The app signs in with the six-digit code from these emails (or their link). The hosted project
+# gets the same subject and template from scripts/supabase_auth_email.mjs (never `config push`).
 [auth.email.template.magic_link]
-subject = "Your Murmur sign-in code"
+subject = "{{ .Token }} is your Murmur code"
 content_path = "./supabase/templates/sign_in_code.html"
 
 [auth.email.template.confirmation]
-subject = "Your Murmur sign-in code"
+subject = "{{ .Token }} is your Murmur code"
 content_path = "./supabase/templates/sign_in_code.html"
 
 # Uncomment to customize email template
