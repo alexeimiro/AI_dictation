@@ -55,6 +55,49 @@ Deno.test("an m4a's length is its movie header's duration over its timescale", (
   assertEquals(audioDurationMs(file, "m4a"), 7800);
 });
 
+// An upload as the app sends it (`M4AFreeSpace` in the app): half a second of a 440 Hz tone in low
+// data mode, through `EncodedAudio.aac` on the iOS 26.5 simulator. Core Audio wrote ftyp, moov, a
+// 23,681-byte free box of zeros and mdat (25,257 bytes); the upload is ftyp, moov, mdat.
+const APP_UPLOAD = Uint8Array.from(atob([
+  "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",
+].join("")), (char) => char.charCodeAt(0));
+
+Deno.test("an upload without Core Audio's empty space states the length it was written with", () => {
+  assertEquals(APP_UPLOAD.length, 1576);
+  // 8,000 samples, plus the encoder's lead-in and the last frame's padding: ten frames of 1,024.
+  assertEquals(audioDurationMs(APP_UPLOAD, "m4a"), 640);
+  // The free box put back where Core Audio wrote it: after ftyp (28 bytes) and moov (859).
+  const audioStart = 28 + 859;
+  const asWritten = new Uint8Array([
+    ...APP_UPLOAD.subarray(0, audioStart),
+    ...box("free", new Array(23681 - 8).fill(0)),
+    ...APP_UPLOAD.subarray(audioStart),
+  ]);
+  assertEquals(asWritten.length, 25257);
+  assertEquals(audioDurationMs(asWritten, "m4a"), 640);
+});
+
 Deno.test("an m4a with the movie box first, and a rounded length", () => {
   const file = m4a(FTYP, box("moov", header("mvhd", 44100, 100000)), MDAT);
   assertEquals(audioDurationMs(file, "m4a"), 2268);
