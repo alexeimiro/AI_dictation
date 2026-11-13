@@ -52,16 +52,15 @@ export type Decision =
   | { ok: false; status: number; error: string };
 
 /**
- * What `transaction` means for `userId`'s entitlement at `now` (ms). `graceUntil`: the end of a
- * billing grace period from the renewal info, during which Pro continues.
+ * What `transaction` means for an entitlement at `now` (ms). `graceUntil`: the end of a billing
+ * grace period from the renewal info, during which Pro continues. Whose entitlement it is, the
+ * handlers decide.
  */
-export function decide(transaction: TransactionInfo, userId: string, now: number, graceUntil?: number): Decision {
+export function decide(transaction: TransactionInfo, now: number, graceUntil?: number): Decision {
   const productId = transaction.productId;
   if (!productId || !APP_STORE.products.includes(productId)) return { ok: false, status: 400, error: "unknown_product" };
   const original = transaction.originalTransactionId;
   if (!original) return { ok: false, status: 400, error: "invalid_transaction" };
-  const token = transaction.appAccountToken?.toLowerCase();
-  if (token && token !== userId.toLowerCase()) return { ok: false, status: 409, error: "other_account" };
   const revoked = transaction.revocationDate ?? null;
   const until = Math.max(transaction.expiresDate ?? 0, graceUntil ?? 0) || null;
   const active = revoked === null && until !== null && until > now;
@@ -139,11 +138,29 @@ function peek(jws: string): Record<string, unknown> | null {
 
 // MARK: - The app's purchases
 
+/**
+ * What became of a Murmur account: a member's can be signed in to again; a guest's can't once
+ * it's signed out or its app is deleted; a deleted one is gone.
+ */
+export type AccountKind = "member" | "guest" | "gone";
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** The account a transaction was bought for, as a lowercase UUID; nothing else is an account. */
+function boughtFor(transaction: TransactionInfo): string | null {
+  const token = transaction.appAccountToken?.toLowerCase();
+  return token && UUID_PATTERN.test(token) ? token : null;
+}
+
 export interface PurchaseDeps {
   authenticate(request: Request): Promise<Caller | null>;
   verifier: Verifier;
-  /** The account the subscription already belongs to, if any. */
+  /** The account whose entitlement holds the subscription, if any. */
   ownerOf(originalTransactionId: string): Promise<string | null>;
+  /** Whether `userId` is an account someone can still sign in to. */
+  accountKind(userId: string): Promise<AccountKind>;
+  /** Takes the subscription off `userId`'s entitlement, which is Basic again. */
+  release(userId: string, originalTransactionId: string): Promise<void>;
   /** Writes the entitlement and returns `quota_status` for the account. */
   apply(userId: string, update: EntitlementUpdate): Promise<Record<string, unknown>>;
   now?: () => number;
@@ -152,7 +169,12 @@ export interface PurchaseDeps {
 /**
  * POST { transaction: JWS } from the app after a purchase, a renewal or Restore. 200 with the
  * account's quota; 400 for something that isn't a Murmur Pro transaction; 409 other_account when
- * the subscription belongs to another Murmur account.
+ * the subscription belongs to another Murmur account that can still be signed in to.
+ *
+ * A subscription is tied to one account: the one holding it, else the one it was bought for. One
+ * tied to a guest's account, or to a deleted one, would be lost with it (nobody can sign in there
+ * again), so it moves to the account that now shows its transaction, which only the Apple
+ * Account that pays for it has.
  */
 export function createPurchaseHandler(deps: PurchaseDeps): (request: Request) => Promise<Response> {
   return async (request) => {
@@ -171,11 +193,19 @@ export function createPurchaseHandler(deps: PurchaseDeps): (request: Request) =>
       console.error(JSON.stringify({ event: "purchase_unverified", reason: String(error) }));
       return json({ error: "invalid_transaction" }, 400);
     }
-    const decision = decide(transaction, caller.userId, (deps.now ?? Date.now)());
+    const decision = decide(transaction, (deps.now ?? Date.now)());
     if (!decision.ok) return json({ error: decision.error }, decision.status);
+    const original = decision.update.original_transaction_id;
     try {
-      const owner = await deps.ownerOf(decision.update.original_transaction_id);
-      if (owner && owner !== caller.userId) return json({ error: "other_account" }, 409);
+      const owner = (await deps.ownerOf(original))?.toLowerCase() ?? null;
+      const tiedTo = owner ?? boughtFor(transaction);
+      if (tiedTo && tiedTo !== caller.userId.toLowerCase()) {
+        const kind = await deps.accountKind(tiedTo);
+        if (kind === "member") return json({ error: "other_account" }, 409);
+        // Before it is written for the caller: one subscription, one account.
+        if (owner) await deps.release(owner, original);
+        console.log(JSON.stringify({ event: "purchase_moved", from: kind }));
+      }
       const quota = await deps.apply(caller.userId, decision.update);
       console.log(JSON.stringify({
         event: "purchase_applied", plan: decision.update.plan, product: decision.update.product_id,
@@ -194,14 +224,22 @@ export function createPurchaseHandler(deps: PurchaseDeps): (request: Request) =>
 export interface NotificationDeps {
   verifier: Verifier;
   ownerOf(originalTransactionId: string): Promise<string | null>;
+  /** Rejects with Postgres's foreign-key error (23503) when the account no longer exists. */
   apply(userId: string, update: EntitlementUpdate): Promise<unknown>;
   now?: () => number;
 }
 
+/** Postgres refused a row for an account that isn't there: it was deleted. */
+function isMissingAccount(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "23503";
+}
+
 /**
  * POST { signedPayload } from App Store Server Notifications V2: renewals, expiries, refunds and
- * revocations reach the account even when the app isn't opened. Answers 200 once handled (or
- * when there's nothing to do), so Apple doesn't retry; 400 when it can't be verified.
+ * revocations reach the account even when the app isn't opened. That is the account holding the
+ * subscription (it may have moved, see `createPurchaseHandler`); until one does, the account it
+ * was bought for. Answers 200 once handled (or when there's nothing to do), so Apple doesn't
+ * retry; 400 when it can't be verified.
  */
 export function createNotificationHandler(deps: NotificationDeps): (request: Request) => Promise<Response> {
   return async (request) => {
@@ -227,17 +265,24 @@ export function createNotificationHandler(deps: NotificationDeps): (request: Req
       return json({ ok: true });
     }
     try {
-      const owner = transaction.appAccountToken ?? await deps.ownerOf(transaction.originalTransactionId);
+      const owner = await deps.ownerOf(transaction.originalTransactionId) ?? boughtFor(transaction);
       if (!owner) {
         console.log(JSON.stringify({ event: "notification_unmatched", type }));
         return json({ ok: true });
       }
-      const decision = decide(transaction, owner, (deps.now ?? Date.now)(), graceUntil);
+      const decision = decide(transaction, (deps.now ?? Date.now)(), graceUntil);
       if (!decision.ok) {
         console.log(JSON.stringify({ event: "notification_skipped", type, reason: decision.error }));
         return json({ ok: true });
       }
-      await deps.apply(owner, decision.update);
+      try {
+        await deps.apply(owner, decision.update);
+      } catch (error) {
+        if (!isMissingAccount(error)) throw error;
+        // Bought for an account that was deleted since: nothing to update, and no use retrying.
+        console.log(JSON.stringify({ event: "notification_unmatched", type, reason: "account_gone" }));
+        return json({ ok: true });
+      }
       console.log(JSON.stringify({ event: "notification_applied", type, subtype: notification.subtype ?? null,
         plan: decision.update.plan }));
       return json({ ok: true });

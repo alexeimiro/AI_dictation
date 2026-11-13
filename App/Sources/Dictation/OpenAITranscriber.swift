@@ -170,16 +170,22 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
     }
 
     func finishUtterance() async throws -> String {
-        try await finish(model: nil).transcript
+        try await finish(model: nil, dictationId: nil).transcript
     }
 
     /// With a request and `dictate` available, the transcript and the model's text from one
     /// request. Otherwise, and whenever the on-device fallback answers, the transcript alone.
     func finishUtterance(model request: ModelRequest?) async throws -> UtteranceOutput {
-        try await finish(model: request)
+        try await finish(model: request, dictationId: request?.dictationId)
     }
 
-    private func finish(model request: ModelRequest?) async throws -> UtteranceOutput {
+    /// As above, naming the dictation to `transcribe` too: Word for word has no model request to
+    /// carry its id, and its words are counted there.
+    func finishUtterance(model request: ModelRequest?, dictationId: UUID) async throws -> UtteranceOutput {
+        try await finish(model: request, dictationId: dictationId)
+    }
+
+    private func finish(model request: ModelRequest?, dictationId: UUID?) async throws -> UtteranceOutput {
         let (pcm, language, paused, utterance, onDevice) = lock.withLock {
             () -> ([Float], ResolvedLanguage?, Bool, Int, ResolvedLanguage?) in
             capturing = false
@@ -220,7 +226,8 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
                 timing = reply.timing
             } else {
                 let transcript = try await client.transcribe(
-                    audio: audio.data, format: audio.format, language: spoken, languageHints: hints, keywords: keywords)
+                    audio: audio.data, format: audio.format, language: spoken, languageHints: hints, keywords: keywords,
+                    dictationId: dictationId)
                 output = UtteranceOutput(transcript: transcript.text, detectedLanguage: detected(transcript.languages))
                 timing = transcript.timing
             }

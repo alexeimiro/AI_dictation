@@ -229,8 +229,9 @@ struct PaywallView: View {
     }
 }
 
-/// A plan's card: its name with the saving, the price per period, for the annual plan the price
-/// a month, and the mark that shows which is chosen.
+/// A plan's card: its name with the saving, the price that is charged, and the mark that shows
+/// which is chosen. The charged amount is the price that stands out; the annual plan's price a
+/// month is worked out from it, so it sits under the name, smaller and grey (App Review 3.1.2).
 private struct PlanCard: View {
     let option: PlanOption
     let isSelected: Bool
@@ -238,34 +239,44 @@ private struct PlanCard: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 8) {
-                        Text(option.title)
-                            .font(.murmur(.headline))
-                            .foregroundStyle(Theme.ink)
-                            .fixedSize()
-                        if let saving = option.saving {
-                            Chip(saving, solid: true)
+            // 8 pt apart: on a 375 pt screen that leaves the annual price its full size.
+            HStack(spacing: 8) {
+                ZStack(alignment: .leading) {
+                    // Two empty lines, so a card with one line is as tall as one with two at any
+                    // text size.
+                    VStack(spacing: 3) {
+                        Text(verbatim: " ").font(.murmur(.headline))
+                        Text(verbatim: " ").font(.murmur(.footnote))
+                    }
+                    .hidden()
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text(option.title)
+                                .font(.murmur(.headline))
+                                .foregroundStyle(Theme.ink)
+                                .fixedSize()
+                            if let saving = option.saving {
+                                Chip(saving, solid: true)
+                            }
+                        }
+                        if let perMonth = option.perMonth {
+                            Text(perMonth)
+                                .font(.murmur(.footnote))
+                                .monospacedDigit()
+                                .foregroundStyle(Theme.second)
+                                .fixedSize()
                         }
                     }
-                    Text(option.price)
-                        .font(.murmur(.subhead))
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.second)
-                        .fixedSize()
                 }
                 .layoutPriority(1)
                 Spacer(minLength: 4)
-                if let perMonth = option.perMonth {
-                    // The one part that may shrink when the card is narrow.
-                    Text(perMonth)
-                        .font(.murmur(.subhead, weight: .semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.ink)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                }
+                // The one part that may shrink when the card is narrow.
+                Text(option.price)
+                    .font(.murmur(.headline))
+                    .monospacedDigit()
+                    .foregroundStyle(Theme.ink)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 SelectionMark(isOn: isSelected)
                     .accessibilityHidden(true)
             }
@@ -288,9 +299,9 @@ private struct PlanCard: View {
 struct PlanOption: Identifiable, Equatable {
     let id: String
     let title: String
-    /// "$79.99 / year".
+    /// What is charged each period: "$79.99 / year".
     let price: String
-    /// The annual plan's price a month: "$6.67 / month".
+    /// The annual plan's price a month, worked out from `price`: "$6.67 / month".
     let perMonth: String?
     /// "Save 33%".
     let saving: String?

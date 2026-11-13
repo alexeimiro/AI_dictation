@@ -79,26 +79,6 @@ targets:
           - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER)
             CFBundleURLSchemes:
               - $(MURMUR_URL_SCHEME)
-        LSApplicationQueriesSchemes:
-          - mobilenotes
-          - sms
-          - message
-          - whatsapp
-          - tg
-          - fb-messenger
-          - slack
-          - msteams
-          - discord
-          - notion
-          - obsidian
-          - bear
-          - evernote
-          - googlegmail
-          - ms-outlook
-          - linkedin
-          - chatgpt
-          - claude
-          - perplexity-app
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         MurmurAppGroupID: $(MURMUR_APP_GROUP)

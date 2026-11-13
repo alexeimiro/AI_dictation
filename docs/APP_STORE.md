@@ -39,7 +39,7 @@ App Store Connect only takes in its web page). Character limits are App Store Co
 > Start and stop a dictation without touching the keyboard.
 >
 > YOU ALWAYS KNOW WHEN IT LISTENS
-> Red means the microphone is open, and nothing else in Murmur is red. Your transcripts and recordings stay on your iPhone. Audio is sent to be transcribed and isn't used to train AI models.
+> Red means the microphone is open, and nothing else in Murmur is red. Murmur asks before your first recording leaves your iPhone: OpenAI turns it into text, and Anthropic tidies or translates the text. Neither trains AI models on it. Your history of transcripts and recordings stays on your iPhone.
 >
 > MURMUR PRO
 > Murmur is free with 1,000 words a week, after a 14-day trial of Pro. Murmur Pro has no weekly limit: $9.99 a month or $79.99 a year. Payment is charged to your Apple Account, and the subscription renews automatically unless cancelled at least 24 hours before the end of the period. Manage or cancel it in Settings › Apple Account › Subscriptions.
@@ -84,15 +84,16 @@ SIM="iPhone 17 Pro Max" DD=build/DerivedData OUT=build/app-store-screenshots scr
 > The keyboard needs Allow Full Access, only to exchange the dictation with the Murmur app through their shared App Group container. It doesn't log keystrokes or send what you type anywhere.
 >
 > TO TRY IT
-> 1. Open Murmur and sign in with Apple (or with an email code).
+> 1. Open Murmur and sign in with Apple.
 > 2. Follow the setup: add the keyboard in Settings › General › Keyboard › Keyboards, and turn on Allow Full Access.
-> 3. Open Notes, switch to the Murmur keyboard with the globe key, tap the mic and speak.
+> 3. On the microphone page, tap Continue. "Before Murmur listens" asks for permission to send recordings to the AI services (see AI below): tap Allow, then allow the microphone.
+> 4. Open Notes, switch to the Murmur keyboard with the globe key, tap the mic and speak.
 >
 > SUBSCRIPTIONS
 > New accounts get a 14-day trial of Pro without payment details. "Upgrade to Pro" in the menu or Settings shows the two auto-renewing subscriptions, Murmur Pro Monthly and Murmur Pro Annual, in the group "Murmur Pro". Restore purchase is on the same screen.
 >
 > AI
-> Recordings are transcribed, and translated or corrected when the user asks, by OpenAI's API through Murmur's server. The user's words are typed into their own text field and aren't shared with other users.
+> Recordings are transcribed by OpenAI's API, and the transcript is tidied or translated by Anthropic's Claude API, both through Murmur's server. Before the microphone is first turned on, the page "Before Murmur listens" names both services, says what each receives, and offers Allow and Not now (guideline 5.1.2(i)). Without Allow, Murmur doesn't turn the microphone on, so nothing is recorded or sent. The same permission is a switch in Settings › Data and privacy ("Write with AI services"). Neither service trains its models on the data. The user's words are typed into their own text field and aren't shared with other users.
 >
 > ACCOUNT DELETION
 > Open the menu, tap the account's row at the bottom, then Delete account. It deletes the account and its data on the server and revokes Sign in with Apple.
@@ -105,14 +106,20 @@ These match `App/Resources/PrivacyInfo.xcprivacy`. Murmur doesn't track, show ad
 
 | Data type | Collected | Linked to the user | Used for | Why |
 |---|---|---|---|---|
+| Contact Info › Name | Yes | Yes | App Functionality | The name Apple or Google passes on at sign-in |
 | Contact Info › Email Address | Yes | Yes | App Functionality | Signing in (email, Google, Apple) |
 | Identifiers › User ID | Yes | Yes | App Functionality | The account |
 | Purchases › Purchase History | Yes | Yes | App Functionality | Granting Pro |
-| User Content › Audio Data | Yes | No | App Functionality | Transcription; not kept by Murmur's server |
-| User Content › Other User Content | Yes | Yes | App Functionality | Dictionary, snippets and notes synced to the account; feedback text when the user shares it |
+| User Content › Audio Data | Yes | No | App Functionality | Transcription by OpenAI; not kept by Murmur's server |
+| User Content › Other User Content | Yes | Yes | App Functionality, Analytics | Dictionary, snippets and notes synced to the account; a dictation's text sent to Anthropic to be tidied or translated; feedback text when the user turns on "Improve Murmur for everyone" |
 | User Content › Customer Support | Yes | Yes | App Functionality | Support messages from the app |
+| Usage Data › Product Interaction | Yes | Yes | App Functionality | The number of words in each dictation, for the free plan's weekly limit |
+| Diagnostics › Other Diagnostic Data | Yes | Yes | App Functionality | App version, iOS version, device model and language with a support message |
+| Other Data › Other Data Types | Yes | Yes | Analytics | The answers given during setup (what Murmur is for, how the user found it) |
 
-Answer "No" to tracking. Transcripts, recordings and keystrokes aren't collected: they stay on the device.
+For every type: "No" to tracking. For each "Used for", tick only the purposes listed. Transcripts' history, recordings kept for playback and keystrokes aren't collected: they stay on the device.
+
+Third-party AI (guideline 5.1.2(i)): the app asks for permission before a recording goes to OpenAI and its text to Anthropic ("Before Murmur listens"), and the privacy policy names both.
 
 ## Age rating
 
@@ -130,5 +137,7 @@ No objectionable content. The app isn't made for children. "Unrestricted web acc
 
 ## Risks to know about
 
-- **Returning to the previous app.** After the keyboard opens Murmur, Murmur reads which app the keyboard was in from a private UIKit value, so it can reopen it (`HostReturn.swift`). Review may flag it under guideline 2.5.1. Shipping keyboards rely on the same behavior. If it's rejected, turn off "Return to the app automatically" (Settings › Debug) by default; users then swipe back themselves.
-- **Sign-in during onboarding.** Guideline 5.1.1(v) asks that features that don't need an account work without one. Dictation needs the server, which needs an account. A "Continue without an account" option exists on the sign-in sheet if review asks.
+- **Returning to the previous app.** After the keyboard opens Murmur, Murmur reads which app the keyboard was in from a private UIKit value, so it can reopen it (`HostReturn.swift`). Review may flag it under guideline 2.5.1. Shipping keyboards rely on the same behavior. If it's rejected, turn off "Return to the app automatically" (Settings › Keyboard) by default; users then swipe back themselves.
+- **Noticing that the keyboard was added.** Onboarding moves on by itself once Murmur's keyboard is in the list of keyboards, which it tells from an undocumented `identifier` of `UITextInputMode` (`SetupStatus.swift`). If review objects, the page can wait for the keyboard's first run instead.
+- **Sign-in during onboarding.** Guideline 5.1.1(v) asks that features that don't need an account work without one. Dictation needs the server, which needs an account. Onboarding's sign-in page offers "Continue without an account" only in a build without a server; someone who has signed out can go on as a guest from the sign-in sheet. Showing the option to everyone is an open decision.
+- **The keyboard opens the app.** Guideline 4.4.1 says keyboards must not launch other apps. iOS gives a keyboard no microphone, so Murmur's keyboard opens its own app to turn it on; the review notes explain it.

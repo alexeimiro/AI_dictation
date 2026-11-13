@@ -35,6 +35,11 @@ protocol Transcriber: AnyObject, Sendable {
     /// another must pass the request on.
     func finishUtterance(model request: ModelRequest?) async throws -> UtteranceOutput
 
+    /// The same, for the dictation `dictationId` (its `requestId`). A transcriber that sends the
+    /// dictation to the server names it in every request (`OpenAITranscriber`), so the free plan
+    /// counts its words once, whichever requests it takes. The others don't need it.
+    func finishUtterance(model request: ModelRequest?, dictationId: UUID) async throws -> UtteranceOutput
+
     func cancelUtterance() async
 
     /// Drops the current dictation at once, from any context, and tears it down in the
@@ -45,6 +50,13 @@ protocol Transcriber: AnyObject, Sendable {
 
     /// Called when the session ends.
     func shutdown() async
+}
+
+extension Transcriber {
+    /// On the iPhone nothing is counted, so the dictation needs no name.
+    func finishUtterance(model request: ModelRequest?, dictationId: UUID) async throws -> UtteranceOutput {
+        try await finishUtterance(model: request)
+    }
 }
 
 /// A finished dictation's transcript, and the model's text when the transcriber had it written in

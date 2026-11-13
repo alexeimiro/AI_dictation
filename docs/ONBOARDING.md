@@ -19,14 +19,14 @@ and their choices. The steps are the cases of `OnboardingStep`, in this order:
 | `setupIntro` | Opens the second part | "Set up" |
 | `keyboardInstructions` | What to turn on in Settings, and the way there | The keyboard is detected on return |
 | `practiceIntro` | Opens the third part | "Try Murmur" |
-| `microphonePrimer` | Why the microphone, before the system asks | Access is granted |
+| `microphonePrimer` | Why the microphone, before the system asks; its button first asks "Before Murmur listens" | Access is granted |
 | `basicPractice` | Say anything; first shows how to switch keyboards | Any text in the box, typed or dictated |
 | `formattingPractice` | Dictate an email and change it halfway | A dictation |
 | `whisperIntro`, `whisperPractice` | Whisper a note | A dictation |
 | `practiceComplete` | A tick for each exercise done | "Continue" |
 | `wrapUpIntro` | Opens the last part | "Next" |
 | `dataChoice` | What Murmur may do with voice and text; nothing preselected | A choice |
-| `languages` | The languages found on the keyboard, to confirm or edit | At least one language |
+| `languages` | The iPhone's own languages, to confirm or edit | At least one language |
 | `defaultStyle` | Word for word or Improve my grammar | A style (Word for word is preselected) |
 | `notifications` | What they are for, then the system prompt | Allowed, denied or "Not now" |
 | `desktopOffer` | A link by email when Murmur for Mac and PC exists | Requested or "No thanks" |
@@ -51,19 +51,24 @@ on the pages that open a part, `ready` and `trialOffer`, which have none.
   Access once the Murmur keyboard is up and points to Settings if the keyboard never reports in.
 - **Microphone.** The page explains first and asks once, after a tap. If access is denied or
   restricted it offers Settings, or "Skip the exercises", which goes to the last part.
+- **The AI question.** That tap first shows "Before Murmur listens" (`AIConsentView`): a recording
+  goes to OpenAI and its text to Anthropic, with Allow and Not now. It isn't a step of the journey:
+  the session asks the same question before it turns the microphone on, wherever that happens, so
+  someone who skips the exercises is asked at their first dictation. "Not now" stays on the page.
 - **Exercises.** The box is a real text view, so a dictation runs through the real keyboard and
   session. The takes are held until onboarding completes and then copied into history once, one
   entry per exercise.
 - **Data choice.** The decision is saved with the policy version and the time. Bump
   `DataChoiceDecision.currentPolicyVersion` when the two options' wording changes meaning.
-- **Languages.** They start from the enabled keyboards' languages that dictation supports. The
-  first becomes the primary language and the second the keyboard's switch.
+- **Languages.** They start from the iPhone's preferred languages that dictation supports (not
+  from its keyboards: what the list of keyboards says may not leave the iPhone). The first becomes
+  the primary language and the second the keyboard's switch.
 - **Desktop link.** The page asks for confirmation before it records the email address.
 - **Plan.** The last page shows what the server answered, never a promise of its own. If the
   account was signed out meanwhile, it offers the sign-in sheet instead of a retry that can't work.
 - **Completion** is written only when the plan page is acknowledged. After that the app opens on
-  Home. Installs that already have history or a keyboard that has run skip onboarding; Settings ›
-  Debug › Replay onboarding starts it again.
+  Home. Installs that already have history or a keyboard that has run skip onboarding; in a Debug
+  build, Settings › Debug › Replay onboarding starts it again.
 - **A keyboard link during onboarding** (the keyboard asking the app to listen) goes to whichever
   of the keyboard and the microphone is still missing.
 
@@ -100,6 +105,9 @@ scrolls under its buttons when it doesn't fit.
 - `-permission-fixtures keyboard,fullAccess,mic=granted,notifications=denied` fixes the setup state.
 - `-onboarding-fixtures` runs the whole journey on fake services with its own checkpoint, and
   `-onboarding-reset` starts it over.
+- A run on fake services is allowed to listen without being asked. `-ai-consent` has it ask
+  "Before Murmur listens" where a real run would, and `-ai-consent show` puts the question over
+  the launch (for a screenshot).
 
 ```sh
 SIM="iPhone 17 Pro (Redesign)" DD=build/RedesignDD scripts/screenshots.sh \

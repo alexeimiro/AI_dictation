@@ -95,6 +95,17 @@ struct SettingsView: View {
                     SettingLabel("Vibrate when text is ready", detail: "So you don’t have to watch the screen")
                 }
                 .settingRow()
+                if model.hostReturn.isAvailable {
+                    Toggle(isOn: $settings.autoReturn) {
+                        SettingLabel("Return to the app automatically",
+                                     detail: "After the keyboard opens \(Brand.name) to start listening, go back to the app you were writing in")
+                    }
+                    .settingRow()
+                }
+                Toggle(isOn: $settings.keepScreenAwake) {
+                    SettingLabel("Keep the screen on while dictating", detail: "So Auto-Lock doesn’t cut a long dictation short")
+                }
+                .settingRow()
 
                 header("Audio")
                 Toggle(isOn: $settings.interactionSounds) {
@@ -118,6 +129,11 @@ struct SettingsView: View {
 
             Group {
                 header("Data and privacy")
+                // The answer to "Before Murmur listens"; off, the microphone stays off.
+                Toggle(isOn: Binding(get: { model.aiConsent.isGranted }, set: { model.setAIConsent($0) })) {
+                    SettingLabel(AIConsentCopy.settingTitle, detail: AIConsentCopy.settingDetail)
+                }
+                .settingRow()
                 if model.account != nil {
                     Toggle(isOn: Binding(get: { model.dataSharing },
                                          set: { on in Task { toast = await model.setDataSharing(on) } })) {
@@ -150,15 +166,14 @@ struct SettingsView: View {
                     .disabled(sync.isSyncing)
                     .settingRow()
                 }
-                Text(model.account?.isSignedIn == true
-                     ? "Your dictionary, snippets and notes are saved to your account, so they’re on every device you sign in on. Transcripts and recordings stay on this iPhone. To write your text, the recording goes to OpenAI and, for Improve my grammar or a translation, its transcript to Anthropic; neither trains on them, and Murmur’s servers don’t keep either."
-                     : "Transcripts, recordings, your dictionary, snippets and notes stay on this iPhone; sign in to have the dictionary, snippets and notes on your other devices too. To write your text, the recording goes to OpenAI and, for Improve my grammar or a translation, its transcript to Anthropic; neither trains on them, and Murmur’s servers don’t keep either.")
+                Text(Self.privacyFootnote(signedIn: model.account?.isSignedIn == true))
                     .font(.murmur(.footnote))
                     .foregroundStyle(Theme.third)
                     .padding(.vertical, 12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .overlay(alignment: .top) { Hairline() }
 
+                #if DEBUG
                 Button { model.router.open(.debug) } label: {
                     SettingLabel("Debug", detail: "The speech engine, timings and a field to test the keyboard in") {
                         chevron
@@ -166,6 +181,7 @@ struct SettingsView: View {
                 }
                 .settingRow()
                 .padding(.top, 12)
+                #endif
 
                 Text(Self.versionLine(plan: model.quota?.planName))
                     .font(.murmur(.footnote))
@@ -215,6 +231,15 @@ struct SettingsView: View {
         }
         let signIn = phrase.map { "Sign in again \($0)" } ?? "Sign in again"
         return "You're signed out. \(signIn) to keep cloud dictation and your plan."
+    }
+
+    /// Under Data and privacy: where each kind of data is kept, and who else gets a dictation.
+    /// It names no style: every style can send the text on.
+    static func privacyFootnote(signedIn: Bool) -> String {
+        let kept = signedIn
+            ? "Your dictionary, snippets and notes are saved to your account, so they’re on every device you sign in on. Transcripts and recordings stay on this iPhone."
+            : "Transcripts, recordings, your dictionary, snippets and notes stay on this iPhone; sign in to have the dictionary, snippets and notes on your other devices too."
+        return kept + " OpenAI gets each recording to turn it into text, and Anthropic gets that text when it needs tidying or translating. Neither trains on them, and Murmur’s servers don’t keep either."
     }
 
     static func layoutTitle(_ layout: KeyboardLayoutPreference) -> String {

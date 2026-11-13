@@ -42,8 +42,10 @@ the code under Menu › Invite a friend.
 
 ## Your data
 
-Your transcripts and recordings stay on your iPhone. Your dictionary, snippets and notes are saved
-to your account so they're on all your devices. The [Privacy Policy](../privacy/) has the details.
+Your history of transcripts and recordings stays on your iPhone. Your dictionary, snippets and notes
+are saved to your account so they're on all your devices. To write your text, each recording goes to
+OpenAI and its text to Anthropic; neither trains on them, and Murmur asks before the first one (you
+can change that in Settings › Data and privacy). The [Privacy Policy](../privacy/) has the details.
 
 To delete your account and its data, open the menu, tap your account at the bottom, then Delete
 account. That doesn't cancel an App Store subscription.

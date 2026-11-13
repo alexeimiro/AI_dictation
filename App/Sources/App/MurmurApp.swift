@@ -130,7 +130,13 @@ private struct TabStack<Root: View>: View {
         switch route {
         case .settings: SettingsView()
         case .languages: LanguagesView()
-        case .debug: DebugView()
+        case .debug:
+            // Development builds only; nothing leads here in a release build.
+            #if DEBUG
+            DebugView()
+            #else
+            EmptyView()
+            #endif
         case .transcript(let id): TranscriptDetailView(id: id)
         case .account: AccountView()
         case .referral: ReferralView()

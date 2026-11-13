@@ -58,15 +58,17 @@ final class EdgeFunctionClient {
         }
     }
 
-    /// POSTs `body` as JSON and returns a 2xx reply undecoded, with its timing.
-    func post(_ function: String, body: some Encodable, timeout: TimeInterval) async throws(EdgeFunctionError) -> Reply {
+    /// POSTs `body` as JSON, with `extraHeaders`, and returns a 2xx reply undecoded, with its timing.
+    func post(_ function: String, body: some Encodable, extraHeaders: [String: String] = [:],
+              timeout: TimeInterval) async throws(EdgeFunctionError) -> Reply {
         let payload: Data
         do {
             payload = try JSONEncoder().encode(body)
         } catch {
             throw .transport(error)
         }
-        return try await send(function, payload: payload, contentType: "application/json", timeout: timeout)
+        return try await send(function, payload: payload, contentType: "application/json",
+                              extraHeaders: extraHeaders, timeout: timeout)
     }
 
     /// POSTs `payload` (none for a warm-up) with `extraHeaders`, and returns a 2xx reply undecoded.

@@ -30,7 +30,7 @@ private final class RecordingCloud: CloudTranscribing {
     private(set) var uploads: [(audio: Data, format: EncodedAudio.Format)] = []
 
     func transcribe(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
-                    keywords: [String]) async throws(CloudTranscriptionError) -> CloudTranscript {
+                    keywords: [String], dictationId: UUID?) async throws(CloudTranscriptionError) -> CloudTranscript {
         uploads.append((audio, format))
         return CloudTranscript(text: "see you at five", timing: nil)
     }
@@ -135,6 +135,25 @@ struct SessionControllerTests {
         defer { try? FileManager.default.removeItem(at: url) }
         let file = try AVAudioFile(forReading: url)
         return Double(file.length) / file.fileFormat.sampleRate
+    }
+
+    /// "Not now" to sending recordings to the AI services: the session doesn't start (so nothing
+    /// is recorded), and the keyboard is told why, as for any failed start.
+    @Test func withoutTheOKForTheAIServicesTheSessionDoesNotStart() async {
+        let transport = InMemoryIPCTransport()
+        let settings = SharedSettings(defaults: UserDefaults(suiteName: "test.murmur.session.\(UUID().uuidString)"))
+        let session = SessionController(
+            transport: transport, pipeline: DictationPipeline(cleanup: NoCleanup()), assets: SpeechAssetManager(),
+            history: HistorySpy(), settings: settings, consent: { false })
+
+        await session.start()
+
+        let message = SessionController.SessionError.aiNotAllowed.localizedDescription
+        #expect(session.phase == .failed(message))
+        #expect(!session.isLive)
+        #expect(transport.payloads.readSessionFailure()?.message == message)
+        #expect(transport.currentState().status == .error)
+        #expect(session.beginInAppDictation() == nil)
     }
 
     /// The keyboard's stop command, when it was sent and how long it took to reach the app, ends

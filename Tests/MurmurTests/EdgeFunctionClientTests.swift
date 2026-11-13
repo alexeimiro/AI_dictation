@@ -34,9 +34,11 @@ struct EdgeFunctionClientTests {
             session: URLSession(configuration: configuration), accessToken: token)
     }
 
-    private func transcribe(with functions: EdgeFunctionClient) async throws(CloudTranscriptionError) -> CloudTranscript {
+    private func transcribe(with functions: EdgeFunctionClient, dictationId: UUID? = nil)
+        async throws(CloudTranscriptionError) -> CloudTranscript {
         try await TranscriptionClient(functions: functions).transcribe(
-            audio: Data("audio".utf8), format: .m4a, language: "ru-RU", languageHints: [], keywords: ["Окафор"])
+            audio: Data("audio".utf8), format: .m4a, language: "ru-RU", languageHints: [], keywords: ["Окафор"],
+            dictationId: dictationId)
     }
 
     private func clean(with functions: EdgeFunctionClient) async throws(CleanupClient.Failure) -> CleanupClient.Response {
@@ -76,6 +78,21 @@ struct EdgeFunctionClientTests {
         #expect(body["language"] as? String == "ru-RU")
         #expect(body["keywords"] as? [String] == ["Окафор"])
         #expect((body["dictationId"] as? String).flatMap(UUID.init(uuidString:)) != nil)
+        // Audio that belongs to no dictation doesn't vouch for the id it makes up.
+        #expect(sent.request.value(forHTTPHeaderField: "x-murmur-dictation") == nil)
+    }
+
+    /// A dictation's own id goes in the body and in the header that vouches for it, as `dictate`
+    /// sends it: the function counts the transcript's words under it.
+    @Test func aDictationIsNamedInTheBodyAndTheHeader() async throws {
+        let dictation = UUID()
+        _ = try await transcribe(with: functions(), dictationId: dictation)
+
+        let sent = try #require(StubURLProtocol.sent(to: host).first)
+        let body = try #require(try JSONSerialization.jsonObject(with: sent.body) as? [String: Any])
+        #expect((body["dictationId"] as? String).flatMap(UUID.init(uuidString:)) == dictation)
+        let header = try #require(sent.request.value(forHTTPHeaderField: "x-murmur-dictation"))
+        #expect(UUID(uuidString: header) == dictation)
     }
 
     @Test func statusesMapAsBefore() async {

@@ -91,6 +91,9 @@ final class SessionController {
     @ObservationIgnored private var backgroundSince: Date?
     @ObservationIgnored private var interruptedAt: Date?
     @ObservationIgnored private var keyboardObservation: IPCObservation?
+    /// The user's OK to send recordings to the AI services that write them, asked if it hasn't
+    /// been given (`AIConsent.ensure`). No session, so no dictation, starts without it.
+    @ObservationIgnored private let consent: @MainActor () async -> Bool
 
     /// A dictation ends by itself after 5 minutes.
     static let maxDictationSeconds: TimeInterval = 300
@@ -106,7 +109,9 @@ final class SessionController {
 
     init(transport: IPCTransport, pipeline: DictationPipeline, assets: SpeechAssetManager, history: any TranscriptSink,
          recordings: RecordingStore? = nil, transcription: (any CloudTranscribing)? = nil, dictate: (any Dictating)? = nil,
-         warmup: BackendWarmup? = nil, timingsLog: TimingsLog? = nil, settings: SharedSettings = .shared) {
+         warmup: BackendWarmup? = nil, timingsLog: TimingsLog? = nil, settings: SharedSettings = .shared,
+         consent: @escaping @MainActor () async -> Bool = { true }) {
+        self.consent = consent
         self.transport = transport
         self.publisher = HotStatePublisher(transport: transport)
         self.pipeline = pipeline
@@ -141,6 +146,9 @@ final class SessionController {
         phase = .starting
         publisher.set(.starting)
         transport.post(.stateChanged)
+        // Before the microphone: what is recorded from here on goes to the AI services. Nothing is
+        // set up yet, so a "Not now" has no audio to take down.
+        guard await consent() else { return failStart(SessionError.aiNotAllowed) }
         do {
             guard await Self.requestMicrophonePermission() else { throw SessionError.microphoneDenied }
             try await activateAudioSession(waitForForeground: true)
@@ -170,16 +178,21 @@ final class SessionController {
             beginRequestedStart()
             prepareFallbackInBackground()
         } catch {
-            logger.error("Session start failed: \(String(describing: error), privacy: .public)")
-            requestedStart = nil
             tearDownAudio()
-            let message = Self.userMessage(for: error)
-            phase = .failed(message)
-            // The keyboard shows the reason; `.error` also stops it from bouncing to the app again.
-            try? transport.payloads.write(sessionFailure: SessionFailure(message: message, createdAt: Date()))
-            publisher.set(.error)
-            transport.post(.stateChanged)
+            failStart(error)
         }
+    }
+
+    /// A start that didn't happen: the phase says why, and so does the keyboard.
+    private func failStart(_ error: any Error) {
+        logger.error("Session start failed: \(String(describing: error), privacy: .public)")
+        requestedStart = nil
+        let message = Self.userMessage(for: error)
+        phase = .failed(message)
+        // The keyboard shows the reason; `.error` also stops it from bouncing to the app again.
+        try? transport.payloads.write(sessionFailure: SessionFailure(message: message, createdAt: Date()))
+        publisher.set(.error)
+        transport.post(.stateChanged)
     }
 
     #if DEBUG
@@ -1104,9 +1117,15 @@ final class SessionController {
 
     enum SessionError: LocalizedError {
         case microphoneDenied
+        /// The user answered "Not now" to sending recordings to the AI services (`AIConsent`).
+        case aiNotAllowed
 
         var errorDescription: String? {
-            "Murmur needs microphone access. Turn it on in Settings › Murmur."
+            switch self {
+            case .microphoneDenied: "Murmur needs microphone access. Turn it on in Settings › Murmur."
+            // Shown on Home over "Try again", and on the keyboard, whose mic opens Murmur again.
+            case .aiNotAllowed: "Murmur needs your OK to use its AI services. Try again to allow it."
+            }
         }
     }
 }

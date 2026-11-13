@@ -9,7 +9,10 @@ Onboarding is described in [docs/ONBOARDING.md](docs/ONBOARDING.md).
 
 ## How it works
 
-A custom keyboard can't use the microphone, so the app does the recording. The first dictation
+A custom keyboard can't use the microphone, so the app does the recording. Before the microphone
+is first turned on, "Before Murmur listens" asks for the OK to send recordings to OpenAI and their
+text to Anthropic (`AIConsent`); without it no session starts, and Settings › Data and privacy has
+the switch. The first dictation
 opens the app briefly: it starts a background audio session, shows a Live Activity, starts
 recording, and sends you back to the app you were typing in (or, for apps it can't reopen, asks
 you to swipe back). Later dictations reuse that session until it times out ("Turn off after"),
@@ -77,8 +80,8 @@ a pure state machine; the checkpoint is saved in the App Group after every step,
 Settings, a permission change or a termination resumes on the same screen. Completion is written
 only after the plan offer is acknowledged, and the practice dictations then land in history once.
 
-- Installs that already have history or a keyboard that has run skip it; Settings › Debug ›
-  Replay onboarding starts it again.
+- Installs that already have history or a keyboard that has run skip it; in a Debug build,
+  Settings › Debug › Replay onboarding starts it again.
 - Screenshot routes: `-onboarding-step <step>` with `-onboarding-variant <name>` and
   `-permission-fixtures keyboard,fullAccess,mic=granted` (fixture data, nothing persisted).
   `-onboarding-fixtures` runs the whole journey on fake services; `-onboarding-reset` restarts it.
@@ -96,8 +99,8 @@ to the `transcribe` function (or `dictate`, below), which passes it to OpenAI (`
 with the language, if any, and the personal dictionary as keyword hints; the audio isn't stored.
 If OpenAI can't be reached, a language whose on-device model is already installed is recognized on
 the iPhone instead; under Auto-detect that is the language of the last dictation, else the
-iPhone's. Without a backend, or with Settings › Debug › Recognizer set to On-device, recognition
-is on-device only, in the primary language. Until they are picked, the letters and the
+iPhone's. Without a backend, or in a Debug build with Settings › Debug › Recognizer set to
+On-device, recognition is on-device only, in the primary language. Until they are picked, the letters and the
 translation target follow the iPhone's language (ЙЦУКЕН on a Russian iPhone).
 
 ## Modes
@@ -198,6 +201,13 @@ language. Redeploy the function together with an app build that translates:
 
 Anonymous (trial) users are limited to 10 cleanups and 10 transcriptions per minute and 6 000-character
 transcripts. On the free plan, once the week's words are used up, `transcribe` answers 402 too.
+
+**The free plan's words.** Each dictation is counted once, under its own id (`record_usage` keeps the
+largest count for a user and a dictation): `transcribe` counts the transcript's words, and `cleanup` or
+`dictate` the words they wrote. `transcribe` counts only when the request carries
+`x-murmur-dictation: <dictationId>`, which the app sends with the dictation's own id; builds before
+that sent a random id and are counted by `cleanup` alone.
+
 To use the backend from the app, set `SUPABASE_HOST` and `SUPABASE_ANON_KEY` in
 `Config/Local.xcconfig` (the example file documents the `host:port` form for the local stack).
 
@@ -211,5 +221,6 @@ To use the backend from the app, set `SUPABASE_HOST` and `SUPABASE_ANON_KEY` in
 5. Murmur opens once and takes you back to Notes (in an app it can't reopen, swipe right along
    the bottom edge). It's already listening: speak and tap the red stop button.
 6. Home lists every dictation by day: tap to copy, swipe for Copy, Retry / Regenerate and Delete,
-   hold a row for its details (the raw transcript and timings). Settings › Debug shows median / p95 latencies and the
-   engine in use; the keyboard toolbar shows the extension's remaining memory in Debug builds.
+   hold a row for its details (the raw transcript and timings). In a Debug build, Settings › Debug shows median / p95
+   latencies and the engine in use, and the keyboard toolbar shows the extension's remaining memory. A release build
+   has no Debug screen.

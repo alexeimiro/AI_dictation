@@ -54,6 +54,8 @@ private final class CloudLikeTranscriber: Transcriber, @unchecked Sendable {
     var currentLanguage: ResolvedLanguage?
     private let output: UtteranceOutput
     private(set) var request: ModelRequest?
+    /// The dictation the pipeline named, for the server to count its words under.
+    private(set) var dictationId: UUID?
 
     init(_ output: UtteranceOutput) {
         self.output = output
@@ -69,6 +71,10 @@ private final class CloudLikeTranscriber: Transcriber, @unchecked Sendable {
     func finishUtterance(model request: ModelRequest?) async throws -> UtteranceOutput {
         self.request = request
         return output
+    }
+    func finishUtterance(model request: ModelRequest?, dictationId: UUID) async throws -> UtteranceOutput {
+        self.dictationId = dictationId
+        return try await finishUtterance(model: request)
     }
     func cancelUtterance() async {}
     func abandonUtterance() {}
@@ -137,6 +143,18 @@ struct DictationPipelineLanguageTests {
         _ = await DictationPipeline(cleanup: StyleCleanup()).complete(
             dictation(style: .verbatim), transcriber: transcriber, audioSeconds: 1, stoppedAt: ContinuousClock.now)
         #expect(transcriber.request == nil)
+    }
+
+    /// Word for word has no model request to carry the dictation's id, so the pipeline names it:
+    /// the server counts the free plan's words under that id, whichever requests the dictation takes.
+    @Test func everyDictationIsNamedToTheTranscriber() async {
+        for style in [StylePreset.verbatim, .grammar] {
+            let transcriber = CloudLikeTranscriber(UtteranceOutput(transcript: "See you at five."))
+            let spoken = dictation(style: style)
+            _ = await DictationPipeline(cleanup: StyleCleanup()).complete(
+                spoken, transcriber: transcriber, audioSeconds: 1, stoppedAt: ContinuousClock.now)
+            #expect(transcriber.dictationId == spoken.requestId, "\(style)")
+        }
     }
 
     private func dictation(style: StylePreset, language: String = "en-US") -> ActiveDictation {

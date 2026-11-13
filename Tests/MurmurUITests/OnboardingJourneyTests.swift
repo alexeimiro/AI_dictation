@@ -68,6 +68,18 @@ final class OnboardingJourneyTests: XCTestCase {
         tap(Copy.next, timeout: 6)
     }
 
+    /// The element with an `AccessibilityID`, whichever of the app's windows it is in.
+    private func element(_ identifier: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: identifier).firstMatch
+    }
+
+    private func tap(id identifier: String, file: StaticString = #filePath, line: UInt = #line) {
+        let target = element(identifier)
+        XCTAssertTrue(target.waitForExistence(timeout: 5), "no “\(identifier)”", file: file, line: line)
+        XCTAssertTrue(waitUntilHittable(target), "“\(identifier)” isn't tappable", file: file, line: line)
+        target.tap()
+    }
+
     // Steps, each ending on the next screen.
     private func throughSurvey() {
         tap(Copy.Welcome.button)
@@ -146,6 +158,30 @@ final class OnboardingJourneyTests: XCTestCase {
         launch(reset: false)
         XCTAssertTrue(app.buttons["Menu"].waitForExistence(timeout: 5))
         XCTAssertFalse(button(Copy.Welcome.button).exists)
+    }
+
+    /// "Before Murmur listens" comes before the system asks for the microphone, and so before
+    /// anything is recorded (`-ai-consent`: this run asks, as a real one does). "Not now" stays on
+    /// the microphone page; "Allow" goes on to the first exercise.
+    func testTheAIQuestionComesBeforeTheMicrophone() {
+        launch(extra: ["-ai-consent"])
+        throughSurvey()
+        throughSignIn()
+        tap(Copy.SetupIntro.button)
+        tap(Copy.Keyboard.button)
+        tap(Copy.PracticeIntro.button)
+        expectText(Copy.Microphone.title)
+
+        tap(Copy.continue)
+        XCTAssertTrue(element(AccessibilityID.screen("aiConsent")).waitForExistence(timeout: 5), "the question")
+        tap(id: AccessibilityID.aiConsentNotNow)
+        XCTAssertTrue(waitUntilHittable(button(Copy.continue)), "back on the microphone page")
+        expectText(Copy.Microphone.title)
+        XCTAssertFalse(app.staticTexts[Copy.Practice.basicLine].exists, "no exercise without the OK")
+
+        tap(Copy.continue)
+        tap(id: AccessibilityID.aiConsentAllow)
+        expectText(Copy.Practice.basicLine)
     }
 
     func testBackKeepsAnswersAndReturnsToTheRightScreen() {

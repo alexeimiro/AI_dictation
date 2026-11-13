@@ -9,6 +9,7 @@ import {
   TRANSCRIBE_LIMITS,
   type TranscribeRequest,
   transcribeWithOpenAI,
+  transcriptUsage,
 } from "../_shared/transcribe.ts";
 
 const audio = btoa("fake m4a bytes");
@@ -149,6 +150,45 @@ Deno.test("a caller's signal replaces the deadline timer", async () => {
   // Identity, not equality: two signals that haven't fired compare as equal objects.
   assertStrictEquals(sent[0], signal);
   assert(sent[1] instanceof AbortSignal && sent[1] !== signal, "without one, the deadline arms its own");
+});
+
+const DICTATION = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+
+Deno.test("a transcript's words are counted under the dictation the header vouches for", () => {
+  const named = { ...request, dictationId: DICTATION };
+  const heard = { text: "Привет, мир. Как дела?", languages: ["ru"] };
+  assertEquals(transcriptUsage(named, DICTATION, heard), { dictationId: DICTATION, words: 4 });
+  // The header's case and padding don't matter; the id is recorded as the body gave it.
+  assertEquals(transcriptUsage(named, ` ${DICTATION.toUpperCase()} `, heard), { dictationId: DICTATION, words: 4 });
+});
+
+Deno.test("nothing is counted without the header, with another dictation's, or for silence", () => {
+  const named = { ...request, dictationId: DICTATION };
+  const heard = { text: "See you at five.", languages: ["en"] };
+  // Builds before the header sent a random id here, and `cleanup` then reports the real one.
+  assertEquals(transcriptUsage(named, null, heard), null);
+  assertEquals(transcriptUsage(named, "", heard), null);
+  assertEquals(transcriptUsage(named, "11111111-2222-4333-8444-555555555555", heard), null);
+  assertEquals(transcriptUsage({ ...request, dictationId: null }, DICTATION, heard), null);
+  assertEquals(transcriptUsage(named, DICTATION, { text: "", languages: [] }), null);
+  assertEquals(transcriptUsage(named, DICTATION, { text: "…", languages: ["en"] }), null);
+});
+
+Deno.test("words are counted in the language asked for, else the one heard first", () => {
+  const japanese = { text: "今日は良い天気ですね", languages: ["ja"] };
+  const detected = transcriptUsage({ ...request, dictationId: DICTATION, language: null }, DICTATION, japanese);
+  const pinned = transcriptUsage({ ...request, dictationId: DICTATION, language: "ja" }, DICTATION, japanese);
+  assert(detected && pinned);
+  // Segmented as Japanese either way, not as one unbroken English "word".
+  assert(detected.words > 1, `detected: ${detected.words}`);
+  assertEquals(pinned.words, detected.words);
+  // Nothing asked for and nothing heard: counted as English.
+  const unknown = transcriptUsage(
+    { ...request, dictationId: DICTATION, language: null },
+    DICTATION,
+    { text: "see you at five", languages: [] },
+  );
+  assertEquals(unknown?.words, 4);
 });
 
 Deno.test("the server key prefers the new secret keys", async () => {

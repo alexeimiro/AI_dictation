@@ -121,10 +121,10 @@ supabase/   config.toml, migrations/, functions/{cleanup,auth-lookup,signup-stat
   - `NSMicrophoneUsageDescription`
   - `NSSupportsLiveActivities`
   - URL scheme `murmur`
-  - `LSApplicationQueriesSchemes` for returning to the app the keyboard was used in
+  - No `LSApplicationQueriesSchemes`: returning to the app the keyboard was used in only opens its URL, and never asks whether it can (`canOpenURL`)
   - `NSSpeechRecognitionUsageDescription` only if SpeechAnalyzer turns out to need it
 - **Keyboard scheme:** `askForAppToLaunch`. Builds use `-allowProvisioningUpdates`.
-- **`PrivacyInfo.xcprivacy` per target:** UserDefaults `CA92.1` and `1C8F.1`; system boot time `35F9.1` if signposts need it.
+- **`PrivacyInfo.xcprivacy` per target:** UserDefaults `CA92.1` and `1C8F.1`; system boot time `35F9.1` if signposts need it; in the app, active keyboards `3EC4.1` (is Murmur's keyboard added; the answer stays on the iPhone).
 - **Localization:** String Catalogs.
 - **Keyboard memory:** the extension stays lean, with no SwiftData, Supabase, bundled fonts or Liquid Glass.
 

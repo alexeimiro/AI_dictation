@@ -1,4 +1,5 @@
 // Request parsing and the OpenAI call for the `transcribe` function. Pure helpers, tested offline.
+import { countWords } from "./text.ts";
 import { normalizeLanguageTag, type Parsed } from "./types.ts";
 
 /** OpenAI's file-transcription model (gpt-4o-transcribe and whisper-1 shut down 2027-02-26). */
@@ -175,6 +176,27 @@ export class OpenAIError extends Error {
   constructor(readonly status: number, readonly code: string | null) {
     super(`OpenAI transcription failed with HTTP ${status}${code ? ` (${code})` : ""}`);
   }
+}
+
+/**
+ * What a transcript adds to the free plan's weekly words: its word count, under the dictation's
+ * own id. `cleanup` and `dictate` report the same dictation under that id, and `record_usage`
+ * keeps the largest count, so a dictation is counted once whichever requests it takes.
+ *
+ * Null when there is nothing to count, or when the request doesn't vouch for its id with
+ * `x-murmur-dictation: <dictationId>`, as `dictate` requires. Builds before the header sent a
+ * random id here; counting under it would count the dictation again when `cleanup` reports it.
+ */
+export function transcriptUsage(
+  request: TranscribeRequest,
+  dictationHeader: string | null,
+  result: TranscriptionResult,
+): { dictationId: string; words: number } | null {
+  const { dictationId } = request;
+  if (!dictationId || dictationHeader?.trim().toLowerCase() !== dictationId.toLowerCase()) return null;
+  // In the language it was spoken in: the one asked for, else the one heard first.
+  const words = countWords(result.text, request.language ?? result.languages[0]);
+  return words > 0 ? { dictationId, words } : null;
 }
 
 function decodeBase64(value: string): Uint8Array<ArrayBuffer> | null {

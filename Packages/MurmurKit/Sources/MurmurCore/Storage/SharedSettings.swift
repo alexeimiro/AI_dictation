@@ -98,7 +98,7 @@ public final class SharedSettings: @unchecked Sendable {
         case disableAfter, keyboardLayout, keyboardFullQwerty, keyboardFeedback, readyHaptic, interactionSounds
         case defaultStyle
         case useBuiltInMic, transcriberEngine, liveActivities, transcriptRetention, autoReturn, keepScreenAwake
-        case translateInOneRequest, lowDataMode, smartFormatting, keepRecordings, autoOpenNote
+        case translateInOneRequest, lowDataMode, smartFormatting, keepRecordings, autoOpenNote, aiConsentVersion
         case primaryLanguage, secondaryLanguage, dictationLanguages, verifiedEngines
         case translationEnabled, translationSourceLanguage, translationTargetLanguage, recentTranslationLanguages
         case lastDetectedLanguage, autoDetectDefaultApplied, keyboardAppearance
@@ -169,14 +169,14 @@ public final class SharedSettings: @unchecked Sendable {
     }
 
     /// After the keyboard opens the app, send the user back to the app they were typing in.
-    /// App-only; a Debug switch, since it relies on a UIKit detail that can change.
+    /// App-only; a switch in Settings, since it relies on a UIKit detail that can change.
     public var autoReturn: Bool {
         get { bool(.autoReturn, default: true) }
         set { defaults.set(newValue, forKey: Key.autoReturn.rawValue) }
     }
 
-    /// The keyboard holds off Auto-Lock while a dictation listens. A Debug switch, since it relies
-    /// on the extension's idle timer, which iOS doesn't document for keyboards.
+    /// The keyboard holds off Auto-Lock while a dictation listens. A switch in Settings, since it
+    /// relies on the extension's idle timer, which iOS doesn't document for keyboards.
     public var keepScreenAwake: Bool {
         get { bool(.keepScreenAwake, default: true) }
         set { defaults.set(newValue, forKey: Key.keepScreenAwake.rawValue) }
@@ -214,6 +214,14 @@ public final class SharedSettings: @unchecked Sendable {
     public var autoOpenNote: Bool {
         get { bool(.autoOpenNote, default: false) }
         set { defaults.set(newValue, forKey: Key.autoOpenNote.rawValue) }
+    }
+
+    /// Which wording of "your recordings go to OpenAI and Anthropic" the user agreed to; 0 until
+    /// they have, and again after they take it back. The app starts no session below its current
+    /// version (`AIConsent`). App-only.
+    public var aiConsentVersion: Int {
+        get { defaults.integer(forKey: Key.aiConsentVersion.rawValue) }
+        set { defaults.set(newValue, forKey: Key.aiConsentVersion.rawValue) }
     }
 
     /// Auto-delete transcripts older than this. App-only; applied by the history store.

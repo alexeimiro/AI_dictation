@@ -20,4 +20,8 @@ enum AccessibilityID {
     /// Home's session control, in the bar at the bottom.
     static let sessionControl = "home.session"
     static let newNote = "home.newNote"
+
+    /// The two answers on "Before Murmur listens" (`AIConsentView`); its title is `screen.aiConsent`.
+    static let aiConsentAllow = "aiConsent.allow"
+    static let aiConsentNotNow = "aiConsent.notNow"
 }

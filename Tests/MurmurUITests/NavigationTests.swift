@@ -195,6 +195,24 @@ final class NavigationTests: XCTestCase {
         XCTAssertEqual(live.value as? String, "On")
     }
 
+    /// Turning Murmur on asks "Before Murmur listens" first, on whatever screen it happens
+    /// (`-ai-consent`: this run asks, as a real one does). "Not now" leaves the microphone off,
+    /// and Home says why.
+    func testTurningMurmurOnAsksAboutTheAIServicesFirst() {
+        launch(extra: ["-ai-consent"])
+        let control = element(AccessibilityID.sessionControl)
+        XCTAssertTrue(control.waitForExistence(timeout: 10))
+        control.tap()
+
+        XCTAssertTrue(element(AccessibilityID.screen("aiConsent")).waitForExistence(timeout: 5), "the question")
+        tap(AccessibilityID.aiConsentNotNow)
+
+        XCTAssertTrue(waitUntilGone(element(AccessibilityID.aiConsentAllow)), "the question stayed up")
+        let reason = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "AI services")).firstMatch
+        XCTAssertTrue(reason.waitForExistence(timeout: 5), "Home doesn't say why Murmur is off")
+        XCTAssertEqual(element(AccessibilityID.sessionControl).value as? String, "Off")
+    }
+
     private func waitUntilGone(_ element: XCUIElement, timeout: TimeInterval = 5) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {

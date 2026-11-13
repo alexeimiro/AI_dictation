@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import {
+  type AccountKind,
   APP_STORE,
   appleVerifier,
   createNotificationHandler,
@@ -26,7 +27,7 @@ const monthly: TransactionInfo = {
 };
 
 Deno.test("an active subscription is Pro until it expires", () => {
-  const decision = decide(monthly, USER, NOW);
+  const decision = decide(monthly, NOW);
   assert(decision.ok);
   assertEquals(decision.update, {
     plan: "pro", source: "app_store", expires_at: new Date(NOW + 30 * DAY).toISOString(),
@@ -36,25 +37,20 @@ Deno.test("an active subscription is Pro until it expires", () => {
 });
 
 Deno.test("expired, refunded or revoked is Basic; a billing grace period keeps Pro", () => {
-  const expired = decide({ ...monthly, expiresDate: NOW - DAY }, USER, NOW);
+  const expired = decide({ ...monthly, expiresDate: NOW - DAY }, NOW);
   assert(expired.ok && expired.update.plan === "basic");
-  const refunded = decide({ ...monthly, revocationDate: NOW - 60_000 }, USER, NOW);
+  const refunded = decide({ ...monthly, revocationDate: NOW - 60_000 }, NOW);
   assert(refunded.ok && refunded.update.plan === "basic" && refunded.update.revoked_at !== null);
-  const grace = decide({ ...monthly, expiresDate: NOW - DAY }, USER, NOW, NOW + 3 * DAY);
+  const grace = decide({ ...monthly, expiresDate: NOW - DAY }, NOW, NOW + 3 * DAY);
   assert(grace.ok && grace.update.plan === "pro");
   assertEquals(grace.ok && grace.update.expires_at, new Date(NOW + 3 * DAY).toISOString());
 });
 
-Deno.test("only Murmur Pro, and only for the account it was bought for", () => {
-  assertEquals(decide({ ...monthly, productId: "com.other.app.pro" }, USER, NOW),
+Deno.test("only a Murmur Pro transaction decides anything", () => {
+  assertEquals(decide({ ...monthly, productId: "com.other.app.pro" }, NOW),
     { ok: false, status: 400, error: "unknown_product" });
-  assertEquals(decide({ ...monthly, originalTransactionId: undefined }, USER, NOW),
+  assertEquals(decide({ ...monthly, originalTransactionId: undefined }, NOW),
     { ok: false, status: 400, error: "invalid_transaction" });
-  assertEquals(decide(monthly, OTHER, NOW), { ok: false, status: 409, error: "other_account" });
-  // A token in capitals is the same account.
-  assert(decide({ ...monthly, appAccountToken: USER.toUpperCase() }, USER, NOW).ok);
-  // Without a token (bought before Murmur set one), the subscription isn't tied to an account yet.
-  assert(decide({ ...monthly, appAccountToken: undefined }, OTHER, NOW).ok);
 });
 
 /** Hands back `transaction` for any JWS, or throws like an unverifiable one. */
@@ -69,8 +65,13 @@ function fakeVerifier(transaction: TransactionInfo | Error, notification?: Recor
   };
 }
 
+/**
+ * `owner`: the account whose entitlement holds the subscription. `kinds`: what became of an
+ * account (a member unless said otherwise). `steps` records the writes in order.
+ */
 function purchaseHandler(options: {
   transaction?: TransactionInfo | Error; owner?: string | null; caller?: string | null;
+  kinds?: Record<string, AccountKind>; steps?: string[]; asked?: string[];
   applied?: [string, EntitlementUpdate][];
 } = {}) {
   return createPurchaseHandler({
@@ -78,7 +79,16 @@ function purchaseHandler(options: {
       options.caller === null ? null : { userId: options.caller ?? USER, isAnonymous: false }),
     verifier: fakeVerifier(options.transaction ?? monthly),
     ownerOf: () => Promise.resolve(options.owner ?? null),
+    accountKind: (userId) => {
+      options.asked?.push(userId);
+      return Promise.resolve(options.kinds?.[userId] ?? "member");
+    },
+    release: (userId, original) => {
+      options.steps?.push(`release ${userId} ${original}`);
+      return Promise.resolve();
+    },
     apply: (userId, update) => {
+      options.steps?.push(`apply ${userId} ${update.plan}`);
       options.applied?.push([userId, update]);
       return Promise.resolve({ plan: update.plan, on_trial: false, weekly_limit: null });
     },
@@ -91,10 +101,22 @@ const post = (body: unknown) =>
 
 Deno.test("a verified purchase grants Pro and answers with the quota", async () => {
   const applied: [string, EntitlementUpdate][] = [];
-  const response = await purchaseHandler({ applied })(post({ transaction: "jws" }));
+  const asked: string[] = [];
+  const response = await purchaseHandler({ applied, asked })(post({ transaction: "jws" }));
   assertEquals(response.status, 200);
   assertEquals(await response.json(), { plan: "pro", on_trial: false, weekly_limit: null });
   assertEquals(applied.map(([user, update]) => [user, update.plan]), [[USER, "pro"]]);
+  // A token in capitals is the same account, and one's own subscription needs no looking up.
+  const capitals = await purchaseHandler({ transaction: { ...monthly, appAccountToken: USER.toUpperCase() }, asked })(
+    post({ transaction: "jws" }),
+  );
+  assertEquals(capitals.status, 200);
+  // Without a token (bought before Murmur set one) and with no holder, it isn't tied to anyone yet.
+  const untied = await purchaseHandler({ caller: OTHER, transaction: { ...monthly, appAccountToken: undefined }, asked })(
+    post({ transaction: "jws" }),
+  );
+  assertEquals(untied.status, 200);
+  assertEquals(asked, []);
 });
 
 Deno.test("the purchase endpoint refuses what it can't trust", async () => {
@@ -102,18 +124,65 @@ Deno.test("the purchase endpoint refuses what it can't trust", async () => {
   assertEquals((await purchaseHandler()(post({ nope: 1 }))).status, 400);
   const unverified = await purchaseHandler()(post({ transaction: "bad" }));
   assertEquals([unverified.status, (await unverified.json()).error], [400, "invalid_transaction"]);
-  const taken = await purchaseHandler({ owner: OTHER })(post({ transaction: "jws" }));
+});
+
+Deno.test("a subscription stays with another account that can still be signed in to", async () => {
+  const steps: string[] = [];
+  // Held by another member's entitlement.
+  const taken = await purchaseHandler({ owner: OTHER, steps })(post({ transaction: "jws" }));
   assertEquals([taken.status, (await taken.json()).error], [409, "other_account"]);
-  const elsewhere = await purchaseHandler({ caller: OTHER })(post({ transaction: "jws" }));
-  assertEquals(elsewhere.status, 409);
+  // Held by nobody yet, but bought for another member.
+  const elsewhere = await purchaseHandler({ caller: OTHER, steps })(post({ transaction: "jws" }));
+  assertEquals([elsewhere.status, (await elsewhere.json()).error], [409, "other_account"]);
+  assertEquals(steps, []);
+});
+
+Deno.test("one tied to a guest's account moves to the account that shows its transaction", async () => {
+  // Bought as a guest, who then signed in: the guest's account can't be reached again.
+  const steps: string[] = [];
+  const guestToken = { ...monthly, appAccountToken: OTHER };
+  const moved = await purchaseHandler({ owner: OTHER, kinds: { [OTHER]: "guest" }, transaction: guestToken, steps })(
+    post({ transaction: "jws" }),
+  );
+  assertEquals(moved.status, 200);
+  assertEquals((await moved.json()).plan, "pro");
+  // Released first: the table allows a subscription on one account only.
+  assertEquals(steps, [`release ${OTHER} 2000000123456789`, `apply ${USER} pro`]);
+
+  // The guest's purchase never reached the server: nothing to release.
+  const unrecorded: string[] = [];
+  const first = await purchaseHandler({ kinds: { [OTHER]: "guest" }, transaction: guestToken, steps: unrecorded })(
+    post({ transaction: "jws" }),
+  );
+  assertEquals(first.status, 200);
+  assertEquals(unrecorded, [`apply ${USER} pro`]);
+});
+
+Deno.test("one bought for an account that was deleted since goes to the caller", async () => {
+  const steps: string[] = [];
+  const asked: string[] = [];
+  const response = await purchaseHandler({
+    kinds: { [OTHER]: "gone" }, transaction: { ...monthly, appAccountToken: OTHER.toUpperCase() }, steps, asked,
+  })(post({ transaction: "jws" }));
+  assertEquals(response.status, 200);
+  assertEquals(steps, [`apply ${USER} pro`]);
+  assertEquals(asked, [OTHER]);
+  // A token that isn't an account id ties it to nobody.
+  const odd = await purchaseHandler({ transaction: { ...monthly, appAccountToken: "not-a-uuid" }, asked })(
+    post({ transaction: "jws" }),
+  );
+  assertEquals(odd.status, 200);
+  assertEquals(asked, [OTHER]);
 });
 
 function notificationHandler(notification: Record<string, unknown>, transaction: TransactionInfo,
-                             applied: [string, EntitlementUpdate][], owner: string | null = null) {
+                             applied: [string, EntitlementUpdate][], owner: string | null = null,
+                             failure?: unknown) {
   return createNotificationHandler({
     verifier: fakeVerifier(transaction, notification),
     ownerOf: () => Promise.resolve(owner),
     apply: (userId, update) => {
+      if (failure) return Promise.reject(failure);
       applied.push([userId, update]);
       return Promise.resolve({});
     },
@@ -133,6 +202,14 @@ Deno.test("a renewal or a refund reaches the account the subscription was bought
   assertEquals(applied.map(([user, update]) => [user, update.plan]), [[USER, "pro"], [USER, "basic"]]);
 });
 
+Deno.test("once a subscription has moved, its renewals reach the account that holds it", async () => {
+  const applied: [string, EntitlementUpdate][] = [];
+  const renewal = { notificationType: "DID_RENEW", data: { signedTransactionInfo: "t" } };
+  // Bought for USER (the token never changes), held by OTHER since.
+  assertEquals((await notificationHandler(renewal, monthly, applied, OTHER)(notify("n"))).status, 200);
+  assertEquals(applied.map(([user, update]) => [user, update.plan]), [[OTHER, "pro"]]);
+});
+
 Deno.test("without a token the subscription's owner is looked up; unknown ones are acknowledged", async () => {
   const applied: [string, EntitlementUpdate][] = [];
   const expired = { notificationType: "EXPIRED", data: { signedTransactionInfo: "t" } };
@@ -142,6 +219,18 @@ Deno.test("without a token the subscription's owner is looked up; unknown ones a
   const unmatched = await notificationHandler(expired, anonymous, applied, null)(notify("n"));
   assertEquals(unmatched.status, 200);
   assertEquals(applied.length, 1);
+});
+
+Deno.test("a notification for a deleted account is acknowledged; a database failure is retried", async () => {
+  const applied: [string, EntitlementUpdate][] = [];
+  const renewal = { notificationType: "DID_RENEW", data: { signedTransactionInfo: "t" } };
+  // Postgres refuses the row: the account it was bought for is gone, and retrying can't help.
+  const gone = await notificationHandler(renewal, monthly, applied, null, { code: "23503", message: "fk" })(notify("n"));
+  assertEquals(gone.status, 200);
+  // Anything else is Apple's to send again.
+  const outage = await notificationHandler(renewal, monthly, applied, null, new Error("connection reset"))(notify("n"));
+  assertEquals(outage.status, 503);
+  assertEquals(applied.length, 0);
 });
 
 Deno.test("a test notification is fine and an unverifiable one is refused", async () => {

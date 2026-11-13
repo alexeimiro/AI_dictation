@@ -194,13 +194,15 @@ enum OnboardingCopy {
         // The two options are the consent's wording (`DataChoiceDecision.currentPolicyVersion`).
         static let improveTitle = "Improve Murmur for everyone"
         static let improveDetail = "To make Murmur better, this option lets us review your transcripts and edits to improve transcription and cleanup."
-        static let privateTitle = "Don’t share data"
-        static let privateDetail = "Your dictations are only used to write your text, never for training by us or anyone else."
+        // Not "Don't share data": a dictation still goes to the AI services that write it, which
+        // "Before Murmur listens" (`AIConsentCopy`) asks about. This choice is about Murmur's team.
+        static let privateTitle = "Don’t review my dictations"
+        static let privateDetail = "Nobody at Murmur reads your transcripts. They go only to the AI services that write your text, which don’t train on them."
     }
 
     enum Languages {
         static let title = "Confirm your language"
-        static let line = "We picked this from your keyboard. Add or remove languages if needed."
+        static let line = "We picked this from your iPhone’s languages. Add or remove languages if needed."
         static let edit = "Edit"
         static let pickerTitle = "Languages"
         static let pickerLine = "Murmur dictates in up to two languages and switches between them from the keyboard."

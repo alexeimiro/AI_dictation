@@ -1,8 +1,8 @@
 // POST /functions/v1/app-store-notifications (no auth: Apple signs the payload)
 // App Store Server Notifications V2, set as the app's Production and Sandbox URL in App Store
 // Connect. Renewals, expiries, billing grace periods, refunds and revocations update the account
-// the subscription was bought for (its appAccountToken, else its original transaction). The
-// handler is _shared/app_store.ts.
+// that holds the subscription (by its original transaction), else the one it was bought for (its
+// appAccountToken). The handler is _shared/app_store.ts.
 //   200 { ok: true } once handled or when there's nothing to do · 400 invalid_notification
 //   503 unavailable: the database failed, and Apple retries
 // Env: APP_STORE_SANDBOX=0 refuses Sandbox notifications.

@@ -1,17 +1,26 @@
 // POST /functions/v1/transcribe
 // Turns a dictation's audio into text with OpenAI. The audio is passed through, never stored.
 // Body: { dictationId?, audio (base64), format: "m4a" | "wav", language? (BCP-47), keywords? }.
+// Header x-murmur-dictation: <dictationId> vouches that the id is the dictation's own; its words
+// then count toward the free plan's week (`transcriptUsage`). Without it nothing is counted here.
 // Responses:
-//   200 { text, languages, model, totalMs, timings }
-//       `totalMs` is the OpenAI call alone; `timings` splits the whole request (_shared/timing.ts).
+//   200 { text, languages, model, words, remaining, totalMs, timings }
+//       `words` is what was counted (0 when nothing was) and `remaining` the free plan's words left
+//       after it (null when unlimited or unknown). `totalMs` is the OpenAI call alone; `timings`
+//       splits the whole request (_shared/timing.ts).
 //   400 bad_request · 401 unauthorized · 402 limit_reached · 429 rate_limited
 //   502/503 transcription_unavailable → the app falls back to on-device recognition if it can.
 // Env: OPENAI_API_KEY (required), TRANSCRIBE_MODEL (default gpt-transcribe),
 // TRANSCRIBE_DEADLINE_MS (whole OpenAI call, default 20000), TRANSCRIBE_DISABLED=1.
 import { transcribeConfig } from "../_shared/config.ts";
-import { adminClient, authenticate, clientInfo, corsHeaders, json } from "../_shared/http.ts";
+import { adminClient, authenticate, background, clientInfo, corsHeaders, json } from "../_shared/http.ts";
 import { beginRequest, Phases } from "../_shared/timing.ts";
-import { OpenAIError, parseTranscribeRequest, transcribeWithOpenAI } from "../_shared/transcribe.ts";
+import {
+  OpenAIError,
+  parseTranscribeRequest,
+  transcribeWithOpenAI,
+  transcriptUsage,
+} from "../_shared/transcribe.ts";
 
 const admin = adminClient();
 /** The deadline must stay below the app's request timeout (25 s). */
@@ -48,8 +57,7 @@ Deno.serve(async (request) => {
   if (limitError) console.error("rate limit check failed", limitError);
   else if (withinLimit !== true) return json({ error: "rate_limited" }, 429);
 
-  // The free plan's weekly words are counted by `cleanup`; once they're used up, stop paying for
-  // transcription too.
+  // Once the free plan's weekly words are used up, stop paying for transcription.
   const { data: quota, error: quotaError } = await phases.mark("preflightMs", admin
     .rpc("quota_status", { p_user: caller.userId })
     .single<Quota>());
@@ -69,6 +77,16 @@ Deno.serve(async (request) => {
   try {
     const result = await phases.mark("transcribeMs", transcribeWithOpenAI(body, { apiKey, model, deadlineMs }));
     const totalMs = Date.now() - started;
+    const usage = transcriptUsage(body, request.headers.get("x-murmur-dictation"), result);
+    if (usage) {
+      background(admin.rpc("record_usage", {
+        p_user: caller.userId,
+        p_dictation: usage.dictationId,
+        p_words: usage.words,
+      }));
+    }
+    const words = usage?.words ?? 0;
+    const left = quota?.remaining ?? null;
     const timings = phases.toJSON();
     console.log(JSON.stringify({
       event: "transcribe",
@@ -79,13 +97,22 @@ Deno.serve(async (request) => {
       detected: result.languages,
       keywords: body.keywords.length,
       outChars: result.text.length,
+      outWords: words,
       isAnonymous: caller.isAnonymous,
       totalMs,
       ...worker,
       client: clientInfo(request),
       timings,
     }));
-    return json({ text: result.text, languages: result.languages, model, totalMs, timings });
+    return json({
+      text: result.text,
+      languages: result.languages,
+      model,
+      words,
+      remaining: left === null ? null : Math.max(0, left - words),
+      totalMs,
+      timings,
+    });
   } catch (error) {
     if (error instanceof OpenAIError) console.error(error.message);
     else console.error("transcription failed", error instanceof Error ? error.name : String(error));

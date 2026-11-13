@@ -17,14 +17,17 @@ private final class FakeCloud: CloudTranscribing {
     private(set) var calls: [(audio: Data, format: EncodedAudio.Format, language: String?, keywords: [String])] = []
     /// Each call's `languageHints`.
     private(set) var hints: [[String]] = []
+    /// The dictation each call named; nil for one that named none.
+    private(set) var dictationIds: [UUID?] = []
     /// When the last request answered.
     private(set) var answeredAt: ContinuousClock.Instant?
     private var held: [CheckedContinuation<Void, Never>] = []
 
     func transcribe(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
-                    keywords: [String]) async throws(CloudTranscriptionError) -> CloudTranscript {
+                    keywords: [String], dictationId: UUID?) async throws(CloudTranscriptionError) -> CloudTranscript {
         calls.append((audio, format, language, keywords))
         hints.append(languageHints)
+        dictationIds.append(dictationId)
         if holdsRequests { await withCheckedContinuation { held.append($0) } }
         answeredAt = .now
         return CloudTranscript(text: try result.get(), languages: languages, timing: timing)
@@ -233,6 +236,35 @@ struct OpenAITranscriberTests {
         #expect(output.modelReply == nil)
         #expect(dictate.calls.isEmpty)
         #expect(cloud.calls.count == 1)
+    }
+
+    /// The server counts a transcript's words under the dictation's own id, so `transcribe` is told
+    /// it: by the pipeline for Word for word, by the model request when `dictate` can't take it.
+    @Test func transcribeIsToldWhichDictationItIs() async throws {
+        let cloud = FakeCloud()
+        let dictate = FakeDictate()
+        dictate.isAvailable = false
+        let transcriber = OpenAITranscriber(client: cloud, dictation: dictate)
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+
+        let wordForWord = UUID()
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        _ = try await transcriber.finishUtterance(model: nil, dictationId: wordForWord)
+
+        let request = translation()
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        _ = try await transcriber.finishUtterance(model: request)
+
+        // Audio that belongs to no dictation names none, and isn't counted.
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        _ = try await transcriber.finishUtterance()
+
+        #expect(cloud.dictationIds == [wordForWord, request.dictationId, nil])
+        #expect(TranscriptionClient.headers(naming: wordForWord) == ["x-murmur-dictation": wordForWord.uuidString])
+        #expect(TranscriptionClient.headers(naming: nil).isEmpty)
     }
 
     /// Under Auto-detect OpenAI picks the language and says which, so the pipeline can format,

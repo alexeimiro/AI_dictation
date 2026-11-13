@@ -1,6 +1,6 @@
 # Murmur Privacy Policy
 
-Effective November 9, 2026
+Effective November 12, 2026
 
 Murmur is a voice keyboard for iPhone made by OKNENOR L.L.C-FZ ("we"). This policy explains what
 Murmur collects, why, and the choices you have. Questions: miralex13@gmail.com.
@@ -14,10 +14,13 @@ Murmur collects, why, and the choices you have. Questions: miralex13@gmail.com.
 ## What we collect and why
 
 - **Your account:** your email address (or the private relay address Sign in with Apple gives
-  us) and an account ID. They let you sign in and keep your plan and library on every device.
-- **Your recordings, to transcribe them:** when you dictate, the audio goes from the Murmur app
-  to our server and on to OpenAI, which turns it into text. If you use Improve my grammar or
-  translation, the text goes to Anthropic, whose Claude model writes it. Our server doesn't keep
+  us), your name if Apple or Google passes it on, and an account ID. They let you sign in and keep
+  your plan and library on every device.
+- **Your recordings and their text, to write what you say:** when you dictate, the audio goes
+  from the Murmur app to our server and on to OpenAI, which turns it into text. When that text
+  needs tidying or translating, it goes to Anthropic, whose Claude model rewrites it. Murmur asks
+  for your permission before the first recording is sent, and you can take it back in Settings ›
+  Data and privacy (Murmur then stops listening until you allow it again). Our server doesn't keep
   the audio or the text. OpenAI and Anthropic process them to return the result. Under their API
   terms neither uses them to train its models, and each may keep them for a limited time to detect
   abuse (OpenAI for up to 30 days).
@@ -30,7 +33,8 @@ Murmur collects, why, and the choices you have. Questions: miralex13@gmail.com.
 - **Purchases:** if you subscribe to Murmur Pro, Apple tells us which plan you bought and when it
   renews, expires or is refunded, so we can grant Pro. We never see your payment details.
 - **Your answers during setup:** what you plan to use Murmur for, how you heard about it, your
-  languages and default style, and your data-sharing choice.
+  languages and default style, your data-sharing choice and, if you ask for the link to Murmur for
+  Mac and PC, the email address to send it to.
 - **Feedback and support messages:** what you write to us, with the app version, iOS version,
   device model and language, to look into the problem. When you rate a dictation and have turned
   on "Improve Murmur for everyone", the rating can include that dictation's text.
@@ -41,7 +45,7 @@ We don't track you across apps and websites, show ads, or sell or rent your data
 
 - **Supabase** hosts our server, database and sign-in, in the European Union (Frankfurt).
 - **OpenAI** transcribes dictations.
-- **Anthropic** corrects and translates them (Improve my grammar and translation).
+- **Anthropic** tidies and translates the text of dictations.
 - **Apple** handles Sign in with Apple and App Store purchases. **Google** handles Sign in with
   Google.
 

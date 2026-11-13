@@ -72,8 +72,10 @@ protocol CloudTranscribing: AnyObject, Sendable {
     var isConfigured: Bool { get }
     /// `language`: BCP-47 tag of the dictation, nil to detect it; `languageHints`: then, the
     /// user's languages (BCP-47) to detect it among, none for any; `keywords`: personal dictionary terms.
+    /// `dictationId`: the dictation's `requestId`, under which the server counts its words, once
+    /// with what `cleanup` reports for it; nil for audio that belongs to no dictation.
     func transcribe(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
-                    keywords: [String]) async throws(CloudTranscriptionError) -> CloudTranscript
+                    keywords: [String], dictationId: UUID?) async throws(CloudTranscriptionError) -> CloudTranscript
 }
 
 /// Calls the `transcribe` Edge Function, which passes the audio to OpenAI. The OpenAI key lives
@@ -106,18 +108,25 @@ final class TranscriptionClient: CloudTranscribing {
     var isConfigured: Bool { functions != nil }
 
     func transcribe(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
-                    keywords: [String]) async throws(CloudTranscriptionError) -> CloudTranscript {
+                    keywords: [String], dictationId: UUID?) async throws(CloudTranscriptionError) -> CloudTranscript {
         guard let functions else { throw .notConfigured }
         let body = RequestBody(
-            dictationId: UUID(), audio: audio.base64EncodedString(), format: format.rawValue,
+            dictationId: dictationId ?? UUID(), audio: audio.base64EncodedString(), format: format.rawValue,
             language: language, languages: language == nil && !languageHints.isEmpty ? languageHints : nil,
             keywords: Array(keywords.prefix(100)))
         do {
-            let reply = try await functions.post("transcribe", body: body, timeout: timeout)
+            let reply = try await functions.post(
+                "transcribe", body: body, extraHeaders: Self.headers(naming: dictationId), timeout: timeout)
             let response = try JSONDecoder().decode(Response.self, from: reply.data)
             return CloudTranscript(text: response.text, languages: response.languages ?? [], timing: reply.timing)
         } catch {
             throw CloudTranscriptionError(error)
         }
+    }
+
+    /// The header that vouches the body's id is the dictation's own, as `dictate` sends it. Only
+    /// then does the function count the transcript's words; a made-up id goes without it.
+    static func headers(naming dictationId: UUID?) -> [String: String] {
+        dictationId.map { ["x-murmur-dictation": $0.uuidString] } ?? [:]
     }
 }

@@ -48,6 +48,9 @@ final class AppModel {
     var quota: AccountService.Quota?
     /// "Improve Murmur for everyone": onboarding's data choice, as Settings changed it since.
     private(set) var dataSharing = false
+    /// The user's OK to send recordings to the AI services that write them. The session asks for
+    /// it before it turns the microphone on.
+    let aiConsent: AIConsent
     /// Murmur Pro on the App Store.
     let pro: ProStore
     /// Murmur Pro's plans are on screen.
@@ -116,11 +119,13 @@ final class AppModel {
         let timingsLog = TimingsLog()
         self.timingsLog = timingsLog
         let dictate = DictateClient(functions: functions)
+        let aiConsent = Self.makeAIConsent(launchOptions: launchOptions)
+        self.aiConsent = aiConsent
         let session = SessionController(transport: transport, pipeline: pipeline, assets: assets, history: practiceBuffer,
                                         recordings: history.recordings,
                                         transcription: TranscriptionClient(functions: functions), dictate: dictate,
                                         warmup: backend.map { BackendWarmup(session: $0, dictate: dictate) },
-                                        timingsLog: timingsLog)
+                                        timingsLog: timingsLog, consent: { await aiConsent.ensure() })
         self.session = session
         noteDictation = NoteDictation(session: session, library: library)
         self.languages = LanguageSettingsModel(assets: assets, session: session)
@@ -183,6 +188,25 @@ final class AppModel {
         LiveActivityActions.model = self
         // Learns whether iOS's Low Data Mode is on before the first dictation.
         _ = NetworkConditions.shared
+        #if DEBUG
+        // Screenshots (`-ai-consent show`): the question itself, over whatever else the launch opens.
+        if launchOptions.showsAIConsent {
+            Task {
+                while UIApplication.shared.applicationState != .active {
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+                _ = await AIConsentPrompt.ask()
+            }
+        }
+        #endif
+    }
+
+    /// The kept answer to "Before Murmur listens". A run on fake services sends no recording
+    /// anywhere and mustn't stop to ask, unless it is there to show the question (`-ai-consent`);
+    /// either way it keeps nothing.
+    private static func makeAIConsent(launchOptions: LaunchOptions) -> AIConsent {
+        guard launchOptions.useFixtures || launchOptions.usesOnboardingFixtures else { return AIConsent() }
+        return launchOptions.asksAIConsent ? AIConsent(settings: nil) : .allowedForFixtures()
     }
 
     /// The configured backend; in screenshot runs with `-account-state` (DEBUG), one faking it.
@@ -367,6 +391,17 @@ final class AppModel {
         }
     }
 
+    /// Settings' "Write with AI services". Off turns the microphone off, so nothing more is sent;
+    /// the next start asks again.
+    func setAIConsent(_ allowed: Bool) {
+        if allowed {
+            aiConsent.grant()
+        } else {
+            aiConsent.withdraw()
+            session.stop()
+        }
+    }
+
     func refreshQuota() {
         guard !launchOptions.useFixtures, launchOptions.accountState == nil, onboarding.isComplete else { return }
         Task {
@@ -413,6 +448,8 @@ final class AppModel {
 
     private func resetAfterAccountEnded() {
         session.stop()
+        // Whoever uses this iPhone next is asked for themselves.
+        aiConsent.withdraw()
         // Before the library goes: what's deleted here stays in the account.
         librarySync?.reset()
         styleSync?.reset()
@@ -431,6 +468,8 @@ final class AppModel {
     /// Re-runs the cleanup on a stored transcript. Returns a message when it failed.
     func regenerate(_ id: UUID) async -> String? {
         guard let transcript = history.snapshot(id) else { return "Transcript not found" }
+        // The transcript goes to the AI service again, which needs the same OK as a dictation.
+        guard await aiConsent.ensure() else { return SessionController.SessionError.aiNotAllowed.localizedDescription }
         do {
             let updated = try await pipeline.recleanup(transcript)
             history.upsert(updated)
@@ -711,6 +750,10 @@ enum LaunchRoute: String {
 /// Other states (screenshots, DEBUG builds only, with `-fixtures`): `-quota-fixture
 /// trial|basic|limit|pro` picks the plan, `-history-fixture empty` leaves the history empty and
 /// `-library-fixture empty` leaves out the words, snippets and notes.
+///
+/// The AI question (UI tests and screenshots, DEBUG builds only): a run on fake services is
+/// allowed without asking; `-ai-consent` has it ask "Before Murmur listens" when a real run would,
+/// and `-ai-consent show` puts the question over the launch. Neither keeps the answer.
 struct LaunchOptions: Equatable {
     var route: LaunchRoute?
     var useFixtures = false
@@ -726,6 +769,8 @@ struct LaunchOptions: Equatable {
     var quotaFixture: AccountService.Quota?
     var emptyHistory = false
     var emptyLibrary = false
+    var asksAIConsent = false
+    var showsAIConsent = false
 
     init(arguments: [String]) {
         route = LaunchRoute(arguments: arguments)
@@ -746,6 +791,8 @@ struct LaunchOptions: Equatable {
         quotaFixture = Self.value(after: "-quota-fixture", in: arguments).flatMap(AccountService.Quota.fixture(named:))
         emptyHistory = Self.value(after: "-history-fixture", in: arguments) == "empty"
         emptyLibrary = Self.value(after: "-library-fixture", in: arguments) == "empty"
+        asksAIConsent = arguments.contains("-ai-consent")
+        showsAIConsent = Self.value(after: "-ai-consent", in: arguments) == "show"
         #endif
     }
 

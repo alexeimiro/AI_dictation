@@ -129,6 +129,8 @@ struct MicrophonePrimerView: View {
             requesting = true
             Task {
                 defer { requesting = false }
+                // Where a recording goes comes before the system's question about the microphone.
+                guard await model.aiConsent.ensure() else { return }
                 // The reducer moves on when the answer is "granted".
                 _ = await model.requestMicrophone()
             }

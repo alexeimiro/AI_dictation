@@ -33,28 +33,6 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>LSApplicationQueriesSchemes</key>
-	<array>
-		<string>mobilenotes</string>
-		<string>sms</string>
-		<string>message</string>
-		<string>whatsapp</string>
-		<string>tg</string>
-		<string>fb-messenger</string>
-		<string>slack</string>
-		<string>msteams</string>
-		<string>discord</string>
-		<string>notion</string>
-		<string>obsidian</string>
-		<string>bear</string>
-		<string>evernote</string>
-		<string>googlegmail</string>
-		<string>ms-outlook</string>
-		<string>linkedin</string>
-		<string>chatgpt</string>
-		<string>claude</string>
-		<string>perplexity-app</string>
-	</array>
 	<key>MurmurAppGroupID</key>
 	<string>$(MURMUR_APP_GROUP)</string>
 	<key>MurmurInviteURL</key>

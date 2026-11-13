@@ -16,11 +16,11 @@ final class OnboardingServices {
     let offers: any OfferProviding
     let notifications: any NotificationAuthorizing
     let profile: any ProfileSyncing
-    let languages: any KeyboardLanguageProviding
+    let languages: any DictationLanguageProviding
 
     init(auth: any OnboardingAuthenticating, offers: any OfferProviding,
          notifications: any NotificationAuthorizing, profile: any ProfileSyncing,
-         languages: any KeyboardLanguageProviding) {
+         languages: any DictationLanguageProviding) {
         self.auth = auth
         self.offers = offers
         self.notifications = notifications
@@ -34,7 +34,7 @@ final class OnboardingServices {
             offers: SupabaseOfferProvider(backend: backend),
             notifications: SystemNotificationAuthorizer(),
             profile: SupabaseProfileSync(backend: backend),
-            languages: SystemKeyboardLanguages())
+            languages: SystemDictationLanguages())
     }
 
     /// `offer: nil` behaves like a server that can't be reached. `account`: a faked one
@@ -410,22 +410,23 @@ final class SupabaseProfileSync: ProfileSyncing {
 // MARK: - Languages
 
 @MainActor
-protocol KeyboardLanguageProviding: AnyObject {
-    /// The iPhone's enabled keyboard languages that on-device recognition supports, as BCP-47
-    /// tags; at most two, because Murmur dictates in a primary and a secondary language.
+protocol DictationLanguageProviding: AnyObject {
+    /// The iPhone's own languages that on-device recognition supports, as BCP-47 tags; at most
+    /// two, because Murmur dictates in a primary and a secondary language.
     func detectedLanguages() async -> [String]
     /// Every language the recognizers support, for Edit.
     func availableLanguages() async -> [DictationLanguage]
 }
 
+/// From the iPhone's preferred languages (Settings › General › Language & Region). Not from its
+/// keyboards: what `UITextInputMode.activeInputModes` says, or anything worked out from it, may
+/// not leave the iPhone (a required-reason API), and these languages go to the profile.
 @MainActor
-final class SystemKeyboardLanguages: KeyboardLanguageProviding {
+final class SystemDictationLanguages: DictationLanguageProviding {
     func detectedLanguages() async -> [String] {
         var tags: [String] = []
-        let keyboards = UITextInputMode.activeInputModes.compactMap(\.primaryLanguage)
-        for identifier in keyboards + Locale.preferredLanguages {
-            guard !["emoji", "dictation", "mul"].contains(identifier),
-                  let tag = await LanguageResolver.supportedTag(equivalentTo: identifier),
+        for identifier in Locale.preferredLanguages {
+            guard let tag = await LanguageResolver.supportedTag(equivalentTo: identifier),
                   !tags.contains(where: { DictationLanguage(tag: $0).languageCode == DictationLanguage(tag: tag).languageCode })
             else { continue }
             tags.append(tag)
@@ -496,7 +497,7 @@ final class FixtureProfileSync: ProfileSyncing {
 }
 
 @MainActor
-final class FixtureLanguages: KeyboardLanguageProviding {
+final class FixtureLanguages: DictationLanguageProviding {
     func detectedLanguages() async -> [String] { ["en-US", "ru-RU"] }
 
     func availableLanguages() async -> [DictationLanguage] {

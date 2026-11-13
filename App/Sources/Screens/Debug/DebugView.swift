@@ -1,8 +1,10 @@
+#if DEBUG
 import MurmurCore
 import MurmurUI
 import SwiftUI
 
-/// Engine override, a test field, latency percentiles and housekeeping.
+/// Engine override, a test field, latency percentiles and housekeeping. Development builds only:
+/// a release build has neither this screen nor its row in Settings.
 struct DebugView: View {
     @Environment(AppModel.self) private var model
     @State private var testText = ""
@@ -35,14 +37,12 @@ struct DebugView: View {
                     Text("Recognizer changes apply the next time the session starts. On-device languages are the primary and secondary models the fallback uses.")
                 }
                 Section {
-                    Toggle("Return to the app automatically", isOn: $settings.autoReturn)
-                    Toggle("Keep the screen on while dictating", isOn: $settings.keepScreenAwake)
                     LabeledContent("Last time", value: model.hostReturn.lastOutcome
                         ?? (model.hostReturn.isAvailable ? "—" : "Not available on this iOS"))
                 } header: {
                     Text("After the keyboard opens Murmur")
                 } footer: {
-                    Text("Murmur learns which app you were typing in from a part of iOS that isn't public, and reopens it. Turn this off to always swipe back yourself.")
+                    Text("What happened the last time Murmur tried to go back to the app you were typing in. The switch is in Settings › Keyboard.")
                 }
                 Section {
                     TextField("Tap here, switch to the Murmur keyboard, and dictate", text: $testText, axis: .vertical)
@@ -217,3 +217,4 @@ struct DebugView: View {
         String(format: "%.1f MB", Double(bytes) / 1_048_576)
     }
 }
+#endif

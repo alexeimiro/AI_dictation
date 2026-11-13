@@ -90,7 +90,7 @@ final class DictationPipeline {
             : nil
         let output: UtteranceOutput
         do {
-            output = try await transcriber.finishUtterance(model: request)
+            output = try await transcriber.finishUtterance(model: request, dictationId: dictation.requestId)
         } catch {
             logger.error("Transcription failed: \(error.localizedDescription, privacy: .public)")
             let utterance = (transcriber as? UtteranceTimingProviding)?.takeTimings()
