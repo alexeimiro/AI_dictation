@@ -516,6 +516,28 @@ Deno.test("Improve my grammar in audio mode: the transcript and its cleanup in o
   assertEquals([line.model, line.effort, line.style, line.targetLanguageTag], ["gpt-6.1-terra", "none", "grammar", null]);
 });
 
+Deno.test("Professional, Casual and Concise are written in audio mode too, each under its own style line", async () => {
+  const styles: Array<[string, string]> = [["professional", "Professional"], ["chat", "Casual:"], ["concise", "Concise:"]];
+  for (const [style, label] of styles) {
+    const written = "Мне нужен этот отчёт до пятницы.";
+    const { handler, recorded } = setup({
+      env: { CLEANUP_MODEL: "gpt-6.1-terra", TRANSLATE_MODEL: "gpt-6-luna" },
+      transcription: () => Response.json({ text: "слушай короче мне нужен этот отчёт до пятницы ок", languages: [{ code: "ru" }] }),
+      responses: () => Response.json(responsesReply(written)),
+    });
+    const response = await handler(audioRequest({ ...metadata, targetLanguage: undefined, style }));
+    assertEquals(response.status, 200, style);
+    const reply = await response.json();
+    assertEquals([reply.status, reply.text, reply.targetLanguage], ["cleaned", written, null], style);
+    assertEquals(paths(recorded), ["/v1/audio/transcriptions", "/v1/responses"], style);
+    // The cleanup model with the cleanup rules, as Improve my grammar runs.
+    const prompt = recorded.fetches[1].json!;
+    assertEquals([prompt.model, prompt.prompt_cache_key], ["gpt-6.1-terra", "murmur-cleanup-ru"], style);
+    assertStringIncludes(prompt.instructions as string, `Style: ${label}`, style);
+    assertEquals(recorded.logs[0].style, style);
+  }
+});
+
 Deno.test("Improve my grammar leaves three words or fewer as heard, with no model call", async () => {
   const { handler, recorded } = setup({ transcription: () => Response.json({ text: "Спасибо, увидимся вечером.", languages: [{ code: "ru" }] }) });
   const reply = await (await handler(audioRequest({ ...metadata, targetLanguage: undefined, style: "grammar" }))).json();
@@ -753,7 +775,7 @@ Deno.test("bad bodies are 400s with no OpenAI call", async () => {
     [new Request(ENDPOINT, { method: "POST", body: withoutMetadata, headers: headersFor({}) }), "metadata part is missing"],
     [new Request(ENDPOINT, { method: "POST", body: audioAsText, headers: headersFor({}) }), "audio must be a file part"],
     [audioRequest("{not json"), "metadata must be JSON"],
-    // Word for word has nothing for the model to write; Improve my grammar needs no target.
+    // Word for word has nothing for the model to write; the styles the model writes need no target.
     [audioRequest({ ...metadata, targetLanguage: undefined, style: "verbatim" }), "targetLanguage is required"],
     [audioRequest({ ...metadata, targetLanguage: undefined, style: undefined }), "targetLanguage is required"],
     [audioRequest({ ...metadata, targetLanguage: "und", style: "verbatim" }), "targetLanguage is required"],

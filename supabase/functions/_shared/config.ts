@@ -70,10 +70,10 @@ export interface DictateConfig {
   /** The same secrets `transcribe` reads. */
   transcribe: TranscribeConfig;
   translation: ModelConfig;
-  /** Improve my grammar in audio mode, as `cleanup` runs it. */
+  /** A style the model writes (Improve my grammar, Professional, …) in audio mode, as `cleanup` runs it. */
   cleanup: ModelConfig;
   /**
-   * Audio mode's bound, from the start of the request: the model call (translation or grammar)
+   * Audio mode's bound, from the start of the request: the model call (translation or style)
    * gets what is left of it (at most its own deadline) and is skipped when under a second remains.
    * Below the app's 30 s.
    */

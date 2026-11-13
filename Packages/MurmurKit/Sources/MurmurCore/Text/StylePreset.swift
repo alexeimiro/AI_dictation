@@ -1,11 +1,19 @@
 import Foundation
 
-/// How a dictation is written: "Your default style" in Settings, and the keyboard's style pill.
+/// How a dictation is written: the Style screen's choice, which the keyboard's style pill
+/// changes too.
 public enum StylePreset: String, Sendable, CaseIterable, Identifiable {
     /// Keeps the speaker's exact words; translations are literal, never rephrased. The default.
     case verbatim
     /// The speaker's words and tone, made grammatically correct.
     case grammar
+    /// Rewritten clear and polite, for work and email.
+    case professional
+    /// Lowercase and relaxed, like a text to a friend. Stored as "chat": "casual" is a style
+    /// removed in November 2026 that old profiles still hold, and it must not come back as this.
+    case casual = "chat"
+    /// The same message in fewer words.
+    case concise
 
     public var id: String { rawValue }
 
@@ -16,18 +24,24 @@ public enum StylePreset: String, Sendable, CaseIterable, Identifiable {
         self = StylePreset(rawValue: rawValue) ?? .verbatim
     }
 
+    /// The model writes the text. Word for word asks it only for what `CleanupGate` finds.
+    public var usesModel: Bool { self != .verbatim }
+
     public var title: String {
         switch self {
         case .verbatim: "Word for word"
         case .grammar: "Improve my grammar"
+        case .professional: "Professional"
+        case .casual: "Casual"
+        case .concise: "Concise"
         }
     }
 
     /// The keyboard pill's label, where "Improve my grammar" doesn't fit.
     public var shortTitle: String {
         switch self {
-        case .verbatim: "Word for word"
         case .grammar: "Grammar"
+        case .verbatim, .professional, .casual, .concise: title
         }
     }
 
@@ -35,6 +49,20 @@ public enum StylePreset: String, Sendable, CaseIterable, Identifiable {
         switch self {
         case .verbatim: "Your exact words, no rephrasing"
         case .grammar: "Fixes grammar, keeps your words"
+        case .professional: "Clear and polite, for work and email"
+        case .casual: "Lowercase and relaxed, like texting"
+        case .concise: "The same message in fewer words"
+        }
+    }
+
+    /// One short line under the title on the keyboard's style page, where `subtitle` doesn't fit.
+    public var hint: String {
+        switch self {
+        case .verbatim: "Your exact words"
+        case .grammar: "Fixes mistakes"
+        case .professional: "For work and email"
+        case .casual: "Like texting"
+        case .concise: "Fewer words"
         }
     }
 }

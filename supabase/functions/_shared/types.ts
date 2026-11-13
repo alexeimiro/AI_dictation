@@ -1,5 +1,13 @@
-/** How a dictation is written: Word for word (the default when a request names none) or Improve my grammar. */
-export type Style = "verbatim" | "grammar";
+/**
+ * How a dictation is written: Word for word (the default when a request names none), or a style
+ * the model writes: Improve my grammar, Professional, Casual ("chat") or Concise.
+ */
+export type Style = "verbatim" | "grammar" | "professional" | "chat" | "concise";
+
+/** The model writes every dictation in this style. Word for word asks it only for what the app's gate finds. */
+export function writesWithModel(style: Style | undefined): boolean {
+  return style !== undefined && style !== "verbatim";
+}
 
 export interface DictionaryEntry {
   term: string;
@@ -33,11 +41,12 @@ export interface CleanupRequest {
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 
-const STYLES: Style[] = ["verbatim", "grammar"];
+const STYLES: Style[] = ["verbatim", "grammar", "professional", "chat", "concise"];
 /**
  * The styles removed in November 2026, which older builds still send ("casual" by default). Each
- * now means Improve my grammar, the closer of the two to the cleanup it asked for; rejecting them
- * would turn every cleanup and translation from those builds into a 400.
+ * now means Improve my grammar, the closest to the cleanup it asked for; rejecting them
+ * would turn every cleanup and translation from those builds into a 400. Today's Casual is
+ * "chat", so that an old build's "casual" doesn't come back in lowercase.
  */
 const LEGACY_STYLES = ["formal", "casual", "veryCasual", "excited"];
 export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -1,5 +1,5 @@
 // The `dictate` function's handler; the contract is in dictate/index.ts. Audio mode transcribes and
-// then translates or improves the grammar on one worker, text mode translates a transcript the app
+// then translates it, or writes it in a style, on one worker; text mode translates a transcript the app
 // already has, and warm mode
 // opens the connections a dictation needs while the user is still speaking. Everything the handler
 // talks to is injected (`DictateDeps`), so the tests drive it offline.
@@ -34,6 +34,7 @@ import {
   type Parsed,
   parseCleanupRequest,
   UUID_PATTERN,
+  writesWithModel,
 } from "./types.ts";
 
 /** A translation request: `cleanup`'s body, with the target it must have here. */
@@ -41,7 +42,7 @@ export type TranslationRequest = CleanupRequest & { targetLanguage: string };
 
 /**
  * Audio mode: what the model writes from the transcript, as `cleanup` takes it (its transcript
- * still to come): a translation, or with no target Improve my grammar. And the transcription as
+ * still to come): a translation, or with no target a style the model writes. And the transcription as
  * `transcribe` takes it.
  */
 export interface AudioBody {
@@ -65,7 +66,7 @@ export interface DictateDeps {
   /** OPENAI_API_KEY. Without it, a request that passes the checks gets 503 and a warm-up skips OpenAI. */
   apiKey: string | undefined;
   /**
-   * ANTHROPIC_API_KEY, for a `claude-` translation or grammar model. Without it, a request that
+   * ANTHROPIC_API_KEY, for a `claude-` translation or cleanup model. Without it, a request that
    * needs that model gets 503 and a warm-up skips Anthropic.
    */
   anthropicApiKey: string | undefined;
@@ -104,7 +105,7 @@ export interface DictateDeps {
 const MAX_BODY_BYTES = TRANSCRIBE_LIMITS.maxAudioBytes;
 /** Audio mode skips the model call when less than this is left of its budget. */
 const MIN_MODEL_MS = 1000;
-/** Improve my grammar leaves a dictation of this many words or fewer as it was heard, as the app does. */
+/** Without a translation, a dictation of this many words or fewer stays as it was heard, as in the app. */
 const SHORT_WORDS = 3;
 /** Each warm-up fetch is bounded by this, below the app's 5 s warm-up timeout. */
 const WARM_FETCH_MS = 3000;
@@ -128,7 +129,7 @@ function settle<T>(work: Promise<T>): Promise<Settled<T>> {
 /**
  * Audio mode's "metadata" part: { dictationId, format: "m4a" | "wav", language: BCP-47 | null,
  * languages?, keywords?, targetLanguage?, style?, dictionary?, snippets? }, with a targetLanguage unless the
- * style is "grammar". `cleanup`'s and `transcribe`'s own validators check it; `audio` is the
+ * style is one the model writes. `cleanup`'s and `transcribe`'s own validators check it; `audio` is the
  * "audio" part's bytes.
  */
 export function parseDictateMetadata(raw: unknown, audio: Uint8Array<ArrayBuffer>): Parsed<AudioBody> {
@@ -139,7 +140,7 @@ export function parseDictateMetadata(raw: unknown, audio: Uint8Array<ArrayBuffer
   if (!parsed.ok) return parsed;
   const translation = parsed.value;
   // A Word for word dictation has nothing for the model to write: it goes to `transcribe`.
-  if (!translation.targetLanguage && translation.style !== "grammar") {
+  if (!translation.targetLanguage && !writesWithModel(translation.style)) {
     return { ok: false, error: "targetLanguage is required" };
   }
   if (fields.format !== "m4a" && fields.format !== "wav") return { ok: false, error: "format must be m4a or wav" };
@@ -357,7 +358,7 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
   const claudeModel = [config.translation.model, config.cleanup.model].find(isClaudeModel);
 
   const perMinute = (caller: Caller) => caller.isAnonymous ? config.anonymousPerMinute : config.perMinute;
-  /** A translation runs as `cleanup` translates; Improve my grammar as it cleans up. */
+  /** A translation runs as `cleanup` translates; a style as it cleans up. */
   const modelConfig = (request: CleanupRequest) => request.targetLanguage ? config.translation : config.cleanup;
   /** The key of `model`'s provider. */
   const keyFor = (model: string) => isClaudeModel(model) ? anthropicApiKey : apiKey;
@@ -506,7 +507,7 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
   }
 
   /**
-   * Audio mode: transcribe, then translate or improve the grammar in what is left of the 26 s
+   * Audio mode: transcribe, then translate or write in the style in what is left of the 26 s
    * budget (the app waits 30 s).
    */
   async function dictateAudio(d: Dictation & { body: AudioBody }): Promise<Response> {

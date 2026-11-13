@@ -587,7 +587,7 @@ final class SessionController {
         transport.post(.stateChanged)
         playSound(.start)
         // After the acknowledgement: nothing here may delay it.
-        let usesDictate = translationTargetLanguage != nil || (style ?? settings.defaultStyle) == .grammar
+        let usesDictate = translationTargetLanguage != nil || (style ?? settings.defaultStyle).usesModel
         // Low data mode sends nothing ahead of the dictation.
         if !NetworkConditions.shared.savesData(settings: settings) {
             warmup?.dictationDidStart(requestId, usesDictate: usesDictate && usesCloud)

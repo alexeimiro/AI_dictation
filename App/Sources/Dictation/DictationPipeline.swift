@@ -49,8 +49,9 @@ protocol Cleaning: AnyObject {
 
 /// Turns a finished recording into the text the keyboard inserts:
 /// transcript (OpenAI, or on-device) → AI cleanup (OpenAI, via the `cleanup` function) → `DictationResult`.
-/// A translation or an Improve my grammar dictation the transcriber had written in the same request
-/// (`dictate`) skips the cleanup call, and its reply is judged as `cleanup`'s would be.
+/// A translation, or a dictation in a style the model writes, that the transcriber had written in
+/// the same request (`dictate`) skips the cleanup call, and its reply is judged as `cleanup`'s
+/// would be.
 /// Falls back to `LocalFormatter` when cleanup is unavailable, the dictation is tiny, or
 /// `CleanupGate` finds nothing in a Word for word transcript for the model to write differently.
 @MainActor
@@ -82,9 +83,9 @@ final class DictationPipeline {
         let language = dictation.language
         let targetLanguage = dictation.translationTargetLanguage
         let style = dictation.style ?? settings.defaultStyle
-        // The model writes a translation, or Improve my grammar, in the request that transcribes.
-        // Word for word is transcribed alone.
-        let request = targetLanguage != nil || style == .grammar
+        // The model writes a translation, or any style but Word for word, in the request that
+        // transcribes. Word for word is transcribed alone.
+        let request = targetLanguage != nil || style.usesModel
             ? ModelRequest(dictationId: dictation.requestId, targetLanguage: targetLanguage, style: style,
                            dictionary: dictionary, snippets: snippets)
             : nil
@@ -130,12 +131,19 @@ final class DictationPipeline {
         }
 
         // A translation never inserts the transcript, so it needs no local text.
-        let localText = targetLanguage != nil
-            ? "" : LocalFormatter(dictionary: dictionary, snippets: snippets, language: spoken,
-                                  removesFillers: settings.smartFormatting).format(trimmed)
+        let localText = targetLanguage != nil ? "" : localText(for: trimmed, language: spoken, style: style)
+        // Nothing but hesitations ("Hmm."): there is nothing to insert, and nothing to ask the model.
+        guard targetLanguage != nil || !localText.isEmpty else {
+            return outcome(
+                dictation, spoken: spoken, raw: trimmed, text: "", status: .empty,
+                message: "We didn't catch anything. Please try speaking again.", errorReason: nil,
+                style: style, cleanupModel: nil,
+                metrics: TranscriptMetrics(audioSeconds: audioSeconds, words: 0, asrMs: transcriptMs),
+                utterance: utterance, recording: recording)
+        }
         var cleaned: CleanupOutcome
         if let reply = output.modelReply {
-            var judged = judge(reply, targetLanguage: targetLanguage, localText: localText)
+            var judged = judge(reply, targetLanguage: targetLanguage, style: style, localText: localText)
             judged.cleanupMs = singleCallModelMs
             cleaned = judged
             // `dictate` kept the transcript but couldn't translate it (out of time, or the model
@@ -183,9 +191,7 @@ final class DictationPipeline {
     /// couldn't be reached, leaving the stored transcript untouched.
     func recleanup(_ transcript: Transcript) async throws(CleanupClient.Failure) -> Transcript {
         guard cleanup.isConfigured else { throw .notConfigured }
-        let localText = LocalFormatter(dictionary: dictionary, snippets: snippets, language: transcript.language,
-                                       removesFillers: settings.smartFormatting)
-            .format(transcript.rawText)
+        let localText = localText(for: transcript.rawText, language: transcript.language, style: transcript.style)
         let cleaned = await runCleanup(
             dictationId: transcript.id, raw: transcript.rawText, language: transcript.language,
             targetLanguage: nil, style: transcript.style, localText: localText, force: true)
@@ -203,6 +209,14 @@ final class DictationPipeline {
     }
 
     // MARK: Cleanup
+
+    /// The text when no model writes it: the transcript tidied on the iPhone, and the part of the
+    /// style that needs no model (Casual's lowercase and missing full stop).
+    private func localText(for transcript: String, language: String?, style: StylePreset) -> String {
+        let formatted = LocalFormatter(dictionary: dictionary, snippets: snippets, language: language,
+                                       removesFillers: settings.smartFormatting).format(transcript)
+        return StyleFormatter.apply(style, to: formatted)
+    }
 
     private struct CleanupOutcome {
         var text: String
@@ -249,7 +263,7 @@ final class DictationPipeline {
         } catch {
             result = .failure(error)
         }
-        outcome = judge(result, targetLanguage: targetLanguage, localText: localText)
+        outcome = judge(result, targetLanguage: targetLanguage, style: style, localText: localText)
         outcome.cleanupMs = Self.milliseconds(since: started)
         return outcome
     }
@@ -258,7 +272,7 @@ final class DictationPipeline {
     /// that also transcribed (`dictate`). `localText` is kept when there's nothing better.
     private func judge(
         _ result: Result<CleanupClient.Response, CleanupClient.Failure>, targetLanguage: String?,
-        localText: String
+        style: StylePreset, localText: String
     ) -> CleanupOutcome {
         var outcome = CleanupOutcome(text: localText, status: .raw)
         switch result {
@@ -271,7 +285,9 @@ final class DictationPipeline {
                 outcome.errorReason = "The cleanup service didn't translate. Deploy the latest cleanup function."
                 outcome.message = "Translation isn't available right now. Please try again later."
             } else if response.status == "cleaned" {
-                outcome.text = SnippetPlaceholders.substitute(in: response.text, snippets: snippets)
+                // The model wrote the style; only what it may have left (Casual's last full stop) is enforced.
+                outcome.text = StyleFormatter.apply(
+                    style, to: SnippetPlaceholders.substitute(in: response.text, snippets: snippets), written: true)
                 outcome.status = .cleaned
             } else if targetLanguage != nil {
                 outcome.errorReason = response.reason == "untranslated"

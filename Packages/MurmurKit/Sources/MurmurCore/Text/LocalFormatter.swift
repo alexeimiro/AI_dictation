@@ -55,36 +55,88 @@ public struct LocalFormatter: Sendable {
 
     // MARK: Steps
 
-    /// English hesitations are removed for every language (bilingual speakers say "um" too);
-    /// the Russian ones only when the dictation is Russian.
+    /// English hesitations are removed where they can't be words: in English, when the language
+    /// is unknown, and in languages not written in Latin letters (bilingual speakers say "um"
+    /// too). German and Portuguese "um" is a word and stays. The Russian ones go only from
+    /// Russian dictations.
     static func removeFillers(_ text: String, language: String? = nil) -> String {
-        var output = removeMatches(of: englishFillers, in: text)
-        if let language, DictationLanguage(tag: language).isRussian {
-            output = removeMatches(of: russianFillers, in: output)
+        let spoken = language.map(DictationLanguage.init(tag:))
+        var output = text
+        if spoken.map({ $0.isAutomatic || $0.languageCode == "en" || !$0.usesLatinScript }) ?? true {
+            output = removeHesitations(matching: englishFillers, in: output)
+        }
+        if let spoken, spoken.isRussian {
+            output = removeHesitations(matching: russianFillers, in: output) { token, before in
+                // «мм» after a number is millimetres.
+                token.lowercased().allSatisfy { $0 == "м" } && before.last(where: { !$0.isWhitespace })?.isNumber == true
+            }
         }
         return output
     }
 
-    /// "um", "uh", "erm", "uhm", "hmm" as whole words. "so, uh, we" keeps one comma: "so, we".
-    private static let englishFillers = #"(?i)(,)?\s*\b(?:u+m+|u+h+|e+r+m+|u+h+m+|h+m+)\b\s*(,)?"#
+    /// "um", "uh", "erm", "uhm", "hmm" on their own: not inside "uh-huh", "mm-hmm" or "um's".
+    /// "so, uh, we" keeps one comma: "so, we".
+    private static let englishFillers =
+        #"(?i)(,)?\s*(?<![\p{L}\p{N}'’-])(u+m+|u+h+|e+r+m+|u+h+m+|h+m+)(?![\p{L}\p{N}'’-])\s*(,)?"#
 
     /// Vocalized hesitations only: "э", "э-э", "эм", "мм", "хм", "гм". Words such as "ну", "вот",
     /// "типа" or "короче" are left alone because they are often meaningful; the AI cleanup
     /// decides about those.
     private static let russianFillers =
-        #"(?i)(,)?\s*(?<![\p{L}\p{N}])(?:э+м*|э(?:-э)+м*|м{2,}|х+м+|гм+)(?![\p{L}\p{N}-])\s*(,)?"#
+        #"(?i)(,)?\s*(?<![\p{L}\p{N}-])(э+м*|э(?:-э)+м*|м{2,}|х+м+|гм+)(?![\p{L}\p{N}-])\s*(,)?"#
 
-    private static func removeMatches(of pattern: String, in text: String) -> String {
+    private static let sentenceEnd: Set<Character> = [".", "!", "?", "…"]
+
+    /// Removes the hesitations `pattern` finds (group 1: a comma before, 2: the sound, 3: a comma
+    /// after), except those that are words: an acronym (UM, HM), a name in mid-sentence (Uhm),
+    /// and what `isWord` keeps, given the sound and the text before it. A hesitation that is a
+    /// sentence of its own goes with its mark, and one at the end of a sentence takes the comma
+    /// before it along.
+    private static func removeHesitations(
+        matching pattern: String, in text: String,
+        keeping isWord: (_ sound: String, _ before: String) -> Bool = { _, _ in false }
+    ) -> String {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-        let nsText = text as NSString
+        let source = text as NSString
         var output = ""
         var cursor = 0
-        for match in regex.matches(in: text, range: NSRange(location: 0, length: nsText.length)) {
-            output += nsText.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
-            output += match.range(at: 1).location != NSNotFound ? ", " : " "
-            cursor = match.range.location + match.range.length
+        // The word after a removed sentence opener starts the sentence.
+        var capitalizeNext = false
+        func append(_ segment: String) {
+            guard capitalizeNext, let first = segment.firstIndex(where: { !$0.isWhitespace }) else {
+                output += segment
+                return
+            }
+            capitalizeNext = false
+            output += segment.replacingCharacters(in: first...first, with: segment[first].uppercased())
         }
-        output += nsText.substring(from: cursor)
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: source.length)) {
+            // Already taken, as the mark of the hesitation before.
+            guard match.range.location >= cursor else { continue }
+            let sound = source.substring(with: match.range(at: 2))
+            let between = source.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+            let before = output + between
+            let opensSentence = before.last(where: { !$0.isWhitespace }).map { sentenceEnd.contains($0) || $0.isNewline } ?? true
+            let isAcronym = sound.count > 1 && sound == sound.uppercased()
+            let isName = sound.first?.isUppercase == true && !opensSentence
+            if isAcronym || isName || isWord(sound, before) { continue }
+
+            append(between)
+            var end = match.range.location + match.range.length
+            let marks = source.substring(from: end).prefix(while: { sentenceEnd.contains($0) })
+            if !marks.isEmpty {
+                if opensSentence {
+                    end += (String(marks) as NSString).length
+                    output += " "
+                    capitalizeNext = !output.allSatisfy(\.isWhitespace)
+                }
+            } else if end < source.length {
+                output += match.range(at: 1).location != NSNotFound ? ", " : " "
+                capitalizeNext = opensSentence && !output.allSatisfy(\.isWhitespace)
+            }
+            cursor = end
+        }
+        append(source.substring(from: cursor))
         return output
     }
 

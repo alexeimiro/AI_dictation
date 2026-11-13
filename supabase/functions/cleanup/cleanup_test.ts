@@ -25,6 +25,7 @@ import {
   buildTranslationContext,
   buildTranslationMessage,
   buildUserContext,
+  buildVerbatimLanguageBlock,
   CLEANUP_RULES,
   describeLanguage,
   genericLanguageRules,
@@ -32,6 +33,7 @@ import {
   resolveLanguage,
   TRANSLATION_RULES,
   TRANSLATION_STYLES,
+  VERBATIM_RULES,
 } from "../_shared/prompt.ts";
 import {
   countWords,
@@ -43,7 +45,13 @@ import {
   tidyOutput,
   wordOverlap,
 } from "../_shared/text.ts";
-import { type CleanupRequest, LIMITS, normalizeLanguageTag, parseCleanupRequest } from "../_shared/types.ts";
+import {
+  type CleanupRequest,
+  LIMITS,
+  normalizeLanguageTag,
+  parseCleanupRequest,
+  writesWithModel,
+} from "../_shared/types.ts";
 
 const request: CleanupRequest = {
   dictationId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
@@ -642,12 +650,12 @@ Deno.test("the language block is byte-identical for every user of a language", (
     ...russianRequest,
     dictationId: "11111111-2222-4333-8444-555555555555",
     transcript: "совсем другой текст",
-    style: "verbatim",
+    style: "concise",
     dictionary: [{ term: "Яндекс", misspelling: "индекс" }],
     snippets: [{ token: "⟦s:1a2b3c4d⟧", trigger: "моя ссылка" }],
   }, ru);
   assertEquals(alice.length, 3);
-  assertEquals(alice[0], bob[0]);
+  assertEquals(alice[0], bob[0], "every style the model writes shares the rules");
   assertEquals(alice[1], bob[1]);
   assert(alice[2] !== bob[2], "only the per-user part differs, and it comes last");
 
@@ -681,11 +689,121 @@ Deno.test("improve my grammar fixes grammar and changes nothing else", () => {
     assertStringIncludes(pack.styles.grammar, "never make the text more formal", pack.key);
   }
   assertStringIncludes(TRANSLATION_STYLES.grammar, "natural, grammatical text in the target language");
-  // The removed styles are gone from every pack.
-  for (const styles of [LANGUAGE_RULES.en.styles, LANGUAGE_RULES.ru.styles, TRANSLATION_STYLES]) {
-    assertEquals(Object.keys(styles).sort(), ["grammar", "verbatim"]);
+  // Every pack has today's five styles and none of the removed ones ("chat" is Casual).
+  for (
+    const styles of [
+      LANGUAGE_RULES.en.styles,
+      LANGUAGE_RULES.ru.styles,
+      genericLanguageRules("tr-TR").styles,
+      genericLanguageRules(null).styles,
+      TRANSLATION_STYLES,
+    ]
+  ) {
+    assertEquals(Object.keys(styles).sort(), ["chat", "concise", "grammar", "professional", "verbatim"]);
   }
   assertFalse(CLEANUP_RULES.includes("more formal than the requested style"));
+});
+
+Deno.test("Professional, Casual and Concise say what they change and what they must keep", () => {
+  const packs = [LANGUAGE_RULES.en, LANGUAGE_RULES.ru, genericLanguageRules("tr-TR"), genericLanguageRules(null)];
+  for (const pack of packs) {
+    const { professional, chat, concise } = pack.styles;
+    assert(professional.startsWith("Professional"), pack.key);
+    assert(chat.startsWith("Casual: "), pack.key);
+    assert(concise.startsWith("Concise: "), pack.key);
+    // The two that reword say so, since the rules keep the speaker's words unless the style says otherwise.
+    for (const line of [professional, concise]) {
+      assertStringIncludes(line, "this style changes the wording", pack.key);
+      assertStringIncludes(line, "Keep every fact, name, number, date, question and request", pack.key);
+    }
+    assertStringIncludes(professional, "Do not add greetings, sign-offs", pack.key);
+    assertStringIncludes(chat, "this style overrides the capitalization rules above", pack.key);
+    assertStringIncludes(chat, "no full stop at the end of the message", pack.key);
+    assertStringIncludes(chat, "Do not add emoji", pack.key);
+    assertStringIncludes(concise, "never drop a separate point", pack.key);
+    assertStringIncludes(concise, "already short and direct stays as it is", pack.key);
+  }
+  // Each language's own example, never another's.
+  assertStringIncludes(LANGUAGE_RULES.en.styles.professional, '"I will need that report by Friday."');
+  assertStringIncludes(LANGUAGE_RULES.ru.styles.professional, "«Мне нужен этот отчёт до пятницы.»");
+  assertStringIncludes(LANGUAGE_RULES.ru.styles.professional, "«ты» stays «ты»");
+  for (const line of Object.values(genericLanguageRules("tr-TR").styles)) {
+    assertFalse(/report|отчёт/.test(line), "a language without a pack gets no example in another language");
+  }
+  // Turkish is shown one agreement mistake, in Turkish; other languages without a pack get none.
+  assertStringIncludes(genericLanguageRules("tr-TR").styles.grammar, "«Ben yarın okula gideceğim.»");
+  assertFalse(genericLanguageRules("de-DE").styles.grammar.includes("For example"));
+  assertFalse(genericLanguageRules(null).styles.grammar.includes("For example"));
+  // A bare hour is never given a part of the day.
+  assertStringIncludes(CLEANUP_RULES, 'Never add a part of the day the speaker did not say: "at 4" stays "at 4"');
+  assertStringIncludes(LANGUAGE_RULES.ru.rules, "a bare hour («в четыре») stays as it was said");
+  assertStringIncludes(CLEANUP_RULES, "Unless the writing style in the context says otherwise");
+  assertStringIncludes(TRANSLATION_RULES, "Unless the writing style in the context says otherwise");
+
+  const english = buildUserContext({ ...request, style: "professional" }, resolveLanguage("en-US"));
+  assertStringIncludes(english, "Style: " + LANGUAGE_RULES.en.styles.professional);
+  const russian = buildUserContext({ ...russianRequest, style: "chat" }, resolveLanguage("ru-RU"));
+  assertStringIncludes(russian, "Style: " + LANGUAGE_RULES.ru.styles.chat);
+  const intoTurkish = buildTranslationContext({ ...translationRequest, style: "concise" }, resolveLanguage("ru-RU"));
+  assertStringIncludes(intoTurkish, "Style: " + TRANSLATION_STYLES.concise);
+  const intoEnglish = buildTranslationContext(
+    { ...russianRequest, targetLanguage: "en-US", style: "chat" },
+    resolveLanguage("ru-RU"),
+  );
+  assertStringIncludes(intoEnglish, "Style: " + LANGUAGE_RULES.en.styles.chat);
+});
+
+Deno.test("Word for word has rules and a pack of its own, which keep the speaker's words", async () => {
+  const captured: Captured = {};
+  const verbatim = { ...request, style: "verbatim" as const };
+  await runCleanup(verbatim, options(fakeFetch(cleaned, captured)));
+  const body = captured.body!;
+  assertEquals(body.prompt_cache_key, "murmur-verbatim-en");
+  assertEquals(body.instructions, [
+    VERBATIM_RULES,
+    buildVerbatimLanguageBlock(LANGUAGE_RULES.en),
+    buildUserContext(verbatim, resolveLanguage("en-US")),
+  ].join("\n\n"));
+  // A request that names no style is Word for word too.
+  const unnamed = buildInstructionParts({ ...request, style: undefined }, resolveLanguage("en-US"));
+  assertEquals(unnamed[0], VERBATIM_RULES);
+
+  // Nothing in the prefix tells the model to drop words or apply corrections.
+  assertFalse(VERBATIM_RULES.includes("keep only the corrected version"));
+  assertStringIncludes(VERBATIM_RULES, 'Filler words stay ("like", "you know", "so", "basically", "I mean")');
+  assertStringIncludes(VERBATIM_RULES, '"at 3 no wait 4" is written "at 3, no wait, 4"');
+  assertStringIncludes(VERBATIM_RULES, "Do not fix grammar");
+  assertStringIncludes(VERBATIM_RULES, '"a difficult period"');
+  assertFalse(/\$\{|\d{4}-\d{2}-\d{2}/.test(VERBATIM_RULES), "no volatile content in the cached prefix");
+
+  for (const pack of [LANGUAGE_RULES.en, LANGUAGE_RULES.ru, genericLanguageRules("tr-TR"), genericLanguageRules(null)]) {
+    const block = buildVerbatimLanguageBlock(pack);
+    assert(block.startsWith(`<language key="${pack.key}"`), pack.key);
+    assertStringIncludes(block, pack.rules.split("\n\n")[0]);
+    assertStringIncludes(block, "Typography.");
+    assertStringIncludes(block, "Capitalization.");
+    for (const dropped of ["Fillers.", "Self-corrections.", "Numbers and formats.", "Mixed language.", "Lists."]) {
+      assertFalse(block.includes(dropped), `${pack.key}: ${dropped}`);
+    }
+    for (const example of pack.examples) assertFalse(block.includes(example.output), pack.key);
+  }
+  // Russian keeps its spoken commands, and shows Word for word in Russian.
+  const russian = buildVerbatimLanguageBlock(LANGUAGE_RULES.ru);
+  assertStringIncludes(russian, "Spoken punctuation. Treat «запятая»");
+  assertStringIncludes(russian, "<output>Ну, короче, давай встретимся в три, нет, подожди, в четыре.</output>");
+  assertEquals(russian.match(/<example>/g)?.length, LANGUAGE_RULES.ru.verbatimExamples.length);
+  assertFalse(buildVerbatimLanguageBlock(LANGUAGE_RULES.en).includes("<examples>"));
+
+  // Two Word for word users of a language share everything but their own context.
+  const ru = resolveLanguage("ru-RU");
+  const alice = buildInstructionParts({ ...russianRequest, style: "verbatim" }, ru);
+  const bob = buildInstructionParts({ ...russianRequest, style: "verbatim", dictionary: [{ term: "Яндекс" }] }, ru);
+  assertEquals([alice[0], alice[1]], [bob[0], bob[1]]);
+  assert(alice[2] !== bob[2]);
+
+  // A Word for word translation still gets the translation prompt.
+  const translation = buildInstructionParts({ ...translationRequest, style: "verbatim" }, ru);
+  assertEquals(translation[0], TRANSLATION_RULES);
 });
 
 Deno.test("word for word style keeps the speaker's words and translates literally", () => {
@@ -746,11 +864,18 @@ Deno.test("request validation", () => {
   assertFalse(parseCleanupRequest({ ...request, transcript: 42 }).ok);
   assertFalse(parseCleanupRequest({ ...request, transcript: "x".repeat(20_001) }).ok);
   assertFalse(parseCleanupRequest({ ...request, style: "shouty" }).ok);
-  // Builds from before November 2026 send the removed styles ("casual" by default).
+  for (const style of ["verbatim", "grammar", "professional", "chat", "concise"]) {
+    const parsed = parseCleanupRequest({ ...request, style });
+    assert(parsed.ok && parsed.value.style === style, style);
+  }
+  // Builds from before November 2026 send the removed styles ("casual" by default): an old
+  // build's "casual" is not today's Casual, which is "chat".
   for (const legacy of ["formal", "casual", "veryCasual", "excited"]) {
     const parsed = parseCleanupRequest({ ...request, style: legacy });
     assert(parsed.ok && parsed.value.style === "grammar", legacy);
   }
+  assert(writesWithModel("grammar") && writesWithModel("professional") && writesWithModel("chat") && writesWithModel("concise"));
+  assertFalse(writesWithModel("verbatim") || writesWithModel(undefined), "a request without a style is Word for word");
   assertFalse(parseCleanupRequest({ ...request, snippets: [{ token: "{s:1}", trigger: "x" }] }).ok);
   assertFalse(parseCleanupRequest({ ...request, dictionary: [{ term: "" }] }).ok);
   for (const language of ["ru", "ru_RU", "zh-Hans-CN", "en-001"]) {

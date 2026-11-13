@@ -21,7 +21,7 @@ App Store Connect only takes in its web page). Character limits are App Store Co
 > Messages, email, notes, documents, chats with AI. Switch to the Murmur keyboard, tap the mic, talk, and tap the check mark.
 >
 > YOUR WORDS, OR YOUR WORDS TIDIED
-> Word for word keeps exactly what you said. Improve my grammar fixes mistakes and drops false starts without changing your tone.
+> Word for word keeps exactly what you said. Improve my grammar fixes mistakes and drops false starts without changing your tone. Professional makes it clear and polite for work, Casual writes it the way you text, and Concise says it in fewer words.
 >
 > TRANSLATE AS YOU SPEAK
 > Speak one language and type in another, in more than 50 languages. Murmur detects the language you speak.

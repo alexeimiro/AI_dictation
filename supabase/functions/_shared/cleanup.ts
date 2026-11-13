@@ -5,13 +5,15 @@ import {
   buildTranslationContext,
   buildTranslationMessage,
   buildUserContext,
+  buildVerbatimLanguageBlock,
   CLEANUP_RULES,
   resolveLanguage,
   type ResolvedLanguage,
   TRANSLATION_RULES,
+  VERBATIM_RULES,
 } from "./prompt.ts";
 import { guardOutput, guardTranslation, tidyOutput } from "./text.ts";
-import type { CleanupRequest } from "./types.ts";
+import { type CleanupRequest, writesWithModel } from "./types.ts";
 
 /** OpenAI's flagship; override with the CLEANUP_MODEL secret without shipping an app update. */
 export const DEFAULT_MODEL = "gpt-6-astra";
@@ -88,13 +90,27 @@ export class CleanupAPIError extends Error {
 
 /**
  * The system prompt in stability order. A cleanup: shared rules → language pack → per-user context.
- * A translation (`targetLanguage` set): translation rules → per-user context with the language
- * pair. OpenAI caches the longest identical prefix (from 1,024 tokens), so the parts every user
- * shares come first and the per-user context last.
+ * Word for word has rules and a pack of its own, which keep the speaker's words. A translation
+ * (`targetLanguage` set): translation rules → per-user context with the language pair. OpenAI
+ * caches the longest identical prefix (from 1,024 tokens), so the parts every user shares come
+ * first and the per-user context last.
  */
 export function buildInstructionParts(request: CleanupRequest, language: ResolvedLanguage): string[] {
   if (request.targetLanguage) return [TRANSLATION_RULES, buildTranslationContext(request, language)];
+  if (!writesWithModel(request.style)) {
+    return [VERBATIM_RULES, buildVerbatimLanguageBlock(language.rules), buildUserContext(request, language)];
+  }
   return [CLEANUP_RULES, buildLanguageBlock(language.rules), buildUserContext(request, language)];
+}
+
+/**
+ * Routes requests that share a prefix to the same cache: one per cleanup language, one per Word
+ * for word language, and one for every translation (the language pair is in the per-user
+ * context, after the prefix).
+ */
+function promptCacheKey(request: CleanupRequest, language: ResolvedLanguage): string {
+  if (request.targetLanguage) return "murmur-translate";
+  return `murmur-${writesWithModel(request.style) ? "cleanup" : "verbatim"}-${language.key}`;
 }
 
 /** The Responses API request body. */
@@ -116,9 +132,7 @@ export function buildResponsesRequest(
     max_output_tokens: 16000,
     // Dictations are never kept on OpenAI's side as stored responses.
     store: false,
-    // Routes requests that share a prefix to the same cache: one per cleanup language, and one
-    // for every translation (the language pair is in the per-user context, after the prefix).
-    prompt_cache_key: target ? "murmur-translate" : `murmur-cleanup-${language.key}`,
+    prompt_cache_key: promptCacheKey(request, language),
   };
 }
 

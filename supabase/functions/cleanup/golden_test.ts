@@ -104,6 +104,36 @@ english("word for word keeps hedges and self-corrections", async (clean) => {
   assert(/actually/i.test(text) && /monday/i.test(text) && /tuesday/i.test(text), text);
 });
 
+english("word for word leaves the grammar alone", async (clean) => {
+  const { text } = await clean({ transcript: "um me and him was thinking we could meet friday at 4", style: "verbatim" });
+  assert(/^Me and him was thinking we could meet Friday at (4|four)\.$/.test(text), text);
+});
+
+english("professional drops slang and openers, keeps every fact and adds nothing", async (clean) => {
+  const { text } = await clean({
+    transcript: "hey guys so i'm gonna need the q3 report by friday ok thanks",
+    style: "professional",
+  });
+  assertFalse(/\b(gonna|guys|dear|regards)\b/i.test(text) || /^hey\b/i.test(text), text);
+  assert(/report/i.test(text) && /Friday/.test(text) && /Q3/.test(text), text);
+});
+
+english("casual is lowercase, keeps names and has no full stop at the end", async (clean) => {
+  const { text } = await clean({ transcript: "um I think Anna and I are gonna fly to Berlin on monday", style: "chat" });
+  assert(/^[a-z]/.test(text) && /\bAnna\b/.test(text) && /\bBerlin\b/.test(text) && /\bgonna\b/.test(text), text);
+  assertFalse(/\.$/.test(text) || /\p{Extended_Pictographic}/u.test(text), text);
+});
+
+english("concise says it in fewer words and keeps the facts", async (clean) => {
+  const transcript = "so basically what I wanted to say is that I think that maybe we should probably move the meeting " +
+    "from wednesday to thursday at 3 pm because you know a lot of people are going to be out on wednesday if that makes sense";
+  const { text } = await clean({ transcript, style: "concise" });
+  assert(/Thursday/.test(text) && /Wednesday/.test(text) && /\b3\b/.test(text), text);
+  assert(countWords(text) <= 0.7 * countWords(transcript), text);
+  const short = await clean({ transcript: "Can you send me the report by Friday?", style: "concise" });
+  assertEquals(short.text, "Can you send me the report by Friday?");
+});
+
 // ---------------------------------------------------------------------------------------------
 // Russian. Assertions tolerate digits or words wherever the rules allow either.
 
@@ -179,6 +209,23 @@ russian("improve my grammar fixes case endings", async (clean) => {
   const { text } = await clean({ transcript: "я вчера купил две яблоки и один груша" });
   assert(/два яблока/i.test(text), text);
   assert(/одну грушу/i.test(text), text);
+});
+
+russian("word for word keeps «нет, подожди» and both times", async (clean) => {
+  const { text } = await clean({ transcript: "давай встретимся в три нет подожди в четыре", style: "verbatim" });
+  assert(/в три/i.test(text) && /подожди/i.test(text) && /в четыре/i.test(text), text);
+});
+
+russian("professional drops «слушай» and «короче», and «ты» stays «ты»", async (clean) => {
+  const { text } = await clean({ transcript: "ну ты это скинь мне пожалуйста презентацию до вечера", style: "professional" });
+  assert(/презентаци/i.test(text) && /до вечера/i.test(text), text);
+  assertFalse(word("вы").test(text) || word("скиньте").test(text) || word("ну").test(text), text);
+});
+
+russian("casual is lowercase with no full stop at the end", async (clean) => {
+  const { text } = await clean({ transcript: "Привет, можешь скинуть отчёт до пятницы? Спасибо большое.", style: "chat" });
+  assert(/^[а-яё]/.test(text) && text.includes("?") && /отчёт/.test(text), text);
+  assertFalse(/\.$/.test(text), text);
 });
 
 russian("«ёлочки» and the em dash", async (clean) => {

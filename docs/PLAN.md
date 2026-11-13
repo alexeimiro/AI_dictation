@@ -79,7 +79,7 @@ Keyboard ext ── Darwin post + command file (one-time token) ──► Murmur
    - `DictationTranscriber` covers locales SpeechTranscriber lacks. Only it honors `AnalysisContext.contextualStrings` (at most 100 phrases).
 2. **Cleanup.**
    - Dictations of 3 words or fewer skip Claude.
-   - So do Word for word transcripts `CleanupGate` finds nothing to write differently in: punctuated (in any script), with no spoken punctuation command or spelled-out address. They get `LocalFormatter` only. Improve my grammar always asks the model.
+   - So do Word for word transcripts `CleanupGate` finds nothing to write differently in: punctuated (in any script), with no spoken punctuation command or spelled-out address. They get `LocalFormatter` only. The styles the model writes (Improve my grammar, Professional, Casual, Concise) always ask it.
    - Otherwise `CleanupClient` calls `cleanup` with an 8 s timeout.
    - Snippet triggers come back from Claude as `⟦s:<id>⟧` placeholders, and the app substitutes the expansion. Expansions never go to the server, and nothing is expanded twice.
 3. **`TextJoiner`.**
@@ -204,7 +204,7 @@ Every `-route` name still opens its screen; `menu` opens the menu.
 - **Snippets:**
   - Fields: Snippet (under 60 characters) and Expansion.
   - Errors: "Please enter a snippet", "Snippet too long", "Snippet already exists".
-- **Style:** "How Murmur writes": Word for word (exact words, literal translation; the default) or Improve my grammar (the same words and tone, grammatically correct), each shown on one spoken sentence, with a pill on the keyboard that sets it. The four earlier styles were removed in November 2026. Since iOS 26.4 there's no per-app context.
+- **Style:** "How Murmur writes": Word for word (exact words, literal translation; the default), then four the model writes: Improve my grammar (the same words and tone, grammatically correct), Professional (clear and polite, for work), Casual (lowercase, like texting) and Concise (fewer words). Each is shown on one spoken sentence, with a pill on the keyboard that sets it. Four earlier styles (formal, casual, very casual, excited) were removed in November 2026; today's Casual is stored as `chat`. Since iOS 26.4 there's no per-app context.
 
 **Menu and Account:**
 - **Account:**

@@ -120,7 +120,7 @@ struct SettingsView: View {
                 header("Personalization")
                 Toggle(isOn: $settings.smartFormatting) {
                     SettingLabel("Smart formatting",
-                                 detail: "Drop “um” and “uh”, and turn “new line” or “comma” into what they say. Improve my grammar always does.")
+                                 detail: "Drop “um” and “uh”, and turn “new line” or “comma” into what they say. Every style but Word for word always does.")
                 }
                 .settingRow()
             }
@@ -199,6 +199,8 @@ struct SettingsView: View {
         .tint(Theme.ink)
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+        // The keyboard's menu may have changed its switches while Murmur stayed in front.
+        .onAppear { model.settings.reloadFromKeyboard() }
         .toast($toast)
         .sheet(isPresented: $choosingLanguages) {
             LanguagePickerSheet()

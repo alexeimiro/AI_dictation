@@ -105,14 +105,23 @@ translation target follow the iPhone's language (ЙЦУКЕН on a Russian iPhon
 
 ## Modes
 
-Two, in the keyboard's style chip and the menu's Style:
+Five, in the keyboard's style chip and the menu's Style:
 - **Word for word** (the default): your words as spoken, punctuated. The AI runs only when the
-  transcript has no punctuation, a spoken command ("comma", "new line") or a spelled-out address.
+  transcript has no punctuation, a spoken command ("comma", "new line") or a spelled-out address,
+  and then under rules of its own that keep every word (`VERBATIM_RULES`).
 - **Improve my grammar**: the same words and tone, made grammatically correct; fillers and false
-  starts go. Sent in the request that transcribes (`dictate`), so it costs no extra round trip.
+  starts go.
+- **Professional**: rewritten clear and polite, for work and email; every fact kept, nothing added.
+- **Casual** (stored as `chat`): the speaker's words in lowercase, with light punctuation and no
+  final full stop, like a text to a friend.
+- **Concise**: the same message in fewer words.
 
-Builds from before November 2026 still send the old styles; the functions read them as Improve my
-grammar. The **primary** language is the explicit choice in Settings › Languages, else the
+The four the model writes go in the request that transcribes (`dictate`), so they cost no extra
+round trip. Three words or fewer stay as heard; Casual still lowercases them, on the iPhone
+(`StyleFormatter`).
+
+Builds from before November 2026 still send the old styles (formal, casual, veryCasual, excited);
+the functions read them as Improve my grammar. The **primary** language is the explicit choice in Settings › Languages, else the
 first of the iPhone's preferred languages that an engine supports, else US English. A
 **secondary** language adds a switch (RU / EN) to the keyboard toolbar.
 

@@ -32,6 +32,12 @@ public struct DictationLanguage: Codable, Hashable, Sendable, Identifiable, Cust
     public var isRussian: Bool { languageCode == "ru" }
     public var isAutomatic: Bool { languageCode == "und" }
 
+    /// Normally written in Latin letters: "de", "pt-BR", "sr-Latn"; not "ru", "ja" or "sr".
+    public var usesLatinScript: Bool {
+        let likely = Locale.Language(identifier: tag).maximalIdentifier
+        return Locale.Language(identifier: likely).script == .latin
+    }
+
     /// The language name in the UI language ("Russian").
     public var localizedName: String {
         if isAutomatic { return "Auto-detect" }

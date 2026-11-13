@@ -149,6 +149,48 @@ struct LocalFormatterTests {
         #expect(formatter.format("uh, okay hmm let's go") == "Okay let's go")
     }
 
+    /// "Uh-huh" and "mm-hmm" are words, and so are UM, HM and a Mr Uhm in mid-sentence.
+    @Test func keepsWordsThatOnlyLookLikeHesitations() {
+        let formatter = LocalFormatter(language: "en-US")
+        for text in [
+            "Uh-huh, that works for me.",
+            "Uh-oh, I forgot the keys.",
+            "Mm-hmm, sounds good.",
+            "Uh-uh, no way.",
+            "I went to UM and then worked at HM Treasury.",
+            "Call Uhm Jung-ah tomorrow.",
+        ] {
+            #expect(formatter.format(text) == text, "\(text)")
+        }
+    }
+
+    /// A hesitation that is a sentence of its own goes with its mark, and none leaves a comma
+    /// in front of a full stop.
+    @Test func hesitationsLeaveNoStrayPunctuation() {
+        let formatter = LocalFormatter(language: "en-US")
+        #expect(formatter.format("Um. So I think we should go.") == "So I think we should go.")
+        #expect(formatter.format("Um... me and him was thinking.") == "Me and him was thinking.")
+        #expect(formatter.format("Yes. Um, so I think.") == "Yes. So I think.")
+        #expect(formatter.format("Yes. Hmm. Okay.") == "Yes. Okay.")
+        #expect(formatter.format("We could meet tomorrow, uh.") == "We could meet tomorrow.")
+        #expect(formatter.format("I was thinking, um...") == "I was thinking...")
+        #expect(formatter.format("We could meet tomorrow uh") == "We could meet tomorrow")
+        #expect(formatter.format("Hmm.") == "")
+    }
+
+    /// "um" is a word in German, Portuguese and Croatian: English hesitations go only where they
+    /// can't be words (English, an unknown language, a language not written in Latin letters).
+    @Test func englishHesitationsStayInLanguagesWhereTheyAreWords() {
+        #expect(LocalFormatter(language: "de-DE").format("Wir treffen uns um acht Uhr.") == "Wir treffen uns um acht Uhr.")
+        #expect(LocalFormatter(language: "de").format("Es geht um das neue Projekt, um ehrlich zu sein.")
+                == "Es geht um das neue Projekt, um ehrlich zu sein.")
+        #expect(LocalFormatter(language: "pt-BR").format("Eu tenho um carro e um cachorro.") == "Eu tenho um carro e um cachorro.")
+        #expect(LocalFormatter(language: "hr-HR").format("Zdrav um u zdravom tijelu.") == "Zdrav um u zdravom tijelu.")
+        // Auto-detect that found no language still tidies as English does.
+        #expect(LocalFormatter(language: "und").format("um so we should go") == "So we should go")
+        #expect(LocalFormatter(language: "en-GB").format("um so we should go") == "So we should go")
+    }
+
     /// Smart formatting off: the hesitations stay; the dictionary and snippets still apply.
     @Test func keepsFillersWithoutSmartFormatting() {
         let formatter = LocalFormatter(dictionary: [DictionaryTerm(term: "Valerio", misspelling: "valeria")],
@@ -220,10 +262,14 @@ struct CleanupGateTests {
         }
     }
 
-    /// A grammar mistake doesn't show in the text, so Improve my grammar always asks the model.
-    @Test func grammarAlwaysNeedsTheModel() {
-        #expect(CleanupGate.needsModel("Can you send me the report by Friday?", style: .grammar))
+    /// What the model's styles change doesn't show in the text, so they always ask the model.
+    @Test func theModelsStylesAlwaysNeedTheModel() {
         #expect(CleanupGate.needsModel("Me and him was going to the store.", style: .grammar))
+        for style in StylePreset.allCases where style.usesModel {
+            #expect(CleanupGate.needsModel("Can you send me the report by Friday?", style: style), "\(style)")
+            #expect(CleanupGate.needsModel("Can you send me the report by Friday?", style: style, smartFormatting: false),
+                    "\(style)")
+        }
     }
 
     /// Recognizers punctuate CJK, Arabic and Hindi with their own marks.
@@ -246,12 +292,65 @@ struct CleanupGateTests {
     }
 }
 
+struct StyleFormatterTests {
+    @Test func onlyCasualChangesTheText() {
+        for style in StylePreset.allCases where style != .casual {
+            #expect(StyleFormatter.apply(style, to: "Sounds good, see you soon.") == "Sounds good, see you soon.", "\(style)")
+        }
+    }
+
+    @Test func casualLowercasesSentenceStartsButNotIOrNames() {
+        #expect(StyleFormatter.apply(.casual, to: "Sounds good. See you soon.") == "sounds good. see you soon")
+        #expect(StyleFormatter.apply(.casual, to: "I'm on my way. NASA called.") == "I'm on my way. NASA called")
+        #expect(StyleFormatter.apply(.casual, to: "Are we still on for Friday?") == "are we still on for Friday?")
+        #expect(StyleFormatter.apply(.casual, to: "Привет. Я дома.") == "привет. я дома")
+    }
+
+    @Test func casualDropsOnlyASentencesFinalPeriod() {
+        #expect(StyleFormatter.apply(.casual, to: "Email me at john@gmail.com.") == "email me at john@gmail.com")
+        for text in ["are you coming?", "great!", "wait...", "wait…", "see you at 5 p.m.", "купи хлеб, молоко и т.д."] {
+            #expect(StyleFormatter.apply(.casual, to: text) == text, "\(text)")
+        }
+    }
+
+    /// The model already wrote the casing, and knows which capitals are names; only the final
+    /// period is enforced.
+    @Test func theModelsTextKeepsItsCasing() {
+        #expect(StyleFormatter.apply(.casual, to: "Anna said hi.", written: true) == "Anna said hi")
+        #expect(StyleFormatter.apply(.casual, to: "sounds good", written: true) == "sounds good")
+        #expect(StyleFormatter.apply(.professional, to: "Sounds good.", written: true) == "Sounds good.")
+    }
+}
+
 struct StylePresetTests {
     @Test func wordForWordComesFirstAndIsTheFallback() {
-        #expect(StylePreset.allCases == [.verbatim, .grammar])
+        #expect(StylePreset.allCases == [.verbatim, .grammar, .professional, .casual, .concise])
         #expect(StylePreset(stored: "grammar") == .grammar)
+        #expect(StylePreset(stored: "professional") == .professional)
+        #expect(StylePreset(stored: "concise") == .concise)
         for removed in ["formal", "casual", "veryCasual", "excited", "shouty", ""] {
             #expect(StylePreset(stored: removed) == .verbatim, "\(removed)")
+        }
+    }
+
+    /// Casual is stored as "chat": the removed style "casual" was the default before November
+    /// 2026, and an old profile that still holds it must not turn lowercase.
+    @Test func casualIsStoredUnderANameNoOldBuildWrote() {
+        #expect(StylePreset.casual.rawValue == "chat")
+        #expect(StylePreset(stored: "chat") == .casual)
+        #expect(StylePreset(stored: "casual") == .verbatim)
+    }
+
+    @Test func onlyWordForWordGoesWithoutTheModel() {
+        #expect(StylePreset.allCases.filter { !$0.usesModel } == [.verbatim])
+    }
+
+    /// The pill and the keyboard's tiles have room for one short line each.
+    @Test func everyStyleHasItsWords() {
+        for style in StylePreset.allCases {
+            #expect(!style.title.isEmpty && !style.subtitle.isEmpty, "\(style)")
+            #expect(style.shortTitle.count <= 13, "\(style)")
+            #expect(style.hint.count <= 18, "\(style)")
         }
     }
 
@@ -580,6 +679,22 @@ struct RussianLocalFormatterTests {
 
     @Test func russianHesitationsStayInEnglishDictations() {
         #expect(LocalFormatter().format("эм, okay") == "Эм, okay")
+    }
+
+    /// «мм» after a number is millimetres.
+    @Test func millimetresAreNotAHesitation() {
+        let formatter = LocalFormatter(language: "ru-RU")
+        #expect(formatter.format("Нужен болт на 10 мм.") == "Нужен болт на 10 мм.")
+        #expect(formatter.format("Толщина листа 2,5 мм, а ширина 2 метра.") == "Толщина листа 2,5 мм, а ширина 2 метра.")
+        #expect(formatter.format("Мм, вкусно.") == "Вкусно.")
+    }
+
+    @Test func russianHesitationsLeaveNoStrayPunctuation() {
+        let formatter = LocalFormatter(language: "ru-RU")
+        #expect(formatter.format("Хм. Не знаю.") == "Не знаю.")
+        #expect(formatter.format("Да. Эм, ну ладно.") == "Да. Ну ладно.")
+        #expect(formatter.format("Он сказал: «Хм».") == "Он сказал: «Хм».")
+        #expect(formatter.format("Давай завтра, э-э.") == "Давай завтра.")
     }
 
     @Test func dictionaryMatchesRegardlessOfYo() {

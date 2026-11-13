@@ -1,7 +1,8 @@
 import Foundation
 
 /// Decides whether a transcript needs the AI cleanup or can be inserted as the recognizer wrote
-/// it. Improve my grammar always needs it: a grammar mistake doesn't show in the text. Word for
+/// it. The styles the model writes (Improve my grammar, Professional, Casual, Concise) always
+/// need it: what they change doesn't show in the text. Word for
 /// word keeps the speaker's words, so the model only earns its 1–3 s when there is something it
 /// writes differently: no punctuation at all, a spoken punctuation or layout command, or a
 /// spelled-out address. A miss costs polish, never words, and Regenerate runs the model anyway.
@@ -9,7 +10,7 @@ import Foundation
 public enum CleanupGate {
     public static func needsModel(_ transcript: String, style: StylePreset, smartFormatting: Bool = true) -> Bool {
         switch style {
-        case .grammar:
+        case .grammar, .professional, .casual, .concise:
             return true
         case .verbatim:
             guard smartFormatting else { return false }

@@ -10,7 +10,7 @@ import {
   resolveLanguage,
 } from "../../supabase/functions/_shared/prompt.ts";
 import { guardOutput, guardTranslation, tidyOutput } from "../../supabase/functions/_shared/text.ts";
-import type { CleanupRequest } from "../../supabase/functions/_shared/types.ts";
+import type { CleanupRequest, Style } from "../../supabase/functions/_shared/types.ts";
 import type { Usage } from "./models.ts";
 
 export interface ModelRun {
@@ -84,7 +84,7 @@ export async function runClaudeCleanup(
 
 /** What a judge is shown: never which model wrote the output. */
 export interface JudgeItem {
-  style: "verbatim" | "grammar";
+  style: Style;
   /** Set for a translation. */
   targetLanguage?: string;
   transcript: string;
@@ -101,7 +101,10 @@ export const JUDGE_RULES = `You grade one output of a voice keyboard's text step
 Modes:
 - Word for word: keep every word the speaker said, in order, including self-corrections, hedges and repetitions. Only punctuation and capitalization are added, and spoken punctuation commands become symbols.
 - Improve my grammar: the same words, meaning and tone, made grammatically correct. A correct sentence stays as it is; fillers, stutters and false starts may go, and "no wait…" corrections are applied. Nothing is made more formal, shorter or longer.
-- With a target language, the output is a translation in that mode's spirit: literal for Word for word, natural and grammatical for Improve my grammar.
+- Professional: rewritten the way a careful professional writes to a colleague or a client: complete, clear sentences, no slang, filler or chatty openers, polite requests. Every fact, name, number, date, question and request stays; no greeting, sign-off or anything else is added.
+- Casual: the way people text a friend: the speaker's own words and slang, lowercase except "I", names and acronyms, light punctuation, no full stop at the end, no emoji. Fillers and false starts may go.
+- Concise: the same message in fewer words: repetition, hedging and filler are cut; every fact, name, number, date, question and request stays, and nothing is added. A message that is already short stays as it is.
+- With a target language, the output is a translation in that mode's spirit: literal for Word for word, natural and grammatical for Improve my grammar, and in the other modes' register for those.
 
 Scores, integers from 1 to 5:
 - grammar: is the output correct, natural text in its language? 5 means flawless.
@@ -119,8 +122,17 @@ export const GRADE_SCHEMA = {
   additionalProperties: false,
 };
 
+/** The modes as the app names them. */
+const MODE_NAMES: Record<Style, string> = {
+  verbatim: "Word for word",
+  grammar: "Improve my grammar",
+  professional: "Professional",
+  chat: "Casual",
+  concise: "Concise",
+};
+
 export function judgeMessage(item: JudgeItem): string {
-  const mode = item.style === "verbatim" ? "Word for word" : "Improve my grammar";
+  const mode = MODE_NAMES[item.style];
   return [
     `<mode>${mode}${item.targetLanguage ? `, translating into ${item.targetLanguage}` : ""}</mode>`,
     `<transcript>${item.transcript}</transcript>`,

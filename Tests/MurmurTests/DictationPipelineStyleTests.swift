@@ -194,13 +194,93 @@ struct DictationPipelineStyleTests {
         #expect(transcript.style == .grammar)
     }
 
-    /// Three words or fewer never reach the model, whatever the mode.
+    /// Three words or fewer never reach the model, whatever the mode. Casual still writes them
+    /// its own way: lowercase, with no full stop.
     @Test func shortRepliesSkipTheModel() async {
         for style in StylePreset.allCases {
             let cleanup = StyleCleanup()
             let (result, _) = await dictate("Sounds good.", style: style, cleanup: cleanup)
             #expect(cleanup.receivedStyle == nil, "\(style)")
-            #expect(result.text == "Sounds good.", "\(style)")
+            #expect(result.text == (style == .casual ? "sounds good" : "Sounds good."), "\(style)")
+        }
+    }
+
+    /// Professional, Casual and Concise are written by the model in the request that transcribes,
+    /// as Improve my grammar is.
+    @Test func everyStyleTheModelWritesIsWrittenInTheTranscribingRequest() async throws {
+        for style in StylePreset.allCases where style.usesModel {
+            let cleanup = StyleCleanup()
+            let transcriber = CloudLikeTranscriber(UtteranceOutput(
+                transcript: "hey guys so I'm gonna need the report by Friday",
+                modelReply: .success(CleanupClient.Response(
+                    text: "I will need the report by Friday.", status: "cleaned", words: 7, model: "test", ttftMs: nil,
+                    totalMs: 400, remaining: nil))))
+            let dictation = ActiveDictation(
+                requestId: UUID(), documentIdentifier: nil, style: style, language: "en-US",
+                translationTargetLanguage: nil, source: .keyboard, startedAt: Date())
+
+            let outcome = await DictationPipeline(cleanup: cleanup).complete(
+                dictation, transcriber: transcriber, audioSeconds: 2, stoppedAt: ContinuousClock.now)
+
+            #expect(cleanup.receivedStyle == nil, "\(style): no second request")
+            let request = try #require(transcriber.request, "\(style)")
+            #expect(request.style == style && request.targetLanguage == nil, "\(style)")
+            #expect(outcome.result.status == .cleaned, "\(style)")
+            #expect(outcome.transcript.style == style, "\(style)")
+            // The model's text goes in as it came; Casual only loses a last full stop the model left.
+            #expect(outcome.result.text == (style == .casual ? "I will need the report by Friday" : "I will need the report by Friday."),
+                    "\(style)")
+        }
+    }
+
+    /// Without `dictate` (on-device recognition, or the function switched off) the same styles go
+    /// through `cleanup`, with their own name.
+    @Test func everyStyleTheModelWritesAsksCleanupWhenTheTranscriptCameAlone() async {
+        for style in StylePreset.allCases where style.usesModel {
+            let cleanup = StyleCleanup()
+            cleanup.text = "I will need the report by Friday."
+            let (result, _) = await dictate("Hey guys, so I'm gonna need the report by Friday.", style: style, cleanup: cleanup)
+            #expect(cleanup.receivedStyle == style, "\(style)")
+            #expect(result.status == .cleaned, "\(style)")
+        }
+    }
+
+    /// A Casual dictation whose model step failed still goes in lowercase, with no full stop.
+    @Test func casualFallsBackToItsLocalForm() async {
+        let transcriber = CloudLikeTranscriber(UtteranceOutput(
+            transcript: "Sounds good. See you at the office tomorrow.",
+            modelReply: .failure(.unavailable("dictate couldn't write the text (deadline)"))))
+        let dictation = ActiveDictation(
+            requestId: UUID(), documentIdentifier: nil, style: .casual, language: "en-US",
+            translationTargetLanguage: nil, source: .keyboard, startedAt: Date())
+        let outcome = await DictationPipeline(cleanup: StyleCleanup()).complete(
+            dictation, transcriber: transcriber, audioSeconds: 2, stoppedAt: ContinuousClock.now)
+        #expect(outcome.result.text == "sounds good. see you at the office tomorrow")
+        #expect(outcome.result.status == .raw)
+    }
+
+    /// "um" is a word in German: Word for word must not drop it as a hesitation.
+    @Test func wordForWordKeepsGermanUm() async {
+        let cleanup = StyleCleanup()
+        let dictation = ActiveDictation(
+            requestId: UUID(), documentIdentifier: nil, style: .verbatim, language: "de-DE",
+            translationTargetLanguage: nil, source: .keyboard, startedAt: Date())
+        let outcome = await DictationPipeline(cleanup: cleanup).complete(
+            dictation, transcriber: SpokenTranscriber("Wir treffen uns um acht Uhr."), audioSeconds: 2,
+            stoppedAt: ContinuousClock.now)
+        #expect(cleanup.receivedStyle == nil)
+        #expect(outcome.result.text == "Wir treffen uns um acht Uhr.")
+    }
+
+    /// Nothing but a hesitation: nothing is inserted, and the keyboard says so instead of typing ".".
+    @Test func aDictationOfHesitationsAloneInsertsNothing() async {
+        for style in StylePreset.allCases {
+            let cleanup = StyleCleanup()
+            let (result, transcript) = await dictate("Hmm.", style: style, cleanup: cleanup)
+            #expect(cleanup.receivedStyle == nil, "\(style)")
+            #expect(result.text.isEmpty && result.status == .empty, "\(style)")
+            #expect(result.message == "We didn't catch anything. Please try speaking again.", "\(style)")
+            #expect(transcript.rawText == "Hmm.", "\(style)")
         }
     }
 

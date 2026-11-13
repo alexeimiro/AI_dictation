@@ -2,18 +2,18 @@ import Foundation
 import MurmurCore
 
 /// What `dictate` needs to have the model write a dictation's text in the request that
-/// transcribes it: its translation (`targetLanguage`), or, with no target, its grammar improved.
+/// transcribes it: its translation (`targetLanguage`), or, with no target, the text in `style`.
 struct ModelRequest: Sendable {
     /// The dictation's `requestId`: its usage is counted once, however often it's sent.
     let dictationId: UUID
-    /// Nil for Improve my grammar in the spoken language.
+    /// Nil for a style written in the spoken language.
     let targetLanguage: String?
     let style: StylePreset
     let dictionary: [DictionaryTerm]
     let snippets: [SnippetDefinition]
 }
 
-/// A dictation transcribed and written (translated, or its grammar improved) in one `dictate` request.
+/// A dictation transcribed and written (translated, or put in its style) in one `dictate` request.
 struct DictateReply: Sendable {
     let transcript: String
     /// The languages the transcription heard, first the main one (ISO 639-1); empty when unsure.
@@ -58,8 +58,8 @@ protocol Dictating: AnyObject, Sendable {
     func warm() async -> WarmupResult
 }
 
-/// Calls the `dictate` Edge Function: a translated or Improve my grammar dictation's audio goes
-/// up once, and the function transcribes and writes it on one worker, instead of `transcribe`
+/// Calls the `dictate` Edge Function: the audio of a dictation the model writes (a translation, or
+/// any style but Word for word) goes up once, and the function transcribes and writes it on one worker, instead of `transcribe`
 /// then `cleanup` (two round trips, each checking the token and the limits). A 404 (not deployed, or switched off
 /// with `DICTATE_DISABLED`) turns it off until the app restarts, and dictations go back to those two.
 @MainActor
@@ -72,7 +72,7 @@ final class DictateClient: Dictating {
         /// The user's languages while `language` is detected; left out when empty.
         let languages: [String]?
         let keywords: [String]
-        /// Left out for Improve my grammar.
+        /// Left out for a style written in the spoken language.
         let targetLanguage: String?
         let style: String
         let dictionary: [CleanupClient.Entry]

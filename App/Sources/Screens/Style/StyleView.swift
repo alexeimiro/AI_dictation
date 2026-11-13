@@ -9,7 +9,7 @@ struct StyleView: View {
 
     /// One spoken sentence and what each style writes from it (see the server's style rules: Word
     /// for word drops only sound fillers).
-    static let spoken = "um me and him was thinking we could meet friday at 4"
+    static let spoken = "um so me and him was thinking maybe we could like meet on friday at 4 if that works for you guys"
 
     var body: some View {
         @Bindable var settings = model.settings
@@ -29,15 +29,12 @@ struct StyleView: View {
                     .lineSpacing(2)
                     .foregroundStyle(Theme.ink)
                     .padding(.top, 4)
-                VStack(spacing: 12) {
-                    ForEach(StylePreset.allCases) { style in
-                        StyleCard(style: style, isSelected: settings.defaultStyle == style) {
-                            settings.defaultStyle = style
-                            model.syncStyle()
-                        }
-                    }
-                }
-                .padding(.top, 22)
+                SectionLabel("As you said it")
+                    .padding(.top, 22)
+                cards(StylePreset.allCases.filter { !$0.usesModel }, settings: settings)
+                SectionLabel("Rewritten by AI")
+                    .padding(.top, 22)
+                cards(StylePreset.allCases.filter(\.usesModel), settings: settings)
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 32)
@@ -48,6 +45,24 @@ struct StyleView: View {
             MenuToolbarItem()
         }
         .sensoryFeedback(.selection, trigger: settings.defaultStyle)
+        // The keyboard's pill may have changed the style while Murmur stayed in front (a note),
+        // and the copy this screen reads is otherwise refreshed only when the app comes forward.
+        .onAppear {
+            settings.reloadFromKeyboard()
+            model.syncStyle()
+        }
+    }
+
+    private func cards(_ styles: [StylePreset], settings: SettingsModel) -> some View {
+        VStack(spacing: 12) {
+            ForEach(styles) { style in
+                StyleCard(style: style, isSelected: settings.defaultStyle == style) {
+                    settings.defaultStyle = style
+                    model.syncStyle()
+                }
+            }
+        }
+        .padding(.top, 8)
     }
 }
 
@@ -92,10 +107,14 @@ struct StyleCard: View {
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 
+    /// What the deployed model wrote from `StyleView.spoken` in each style (live check, 2026-11-13).
     private var example: String {
         switch style {
-        case .verbatim: "Me and him was thinking we could meet Friday at 4."
-        case .grammar: "He and I were thinking we could meet Friday at 4."
+        case .verbatim: "So me and him was thinking maybe we could, like, meet on Friday at 4 if that works for you guys."
+        case .grammar: "He and I were thinking maybe we could meet on Friday at 4 if that works for you guys."
+        case .professional: "He and I would like to meet on Friday at 4, if that works for you."
+        case .casual: "so me and him was thinking maybe we could meet on friday at 4 if that works for you guys"
+        case .concise: "He and I could meet on Friday at 4, if that works for you guys."
         }
     }
 }
