@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blind vote</title>
+<link rel="stylesheet" href="/common.css">
+<style>
+  main { max-width: 860px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .meta { color: var(--muted); font-size: 13px; display: flex; gap: 10px; align-items: center; }
+  details.reference { border: 1px dashed var(--line); border-radius: 8px; padding: 8px 12px; }
+  details.reference summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  details.reference p { margin: 6px 0 0; font-size: 16px; }
+  ol.options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  li.option {
+    display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: start; padding: 12px;
+    border: 2px solid var(--line); border-radius: var(--radius); background: var(--panel); cursor: pointer;
+  }
+  li.option:hover { border-color: var(--muted); }
+  li.option.best { border-color: var(--good); background: var(--good-bg); }
+  li.option.unusable { border-color: var(--bad); background: var(--bad-bg); }
+  li.option .key {
+    width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-weight: 700;
+    background: var(--bg); border: 1px solid var(--line);
+  }
+  li.option.best .key { background: var(--good); color: var(--panel); border-color: var(--good); }
+  li.option .text { font-size: 17px; line-height: 1.5; white-space: pre-wrap; }
+  li.option .side { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+  li.option .side button { font-size: 12px; padding: 3px 8px; }
+  li.option.unusable .side .bad { background: var(--bad); color: var(--panel); border-color: var(--bad); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .keys { font-size: 12px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
+  .toggles { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  td.num { font-variant-numeric: tabular-nums; }
+  .verdict { font-size: 17px; font-weight: 650; }
+  .note { font-size: 13px; color: var(--muted); }
+  .no { color: var(--bad); font-weight: 600; }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Model test</h1>
+  <nav><a href="/correct">Correct the texts</a><a class="here" href="/vote">Blind vote</a></nav>
+  <div class="status" id="status">Loading…</div>
+</header>
+<main id="main"><div class="empty">Loading…</div></main>
+<template id="clip-template">
+  <div class="meta"><span class="badge" data-badge></span><span data-meta></span></div>
+  <div class="player">
+    <audio controls preload="auto" data-audio></audio>
+    <label class="muted" style="font-size:13px"><input type="checkbox" data-autoplay> Play when a clip opens</label>
+  </div>
+  <details class="reference" data-reference-box>
+    <summary>What you said (your corrected text)</summary>
+    <p data-reference></p>
+  </details>
+  <div class="toggles">
+    <label><input type="checkbox" data-highlight> Mark the words that differ from what you said</label>
+  </div>
+  <p class="note">Pick the text you'd most want typed for you. Several if they're equally good. Mark any you couldn't use. You don't see who wrote which.</p>
+  <ol class="options" data-options></ol>
+  <div class="actions">
+    <button class="primary" data-save>Save, next</button>
+    <button data-skip>Skip this clip</button>
+    <button data-prev>← Previous</button>
+    <button data-next>Next →</button>
+    <span class="saved" data-saved></span>
+  </div>
+  <div class="keys">
+    <span><kbd>1</kbd>–<kbd>9</kbd> best</span>
+    <span><kbd>⇧</kbd> + <kbd>1</kbd>–<kbd>9</kbd> unusable</span>
+    <span><kbd>Space</kbd> play or pause</span>
+    <span><kbd>↵</kbd> save, next</span>
+    <span><kbd>←</kbd> <kbd>→</kbd> previous / next</span>
+  </div>
+</template>
+<script type="module">
+import { api, escape, groupName, highlighted, remembered, seconds } from "/common.js";
+
+const LETTERS = "ABCDEFGHI";
+let data = null;
+let clips = [];
+let index = 0;
+/** The choice being made on the open clip, by option id. */
+let choice = { best: new Set(), unusable: new Set() };
+const $ = (selector, root = document) => root.querySelector(selector);
+
+function renderStatus() {
+  const progress = data.progress;
+  const position = clips.length ? `Clip ${index + 1} of ${clips.length}` : "No clips to vote on";
+  $("#status").innerHTML = `${position} · voted <b class="${progress.voted >= progress.total && progress.total ? "done" : ""}">${progress.voted}/${progress.total}</b>` +
+    (progress.same ? ` · ${progress.same} where every candidate wrote the same` : "") +
+    ` · <button id="reveal" style="font-size:12px;padding:2px 8px">Reveal the result</button>`;
+  $("#reveal").onclick = reveal;
+}
+
+function render(play = false) {
+  renderStatus();
+  const main = $("#main");
+  if (clips.length === 0) {
+    main.innerHTML = `<div class="empty">${data.candidates < 2
+      ? "There's nothing to compare yet: run the runner (run.ts) with at least two candidates first."
+      : "No clips to vote on: check some texts on the correction page first."}</div>`;
+    return;
+  }
+  const clip = clips[index];
+  main.replaceChildren($("#clip-template").content.cloneNode(true));
+  const badge = $("[data-badge]");
+  badge.className = `badge ${clip.group}`;
+  badge.textContent = clip.group.toUpperCase();
+  $("[data-meta]").textContent = `${groupName(clip.group)} · ${seconds(clip.audioMs)}${clip.vote ? clip.vote.skipped ? " · skipped" : " · voted" : ""}`;
+  const audio = $("[data-audio]");
+  audio.src = `/audio/${encodeURIComponent(clip.id)}`;
+  const autoplay = $("[data-autoplay]");
+  autoplay.checked = remembered.get("autoplay", true);
+  autoplay.onchange = () => remembered.set("autoplay", autoplay.checked);
+  $("[data-reference]").textContent = clip.reference;
+  const box = $("[data-reference-box]");
+  box.open = remembered.get("showReference", false);
+  box.ontoggle = () => remembered.set("showReference", box.open);
+  const highlight = $("[data-highlight]");
+  highlight.checked = remembered.get("highlight", true);
+  highlight.onchange = () => {
+    remembered.set("highlight", highlight.checked);
+    renderOptions();
+  };
+  choice = { best: new Set(clip.vote?.best ?? []), unusable: new Set(clip.vote?.unusable ?? []) };
+  renderOptions();
+  $("[data-save]").onclick = () => saveAndNext(false);
+  $("[data-skip]").onclick = () => saveAndNext(true);
+  $("[data-prev]").onclick = () => go(index - 1);
+  $("[data-next]").onclick = () => go(index + 1);
+  if (play && autoplay.checked) audio.play().catch(() => {});
+}
+
+function renderOptions() {
+  const clip = clips[index];
+  const on = $("[data-highlight]").checked;
+  $("[data-options]").innerHTML = clip.options.map((option, position) => {
+    const classes = [choice.best.has(option.id) ? "best" : "", choice.unusable.has(option.id) ? "unusable" : ""].join(" ");
+    return `<li class="option ${classes}" data-option="${option.id}"><div class="key">${LETTERS[position] ?? position + 1}</div>` +
+      `<div class="text">${highlighted(clip.reference, option.text, on)}</div>` +
+      `<div class="side"><button class="pick" data-pick="${option.id}">Best</button><button class="bad" data-bad="${option.id}">Unusable</button></div></li>`;
+  }).join("");
+}
+
+function toggleBest(id) {
+  if (choice.best.has(id)) choice.best.delete(id);
+  else {
+    choice.best.add(id);
+    choice.unusable.delete(id);
+  }
+  renderOptions();
+}
+
+function toggleUnusable(id) {
+  if (choice.unusable.has(id)) choice.unusable.delete(id);
+  else {
+    choice.unusable.add(id);
+    choice.best.delete(id);
+  }
+  renderOptions();
+}
+
+function note(text, error = false) {
+  const element = $("[data-saved]");
+  if (!element) return;
+  element.textContent = text;
+  element.classList.toggle("error", error);
+}
+
+async function saveAndNext(skipped) {
+  const clip = clips[index];
+  if (!skipped && choice.best.size === 0 && choice.unusable.size < clip.options.length) {
+    return note("Pick at least one as best, or mark them all unusable, or skip.", true);
+  }
+  try {
+    await api(`/api/votes/${encodeURIComponent(clip.id)}`, {
+      method: "PUT",
+      body: JSON.stringify({ best: [...choice.best], unusable: [...choice.unusable], skipped }),
+    });
+  } catch (error) {
+    return note(`Not saved: ${error.message}`, true);
+  }
+  const wasVoted = clip.vote && !clip.vote.skipped;
+  clip.vote = { best: [...choice.best], unusable: [...choice.unusable], skipped };
+  if (!wasVoted && !skipped) data.progress.voted++;
+  if (wasVoted && skipped) data.progress.voted--;
+  const next = clips.findIndex((item, position) => position > index && !item.vote);
+  const anyLeft = clips.findIndex((item) => !item.vote);
+  if (next !== -1) go(next);
+  else if (anyLeft !== -1) go(anyLeft);
+  else {
+    render();
+    note("Every clip has a vote. Reveal the result when you're ready.");
+  }
+}
+
+function go(position) {
+  if (position < 0 || position >= clips.length) return;
+  index = position;
+  render(true);
+}
+
+function percent(value) {
+  return value == null ? "—" : `${Math.round(value)}`;
+}
+
+async function reveal() {
+  const left = data.progress.total - data.progress.voted;
+  if (left > 0 && !confirm(`${left} clips have no vote yet. Revealing shows which candidate is which, and that can sway the votes you make after it. Reveal anyway?`)) return;
+  let report;
+  try {
+    report = await api("/api/reveal");
+  } catch (error) {
+    return alert(`Couldn't make the result: ${error.message}`);
+  }
+  const rows = [...report.candidates].sort((a, b) => {
+    const rank = (name) => report.ranking.includes(name) ? report.ranking.indexOf(name) : 999;
+    return rank(a.name) - rank(b.name) || (b.votes?.points ?? -1) - (a.votes?.points ?? -1);
+  });
+  $("#main").innerHTML = `
+    <div class="panel">
+      <p class="verdict">${escape(report.verdict)}</p>
+      <p class="note">Ranked by ${report.rankedBy === "votes" ? "your votes: the Russian side (Russian and mixed clips) weighs 0.6, English 0.4; your own model wins a tie within 3 points" : "word error rate, until you vote"}. ${report.voted} clips voted.</p>
+      <table>
+        <thead><tr><th>#</th><th>Candidate</th><th>Votes</th><th>ru / en</th><th>Qualifies</th><th>Word errors ru / mix / en</th><th>Median time</th><th>Price per 1,000 min</th></tr></thead>
+        <tbody>${rows.map((row) => `<tr>
+          <td class="num">${report.ranking.includes(row.name) ? report.ranking.indexOf(row.name) + 1 : ""}</td>
+          <td>${escape(row.name)}${row.own ? " <span class=\"muted\">(own)</span>" : ""}</td>
+          <td class="num">${percent(row.votes?.points)}</td>
+          <td class="num">${percent(row.votes?.ruPoints)} / ${percent(row.votes?.enPoints)}</td>
+          <td>${row.qualification.qualifies ? "yes" : `<span class="no">no</span><br><span class="note">${escape(row.qualification.reasons.join("; "))}</span>`}</td>
+          <td class="num">${[row.errorRate.ru, row.errorRate.mix, row.errorRate.en].map((value) => value == null ? "—" : `${value}%`).join(" / ")}</td>
+          <td class="num">${row.speed.medianMs == null ? "—" : `${row.speed.medianMs} ms`}</td>
+          <td class="num">${row.cost.usdPer1000Minutes == null ? (row.own ? "fixed (GPU)" : "—") : `$${row.cost.usdPer1000Minutes}`}</td>
+        </tr>`).join("")}</tbody>
+      </table>
+      <p class="note">Every clip's differences are in report.md in the work folder (the runner writes it).</p>
+      <p><button id="back">Back to voting</button></p>
+    </div>`;
+  $("#back").onclick = () => render();
+}
+
+document.addEventListener("click", (event) => {
+  const pick = event.target.closest("[data-pick]");
+  if (pick) return toggleBest(pick.dataset.pick);
+  const bad = event.target.closest("[data-bad]");
+  if (bad) return toggleUnusable(bad.dataset.bad);
+  const option = event.target.closest("[data-option]");
+  if (option) toggleBest(option.dataset.option);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (!clips.length || event.metaKey || event.ctrlKey || event.altKey) return;
+  // A focused button, checkbox or the player answers Enter and Space itself: don't act twice.
+  if (event.target.closest?.("input, select, button, audio, summary") && (event.key === "Enter" || event.code === "Space")) return;
+  const clip = clips[index];
+  const digit = event.code.match(/^Digit([1-9])$/)?.[1];
+  if (digit && clip.options[Number(digit) - 1]) {
+    event.preventDefault();
+    const id = clip.options[Number(digit) - 1].id;
+    event.shiftKey ? toggleUnusable(id) : toggleBest(id);
+  } else if (event.code === "Space") {
+    event.preventDefault();
+    const audio = $("[data-audio]");
+    audio && (audio.paused ? audio.play() : audio.pause());
+  } else if (event.key === "Enter") {
+    event.preventDefault();
+    saveAndNext(false);
+  } else if (event.key === "ArrowRight") go(index + 1);
+  else if (event.key === "ArrowLeft") go(index - 1);
+});
+
+async function load() {
+  data = await api("/api/ballot");
+  clips = data.clips.filter((clip) => !clip.same);
+  const first = clips.findIndex((clip) => !clip.vote);
+  index = first === -1 ? 0 : first;
+  render(false);
+}
+
+load().catch((error) => {
+  $("#main").innerHTML = `<div class="empty">Couldn't load the ballot: ${escape(error.message)}</div>`;
+});
+</script>
+</body>
+</html>

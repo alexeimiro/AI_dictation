@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Correct the texts</title>
+<link rel="stylesheet" href="/common.css">
+<style>
+  .layout { display: grid; grid-template-columns: 320px 1fr; gap: 16px; padding: 16px; align-items: start; }
+  aside { position: sticky; top: 64px; max-height: calc(100vh - 80px); display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+  .filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px; border-bottom: 1px solid var(--line); }
+  .filters button { padding: 3px 9px; font-size: 13px; border-radius: 999px; }
+  .filters button.here { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+  ul.clips { list-style: none; margin: 0; padding: 4px; overflow: auto; }
+  ul.clips li {
+    display: grid; grid-template-columns: auto auto 1fr auto; gap: 8px; align-items: center;
+    padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 13px;
+  }
+  ul.clips li:hover { background: var(--bg); }
+  ul.clips li.here { background: var(--bg); outline: 2px solid var(--accent); outline-offset: -2px; }
+  ul.clips li .snippet { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+  ul.clips li .mark { font-weight: 700; color: var(--good); min-width: 1em; text-align: right; }
+  ul.clips li.out .snippet { text-decoration: line-through; }
+  ul.clips li.private .mark { color: var(--bad); }
+  ul.clips li.unselected { opacity: .55; }
+  .editor { display: flex; flex-direction: column; gap: 14px; }
+  .meta { color: var(--muted); font-size: 13px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .label { font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 4px; }
+  .phone { padding: 10px 12px; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); white-space: pre-wrap; }
+  textarea {
+    width: 100%; min-height: 120px; resize: vertical; font: 17px/1.5 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink);
+  }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
+  .hint { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .row { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+  .row label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .keys { font-size: 12px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
+  .checked-note { color: var(--good); font-weight: 600; font-size: 13px; }
+  .private-note { color: var(--bad); font-size: 13px; }
+  @media (max-width: 760px) {
+    .layout { grid-template-columns: 1fr; }
+    aside { position: static; max-height: 40vh; }
+  }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>Model test</h1>
+  <nav><a class="here" href="/correct">Correct the texts</a><a href="/vote">Blind vote</a></nav>
+  <div class="status" id="status">Loading…</div>
+</header>
+<div class="layout">
+  <aside class="panel">
+    <div class="filters" id="filters"></div>
+    <ul class="clips" id="list"></ul>
+  </aside>
+  <section class="panel editor" id="editor"><div class="empty">Loading…</div></section>
+</div>
+<template id="editor-template">
+  <div class="meta"><span class="badge" data-group-badge></span><span data-meta></span></div>
+  <div class="player">
+    <audio controls preload="auto" data-audio></audio>
+    <select data-speed title="Playback speed"><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option></select>
+    <label class="muted" style="font-size:13px"><input type="checkbox" data-autoplay> Play when a clip opens</label>
+  </div>
+  <div>
+    <div class="label">What the phone typed</div>
+    <div class="phone" data-phone></div>
+  </div>
+  <div>
+    <div class="label">What you said</div>
+    <textarea data-reference spellcheck="true"></textarea>
+    <div class="hint">Exactly what you said, typed the way you want it typed: punctuation, capitals, numbers as figures, names spelled right. Leave out what you didn't say. Every candidate is compared with this text.</div>
+  </div>
+  <div class="row">
+    <span class="muted">Language:</span>
+    <label><input type="radio" name="group" value="ru"> Russian</label>
+    <label><input type="radio" name="group" value="mix"> Russian with English words</label>
+    <label><input type="radio" name="group" value="en"> English</label>
+  </div>
+  <div class="row">
+    <span class="muted">Has:</span>
+    <label><input type="checkbox" data-tag="names"> names</label>
+    <label><input type="checkbox" data-tag="numbers"> numbers</label>
+    <label><input type="checkbox" data-tag="terms"> terms</label>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" data-selected> In the test</label>
+    <label><input type="checkbox" data-excluded> Private: never send this clip anywhere</label>
+  </div>
+  <div class="actions">
+    <button class="primary" data-check>Checked, next</button>
+    <button data-next>Skip</button>
+    <button data-reset>Start again from the phone's text</button>
+    <span class="saved" data-saved></span>
+  </div>
+  <div class="keys">
+    <span><kbd>⌘</kbd><kbd>↵</kbd> checked, next</span>
+    <span><kbd>⌥</kbd><kbd>Space</kbd> play or pause</span>
+    <span><kbd>⌥</kbd><kbd>R</kbd> from the start</span>
+    <span><kbd>⌥</kbd><kbd>↓</kbd> / <kbd>⌥</kbd><kbd>↑</kbd> next / previous clip</span>
+  </div>
+</template>
+<script type="module">
+import { api, escape, groupName, remembered, seconds } from "/common.js";
+
+const FILTERS = [
+  { id: "test", label: "In the test", test: (clip) => clip.selected && !clip.excluded },
+  { id: "todo", label: "Not checked", test: (clip) => clip.selected && !clip.excluded && !clip.checked },
+  { id: "all", label: "All", test: (clip) => !clip.excluded },
+  { id: "private", label: "Private", test: (clip) => clip.excluded },
+];
+
+let state = { clips: [], counts: null, targets: null };
+let filter = remembered.get("filter", "test");
+let currentId = null;
+let saveTimer = null;
+
+const $ = (selector, root = document) => root.querySelector(selector);
+
+function visible() {
+  const rule = FILTERS.find((item) => item.id === filter) ?? FILTERS[0];
+  return state.clips.filter(rule.test);
+}
+
+function current() {
+  return state.clips.find((clip) => clip.id === currentId) ?? null;
+}
+
+function renderStatus() {
+  const { selected, checked } = state.counts;
+  const t = state.targets;
+  const part = (label, value, target) => `${label} <b class="${value >= target ? "done" : ""}">${value}/${target}</b>`;
+  $("#status").innerHTML = [
+    part("In the test", selected.total, t.total),
+    part("Russian", selected.ru, t.ru),
+    part("mixed", selected.mix, t.mix),
+    part("English", selected.en, t.en),
+    part("short", selected.short, t.short),
+    `checked <b class="${checked.total >= selected.total && selected.total ? "done" : ""}">${checked.total}/${selected.total}</b>`,
+  ].join(" · ");
+}
+
+function renderFilters() {
+  $("#filters").innerHTML = FILTERS.map((item) =>
+    `<button data-filter="${item.id}" class="${item.id === filter ? "here" : ""}">${item.label} (${state.clips.filter(item.test).length})</button>`
+  ).join("");
+}
+
+function renderList() {
+  const clips = visible();
+  $("#list").innerHTML = clips.length ? clips.map((clip) => {
+    const classes = [clip.id === currentId ? "here" : "", clip.excluded ? "private" : "", clip.selected ? "" : "unselected"].join(" ");
+    const mark = clip.excluded ? "✗" : clip.checked ? "✓" : "";
+    const text = clip.reference ?? clip.phoneText;
+    return `<li data-id="${escape(clip.id)}" class="${classes}"><span class="badge ${clip.group}">${clip.group.toUpperCase()}</span>` +
+      `<span class="muted">${seconds(clip.audioMs)}</span><span class="snippet">${escape(text)}</span><span class="mark">${mark}</span></li>`;
+  }).join("") : `<li class="empty" style="display:block">Nothing here.</li>`;
+  $("#list li.here")?.scrollIntoView({ block: "nearest" });
+}
+
+function renderEditor(play = false) {
+  const clip = current();
+  const editor = $("#editor");
+  if (!clip) {
+    editor.innerHTML = `<div class="empty">${state.clips.length ? "Pick a clip on the left." : "No clips yet: run pull_phone.ts first."}</div>`;
+    return;
+  }
+  editor.replaceChildren($("#editor-template").content.cloneNode(true));
+  const badge = $("[data-group-badge]", editor);
+  badge.className = `badge ${clip.group}`;
+  badge.textContent = clip.group.toUpperCase();
+  const when = clip.createdAt ? new Date(clip.createdAt).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+  $("[data-meta]", editor).innerHTML = [when, seconds(clip.audioMs), clip.style === "verbatim" ? "Word for word" : clip.style, clip.source]
+    .filter(Boolean).map(escape).join(" · ") +
+    (clip.checked ? ` <span class="checked-note">✓ checked</span>` : "") + (clip.excluded ? ` <span class="private-note">private: never sent</span>` : "");
+  const audio = $("[data-audio]", editor);
+  audio.src = `/audio/${encodeURIComponent(clip.id)}`;
+  const speed = $("[data-speed]", editor);
+  speed.value = String(remembered.get("speed", 1));
+  audio.playbackRate = Number(speed.value);
+  speed.onchange = () => {
+    audio.playbackRate = Number(speed.value);
+    remembered.set("speed", Number(speed.value));
+  };
+  const autoplay = $("[data-autoplay]", editor);
+  autoplay.checked = remembered.get("autoplay", true);
+  autoplay.onchange = () => remembered.set("autoplay", autoplay.checked);
+  $("[data-phone]", editor).textContent = clip.phoneText;
+  const reference = $("[data-reference]", editor);
+  reference.value = clip.reference ?? clip.phoneText;
+  reference.oninput = () => {
+    clearTimeout(saveTimer);
+    note("Editing…");
+    saveTimer = setTimeout(() => save({ reference: reference.value }), 600);
+  };
+  for (const radio of editor.querySelectorAll('input[name="group"]')) {
+    radio.checked = radio.value === clip.group;
+    radio.onchange = () => save({ group: radio.value });
+  }
+  for (const box of editor.querySelectorAll("[data-tag]")) {
+    box.checked = clip.tags.includes(box.dataset.tag);
+    box.onchange = () => save({ tags: [...editor.querySelectorAll("[data-tag]:checked")].map((item) => item.dataset.tag) });
+  }
+  const selected = $("[data-selected]", editor);
+  selected.checked = clip.selected;
+  selected.disabled = clip.excluded;
+  selected.onchange = () => save({ selected: selected.checked });
+  const excluded = $("[data-excluded]", editor);
+  excluded.checked = clip.excluded;
+  excluded.onchange = () => save({ excluded: excluded.checked }).then(() => renderEditor());
+  $("[data-check]", editor).onclick = () => checkAndNext();
+  $("[data-next]", editor).onclick = () => move(1);
+  $("[data-reset]", editor).onclick = () => {
+    reference.value = clip.phoneText;
+    save({ reference: clip.phoneText });
+  };
+  if (play && autoplay.checked) audio.play().catch(() => {});
+}
+
+function note(text, error = false) {
+  const element = $("[data-saved]");
+  if (!element) return;
+  element.textContent = text;
+  element.classList.toggle("error", error);
+}
+
+/** Saves go out one after another, in the order they were made. */
+let chain = Promise.resolve();
+let inFlight = 0;
+
+function save(fields) {
+  const clip = current();
+  if (!clip) return Promise.resolve();
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  const id = clip.id;
+  inFlight++;
+  chain = chain.then(async () => {
+    try {
+      const { clip: saved, counts } = await api(`/api/clips/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(fields) });
+      const index = state.clips.findIndex((item) => item.id === id);
+      state.clips[index] = { ...state.clips[index], ...saved };
+      state.counts = counts;
+      renderStatus();
+      renderFilters();
+      renderList();
+      if (id === currentId) note("Saved");
+    } catch (error) {
+      if (id === currentId) note(`Not saved: ${error.message}`, true);
+    } finally {
+      inFlight--;
+    }
+  });
+  return chain;
+}
+
+async function checkAndNext() {
+  const reference = $("[data-reference]");
+  if (!reference || !reference.value.trim()) return note("Write what you said first.", true);
+  await save({ reference: reference.value, checked: true });
+  const clips = visible();
+  const index = clips.findIndex((clip) => clip.id === currentId);
+  const next = [...clips.slice(index + 1), ...clips.slice(0, Math.max(0, index))].find((clip) => !clip.checked && !clip.excluded);
+  if (next) open(next.id, true);
+  else {
+    renderEditor();
+    note("Every clip here is checked.");
+  }
+}
+
+function move(step) {
+  const clips = visible();
+  const index = clips.findIndex((clip) => clip.id === currentId);
+  const next = clips[index + step];
+  if (next) open(next.id, true);
+}
+
+function open(id, play = false) {
+  // A text still being typed is saved before the page moves on.
+  const reference = $("[data-reference]");
+  const clip = current();
+  if (clip && reference && saveTimer) save({ reference: reference.value });
+  currentId = id;
+  renderList();
+  renderEditor(play);
+  $("[data-reference]")?.focus();
+}
+
+document.addEventListener("click", (event) => {
+  const row = event.target.closest("#list li[data-id]");
+  if (row) return open(row.dataset.id, true);
+  const button = event.target.closest("[data-filter]");
+  if (button) {
+    filter = button.dataset.filter;
+    remembered.set("filter", filter);
+    renderFilters();
+    renderList();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  const audio = $("[data-audio]");
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    event.preventDefault();
+    checkAndNext();
+  } else if (event.altKey && event.code === "Space" && audio) {
+    event.preventDefault();
+    audio.paused ? audio.play() : audio.pause();
+  } else if (event.altKey && event.code === "KeyR" && audio) {
+    event.preventDefault();
+    audio.currentTime = 0;
+    audio.play();
+  } else if (event.altKey && event.key === "ArrowDown") {
+    event.preventDefault();
+    move(1);
+  } else if (event.altKey && event.key === "ArrowUp") {
+    event.preventDefault();
+    move(-1);
+  }
+});
+
+window.addEventListener("beforeunload", (event) => {
+  if (saveTimer || inFlight) {
+    const reference = $("[data-reference]");
+    if (reference) save({ reference: reference.value });
+    event.preventDefault();
+  }
+});
+
+async function load() {
+  const data = await api("/api/clips");
+  state = data;
+  renderStatus();
+  renderFilters();
+  const clips = visible();
+  const first = clips.find((clip) => !clip.checked) ?? clips[0] ?? state.clips[0];
+  currentId = first?.id ?? null;
+  renderList();
+  renderEditor(false);
+}
+
+load().catch((error) => {
+  $("#editor").innerHTML = `<div class="empty">Couldn't load the clips: ${escape(error.message)}</div>`;
+});
+</script>
+</body>
+</html>

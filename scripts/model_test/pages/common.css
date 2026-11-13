@@ -1,0 +1,80 @@
+:root {
+  --bg: #f6f6f4;
+  --panel: #ffffff;
+  --ink: #1d1d1b;
+  --muted: #6b6b66;
+  --line: #e2e1dc;
+  --accent: #2a62c9;
+  --accent-ink: #ffffff;
+  --good: #1f7a4d;
+  --good-bg: #e3f3ea;
+  --bad: #b3261e;
+  --bad-bg: #fbe9e7;
+  --mark: #fff1b8;
+  --ru: #8a4fd6;
+  --mix: #c46a12;
+  --en: #2a7fb8;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161615;
+    --panel: #20201e;
+    --ink: #ecebe6;
+    --muted: #a3a29b;
+    --line: #34332f;
+    --accent: #6f9bff;
+    --accent-ink: #0f1420;
+    --good: #6fd4a0;
+    --good-bg: #173326;
+    --bad: #ff8a80;
+    --bad-bg: #3a1d1a;
+    --mark: #5a4a12;
+    --ru: #b48cff;
+    --mix: #f0a050;
+    --en: #6cb8ec;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); }
+body { font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+header.top {
+  display: flex; align-items: center; gap: 16px; padding: 10px 16px; background: var(--panel);
+  border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2;
+}
+header.top h1 { font-size: 16px; margin: 0; font-weight: 650; }
+header.top nav { display: flex; gap: 4px; }
+header.top nav a {
+  color: var(--muted); text-decoration: none; padding: 4px 10px; border-radius: 999px;
+}
+header.top nav a.here { background: var(--accent); color: var(--accent-ink); }
+header.top .status { margin-left: auto; color: var(--muted); font-size: 13px; text-align: right; }
+.status b { color: var(--ink); font-weight: 600; }
+.status .done { color: var(--good); }
+button {
+  font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  border-radius: 8px; padding: 6px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button:disabled { opacity: .5; cursor: default; }
+kbd {
+  font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--line);
+  border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; color: var(--muted);
+}
+.badge { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .03em; padding: 1px 6px; border-radius: 4px; color: #fff; }
+.badge.ru { background: var(--ru); }
+.badge.mix { background: var(--mix); }
+.badge.en { background: var(--en); }
+.muted { color: var(--muted); }
+.saved { color: var(--muted); font-size: 13px; }
+.saved.error { color: var(--bad); }
+audio { width: 100%; max-width: 520px; height: 36px; }
+.player { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; }
+.empty { padding: 48px 16px; text-align: center; color: var(--muted); }
+mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
+@media (max-width: 760px) {
+  header.top { flex-wrap: wrap; }
+  header.top .status { margin-left: 0; text-align: left; width: 100%; }
+}

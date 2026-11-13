@@ -1,0 +1,99 @@
+{
+  "languageHints": ["ru", "en"],
+  "keywords": [],
+  "ownCost": "your GPU's rent: about €214 a month for a dedicated 24 GB card, or $0.34–0.89 an hour rented by the hour (prices of 2026-11-13)",
+  "candidates": [
+    {
+      "name": "openai",
+      "kind": "openai",
+      "model": "gpt-transcribe",
+      "keyEnv": "OPENAI_API_KEY",
+      "usdPerMinute": 0.0045,
+      "priceSource": "developers.openai.com/api/docs/pricing, 2026-11-13",
+      "note": "Today's service, sent exactly as the transcribe function sends it."
+    },
+    {
+      "name": "soniox",
+      "kind": "soniox",
+      "model": "stt-rt-v6",
+      "keyEnv": "SONIOX_API_KEY",
+      "usdPerMinute": 0.002,
+      "priceSource": "soniox.com/pricing, 2026-11-13 (realtime)",
+      "options": { "pace": "burst" },
+      "note": "Through the live relay's own adapter; the whole clip at once, then finalize. pace: realtime streams it as spoken."
+    },
+    {
+      "name": "elevenlabs",
+      "kind": "elevenlabs",
+      "model": "scribe_v3",
+      "keyEnv": "ELEVENLABS_API_KEY",
+      "usdPerMinute": 0.0033,
+      "priceSource": "elevenlabs.io pricing, 2026-11-13"
+    },
+    {
+      "name": "qwen3-asr",
+      "kind": "openai-compatible",
+      "model": "Qwen/Qwen3-ASR-1.7B",
+      "url": "http://127.0.0.1:8001",
+      "own": true,
+      "serve": {
+        "command": ["~/.venvs/vllm/bin/vllm", "serve", "Qwen/Qwen3-ASR-1.7B", "--host", "127.0.0.1", "--port", "8001", "--gpu-memory-utilization", "0.85"],
+        "ready": "http://127.0.0.1:8001/health",
+        "timeoutMs": 1200000
+      }
+    },
+    {
+      "name": "whisper-turbo",
+      "kind": "openai-compatible",
+      "model": "openai/whisper-large-v3-turbo",
+      "url": "http://127.0.0.1:8002",
+      "own": true,
+      "serve": {
+        "command": ["~/.venvs/vllm/bin/vllm", "serve", "openai/whisper-large-v3-turbo", "--host", "127.0.0.1", "--port", "8002", "--gpu-memory-utilization", "0.85"],
+        "ready": "http://127.0.0.1:8002/health",
+        "timeoutMs": 1200000
+      }
+    },
+    {
+      "name": "voxtral-realtime",
+      "kind": "vllm-realtime",
+      "model": "mistralai/Voxtral-Mini-4B-Realtime-2602",
+      "url": "ws://127.0.0.1:8003/v1/realtime",
+      "own": true,
+      "serve": {
+        "command": ["~/.venvs/vllm/bin/vllm", "serve", "mistralai/Voxtral-Mini-4B-Realtime-2602", "--host", "127.0.0.1", "--port", "8003",
+          "--tokenizer-mode", "mistral", "--compilation_config", "{\"cudagraph_mode\": \"PIECEWISE\"}", "--max-model-len", "8192",
+          "--gpu-memory-utilization", "0.85"],
+        "ready": "http://127.0.0.1:8003/health",
+        "timeoutMs": 1200000,
+        "env": { "VLLM_DISABLE_COMPILE_CACHE": "1" }
+      },
+      "note": "A live model: the whole clip at once here; options.pace realtime streams it as spoken. Needs 16 GB of GPU memory."
+    },
+    {
+      "name": "parakeet-v3",
+      "kind": "openai-compatible",
+      "model": "nemo-parakeet-tdt-0.6b-v3",
+      "url": "http://127.0.0.1:8101",
+      "own": true,
+      "serve": {
+        "command": ["~/.venvs/onnx/bin/python", "scripts/model_test/model_server.py", "--model", "nemo-parakeet-tdt-0.6b-v3", "--device", "cuda", "--port", "8101"],
+        "ready": "http://127.0.0.1:8101/health",
+        "timeoutMs": 1200000
+      }
+    },
+    {
+      "name": "gigaam",
+      "kind": "openai-compatible",
+      "model": "gigaam-multilingual-large-ctc",
+      "url": "http://127.0.0.1:8102",
+      "own": true,
+      "serve": {
+        "command": ["~/.venvs/onnx/bin/python", "scripts/model_test/model_server.py", "--model", "gigaam-multilingual-large-ctc", "--device", "cuda", "--port", "8102"],
+        "ready": "http://127.0.0.1:8102/health",
+        "timeoutMs": 1200000
+      },
+      "note": "Sber's multilingual model. Russian-only gigaam-v3-e2e-rnnt writes punctuation, if you'd rather try that one."
+    }
+  ]
+}
