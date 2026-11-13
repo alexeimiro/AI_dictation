@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertFalse } from "jsr:@std/assert@1";
+import type { CostCall } from "../_shared/cost.ts";
 import type { Caller } from "../_shared/http.ts";
 import { createLiveHandler, type LiveConfig, liveConfig, type LiveDeps, parseStart, sessionBudgetMs } from "../_shared/live.ts";
 import type { LiveProvider, LiveTarget } from "../_shared/live/adapter.ts";
@@ -141,6 +142,8 @@ interface Setup {
   adapters?: Record<string, LiveProvider>;
   authenticate?: LiveDeps["authenticate"];
   connect?: LiveDeps["connect"];
+  /** Record what the sessions cost too (`recordCost`), as the deployed function does. */
+  costs?: boolean;
 }
 
 /** A handler on fakes, and everything it did. */
@@ -152,6 +155,7 @@ function setup(options: Setup = {}) {
     connected: [] as LiveTarget[],
     preflights: [] as { caller: Caller; scope: string; dictationId: string; perMinute: number }[],
     usage: [] as { caller: Caller; dictationId: string; words: number }[],
+    costs: [] as { caller: Caller; dictationId: string; calls: CostCall[] }[],
     kept: [] as PromiseLike<unknown>[],
     logs: [] as Record<string, unknown>[],
   };
@@ -175,6 +179,14 @@ function setup(options: Setup = {}) {
       recorded.usage.push({ caller, dictationId, words });
       return Promise.resolve();
     },
+    ...(options.costs
+      ? {
+        recordCost: (caller: Caller, dictationId: string, calls: CostCall[]) => {
+          recorded.costs.push({ caller, dictationId, calls });
+          return Promise.resolve();
+        },
+      }
+      : {}),
     background: (work) => void recorded.kept.push(work),
     upgrade: (request) => {
       upgraded.add(request);
@@ -784,6 +796,50 @@ Deno.test("a close without finalize, or before the final text, is a cancel: noth
   assertEquals([h.recorded.logs[2].outcome, h.recorded.logs[2].words], ["cancelled", null]);
 });
 
+Deno.test("a session costs the audio that reached the service, whether it ended in text or was cancelled", async () => {
+  const h = setup({ costs: true });
+  const first = await session(h);
+  first.client.receive(frame(3200));
+  first.client.receive(frame(3200));
+  first.client.receive(finalize(200));
+  first.provider.receive(reply(settled("Привет, мир"), FIN));
+  assertEquals(h.recorded.costs, [{
+    caller: USER,
+    dictationId: DICTATION,
+    calls: [{ kind: "speech", path: "live", plan: "basic", provider: "soniox", model: "stt-rt-v6", audioMs: 200 }],
+  }]);
+
+  // What was said before a cancel was already sent, and the service bills it.
+  const second = await session(h);
+  second.client.receive(frame(16000));
+  second.client.drop(1001);
+  assertEquals(h.recorded.usage.length, 1, "nothing is counted toward the week for a cancel");
+  assertEquals(h.recorded.costs.length, 2);
+  const [cancelled] = h.recorded.costs[1].calls;
+  assertEquals(cancelled.kind === "speech" && cancelled.audioMs, 500);
+});
+
+Deno.test("a session that sent the service no audio costs nothing", async () => {
+  // Ended in an empty final: the service heard nothing.
+  const empty = setup({ costs: true });
+  const quiet = await session(empty);
+  quiet.client.receive(finalize(0));
+  quiet.provider.receive(reply(FIN));
+  assertEquals(empty.recorded.costs, []);
+
+  // Refused by the preflight: the audio never left the relay.
+  const refused = setup({ costs: true, preflight: { allowed: false, reason: "limit_reached" } });
+  await refused.handler(upgradeRequest());
+  const client = refused.clients[0];
+  client.open();
+  client.receive(startMessage());
+  client.receive(frame(3200));
+  refused.providers[0]?.open();
+  await tick();
+  assertEquals(client.closedWith?.reason, "limit_reached");
+  assertEquals(refused.recorded.costs, []);
+});
+
 Deno.test("no final text 2.5 s after finalize ends the socket as finalize_timeout", async () => {
   const h = setup();
   const { client, provider } = await session(h);
@@ -861,6 +917,28 @@ Deno.test("the budget is what is left of the worker's time, and a worker near it
   assertEquals(sessionBudgetMs(config, WORKER), 140_000);
   assertEquals(sessionBudgetMs(config, { ...WORKER, workerAgeMs: 60_000 }), 85_000);
   assertEquals(sessionBudgetMs(config, { ...WORKER, workerAgeMs: 170_000 }), 0);
+});
+
+Deno.test("on a server no platform ends by its age, an old process takes sockets as a new one does", async () => {
+  const unbounded = liveConfig(new Map([["LIVE_WALL_CLOCK_MS", "0"]]));
+  assertEquals(unbounded.wallClockMs, null);
+  assertEquals(sessionBudgetMs(unbounded, WORKER), 140_000);
+  assertEquals(sessionBudgetMs(unbounded, { ...WORKER, workerAgeMs: 3_600_000 }), 140_000);
+
+  // An hour and a day after boot: the socket's time is its own bound, whatever that is set to.
+  const hour = setup({ worker: { workerAgeMs: 3_600_000 }, env: { LIVE_WALL_CLOCK_MS: "0" } });
+  await session(hour);
+  assertEquals(hour.clients[0].messages.at(-1)?.budgetSeconds, 140);
+  const day = setup({ worker: { workerAgeMs: 86_400_000 }, env: { LIVE_WALL_CLOCK_MS: "0", LIVE_MAX_SESSION_MS: "600000" } });
+  await session(day);
+  assertEquals(day.clients[0].messages.at(-1)?.budgetSeconds, 600);
+
+  // The same process under a platform's clock would take none.
+  const supabase = setup({ worker: { workerAgeMs: 3_600_000 } });
+  assertEquals((await supabase.handler(upgradeRequest())).status, 503);
+  // Only a plain 0 turns the clock off.
+  assertEquals(liveConfig(new Map([["LIVE_WALL_CLOCK_MS", "0.0"]])).wallClockMs, 150_000);
+  assertEquals(liveConfig(new Map([["LIVE_WALL_CLOCK_MS", " 0 "]])).wallClockMs, null);
 });
 
 Deno.test("a socket with no audio for 15 s is closed as idle", async () => {

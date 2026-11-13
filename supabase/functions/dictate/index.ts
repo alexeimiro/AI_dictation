@@ -41,6 +41,7 @@
 // TRANSLATE_EFFORT (each defaults to its CLEANUP_* value; the translation deadline is
 // CLEANUP_DEADLINE_MS), DICTATE_DEADLINE_MS (default 26000), DICTATE_DISABLED=1.
 import { dictateConfig } from "../_shared/config.ts";
+import { createCostRecorder } from "../_shared/cost.ts";
 import { createDictateHandler } from "../_shared/dictate.ts";
 import { adminClient, authenticate, background } from "../_shared/http.ts";
 import { dictationPreflight, readQuota, recordUsage } from "../_shared/preflight.ts";
@@ -55,5 +56,6 @@ Deno.serve(createDictateHandler({
   preflight: (caller, scope, dictationId, perMinute) => dictationPreflight(admin, caller, scope, dictationId, perMinute),
   readQuota: (caller, signal) => readQuota(admin, caller, signal),
   recordUsage: (caller, dictationId, words) => recordUsage(admin, caller, dictationId, words),
+  recordCost: createCostRecorder(() => admin),
   background,
 }));

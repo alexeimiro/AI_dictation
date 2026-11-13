@@ -47,9 +47,11 @@
 // or `?bench=`) and `?mode=` goes to it. A bench key without `?mode=` reaches the relay, where
 // `?provider=` may choose the service for that socket.
 // Env: LIVE_PROVIDER (default soniox), SONIOX_API_KEY, LIVE_SONIOX_MODEL (default stt-rt-v6),
-// LIVE_MAX_SESSION_MS (default 140000), LIVE_WALL_CLOCK_MS (default 150000, the Free plan's; a
+// LIVE_MAX_SESSION_MS (default 140000), LIVE_WALL_CLOCK_MS (default 150000, the Free plan's; 0 on
+// a server no platform ends by its age, where a socket's time is LIVE_MAX_SESSION_MS alone; a
 // paid plan's is 400000), LIVE_DISABLED=1, LIVE_BENCH_KEY (bench runs and the spike).
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
+import { createCostRecorder } from "../_shared/cost.ts";
 import { adminClient, authenticate, background } from "../_shared/http.ts";
 import { createLiveHandler, liveConfig } from "../_shared/live.ts";
 import type { LiveTarget } from "../_shared/live/adapter.ts";
@@ -111,6 +113,7 @@ const live = createLiveHandler({
   preflight: async (caller, scope, dictationId, perMinute) =>
     await dictationPreflight(admin(), caller, scope, dictationId, perMinute),
   recordUsage: async (caller, dictationId, words) => await recordUsage(admin(), caller, dictationId, words),
+  recordCost: createCostRecorder(admin),
   background,
   upgrade: (request) => Deno.upgradeWebSocket(request),
   connect,

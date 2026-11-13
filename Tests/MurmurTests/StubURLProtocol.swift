@@ -8,6 +8,8 @@ final class StubURLProtocol: URLProtocol {
         var headers = ["Content-Type": "application/json"]
         var body = Data(#"{"text":"Hello."}"#.utf8)
         var failure: URLError?
+        /// Never answers: the request stays out until it is cancelled or times out.
+        var hangs = false
     }
 
     struct Sent: Sendable {
@@ -38,6 +40,7 @@ final class StubURLProtocol: URLProtocol {
             Self.sent[host, default: []].append(Sent(request: request, body: body))
             return Self.replies[host] ?? Reply()
         }
+        if reply.hangs { return }
         if let failure = reply.failure {
             client?.urlProtocol(self, didFailWithError: failure)
             return

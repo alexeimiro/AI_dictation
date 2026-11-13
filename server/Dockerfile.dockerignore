@@ -1,0 +1,7 @@
+# Only what the server runs goes into the build context. Nothing else in the repository, and no
+# .env file, can reach the image.
+*
+!supabase/functions/_shared
+!supabase/functions/live/spike.ts
+!server/main.ts
+**/*_test.ts

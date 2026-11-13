@@ -33,5 +33,8 @@ MURMUR_PROFILE_WIDGETS =
 // Backend. xcconfig treats `//` as a comment, so store the host only (e.g. abcd.supabase.co).
 SUPABASE_HOST =
 SUPABASE_ANON_KEY =
+// The dictation server (server/), host only: it answers dictate, transcribe and cleanup first, and
+// the project's own functions answer whatever it can't. Empty: the project's functions alone.
+MURMUR_EDGE_HOST =
 
 #include? "Local.xcconfig"

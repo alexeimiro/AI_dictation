@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertFalse, assertStringIncludes } from "jsr:@std/assert@1";
 import { DEFAULT_EFFORT, DEFAULT_MODEL } from "../_shared/cleanup.ts";
 import { cleanupConfig, dictateConfig, envNumber, translationConfig } from "../_shared/config.ts";
+import type { CostCall } from "../_shared/cost.ts";
 import { createDictateHandler, type DictateDeps, parseDictateMetadata, parseDictateText } from "../_shared/dictate.ts";
 import type { Caller } from "../_shared/http.ts";
 import type { Preflight } from "../_shared/preflight.ts";
@@ -81,6 +82,8 @@ interface Setup {
   models?: Route;
   /** Anthropic's /v1/messages. */
   messages?: Route;
+  /** Record what the calls cost too (`recordCost`), as the deployed function does. */
+  costs?: boolean;
 }
 
 interface Fetched {
@@ -98,6 +101,7 @@ function setup(options: Setup = {}) {
     fetches: [] as Fetched[],
     preflights: [] as { caller: Caller; scope: string; dictationId: string | null; perMinute: number }[],
     usage: [] as { caller: Caller; dictationId: string; words: number }[],
+    costs: [] as { caller: Caller; dictationId: string; calls: CostCall[] }[],
     quotas: [] as Caller[],
     signals: [] as number[],
     background: [] as PromiseLike<unknown>[],
@@ -165,6 +169,14 @@ function setup(options: Setup = {}) {
       recorded.usage.push({ caller, dictationId, words });
       return Promise.resolve();
     },
+    ...(options.costs
+      ? {
+        recordCost: (caller: Caller, dictationId: string, calls: CostCall[]) => {
+          recorded.costs.push({ caller, dictationId, calls });
+          return Promise.resolve();
+        },
+      }
+      : {}),
     background: (work) => void recorded.background.push(work),
     fetcher,
     now: () => now,
@@ -600,6 +612,107 @@ Deno.test("Word for word: an empty transcript counts nothing, and a failed trans
   assertEquals(await response.json(), { error: "transcription_unavailable" });
   assertEquals(failing.recorded.usage, []);
   assertEquals([failing.recorded.logs[0].status, failing.recorded.logs[0].model], ["transcription_unavailable", null]);
+});
+
+/** An m4a that states its length: a movie header of `ms` at a timescale of 1000, after the audio. */
+function clipOf(ms: number): Uint8Array<ArrayBuffer> {
+  const u32 = (value: number) => [(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff];
+  const box = (type: string, content: number[]) => [...u32(8 + content.length), ...new TextEncoder().encode(type), ...content];
+  const header = box("mvhd", [0, 0, 0, 0, ...u32(0), ...u32(0), ...u32(1000), ...u32(ms), ...new Array(8).fill(0)]);
+  return new Uint8Array([...box("ftyp", [...new TextEncoder().encode("M4A "), ...u32(0)]), ...box("mdat", [1, 2, 3, 4]), ...box("moov", header)]);
+}
+
+function clipRequest(meta: Record<string, unknown>, ms: number, options: RequestOptions = {}): Request {
+  return new Request(ENDPOINT, { method: "POST", body: audioForm(meta, clipOf(ms)), headers: headersFor(options) });
+}
+
+Deno.test("a Word for word dictation costs its transcription, by the audio's length", async () => {
+  const { handler, recorded } = setup({ costs: true });
+  const response = await handler(clipRequest(wordForWord, 7800));
+  assertEquals(response.status, 200);
+  assertEquals(recorded.costs, [{
+    caller: USER,
+    dictationId: DICTATION,
+    calls: [{ kind: "speech", path: "upload", plan: "basic", provider: "openai", model: "gpt-transcribe", audioMs: 7800 }],
+  }]);
+  // After the reply, beside the words: neither holds the dictation back.
+  assertEquals(recorded.background.length, 2);
+  assertEquals(recorded.usage.length, 1);
+});
+
+Deno.test("a rewritten dictation costs its transcription and the model's tokens", async () => {
+  const { handler, recorded } = setup({ costs: true, preflight: { plan: "pro", remaining: null } });
+  await handler(clipRequest(metadata, 12500));
+  assertEquals(recorded.costs.length, 1);
+  assertEquals(recorded.costs[0].calls, [
+    { kind: "speech", path: "upload", plan: "pro", provider: "openai", model: "gpt-transcribe", audioMs: 12500 },
+    {
+      kind: "text",
+      path: "upload",
+      plan: "pro",
+      provider: "openai",
+      model: "gpt-6-astra-2026-09-01",
+      inputTokens: 1950,
+      cachedTokens: 1900,
+      cacheWriteTokens: 0,
+      outputTokens: 12,
+    },
+  ]);
+});
+
+Deno.test("a Claude model's tokens are on Anthropic's bill, counted as OpenAI counts them", async () => {
+  const { handler, recorded } = setup({ costs: true, env: CLAUDE });
+  await handler(audioRequest({ ...metadata, targetLanguage: undefined }));
+  const [speech, text] = recorded.costs[0].calls;
+  // Audio that doesn't state its length is recorded without one, never with a guess.
+  assertEquals([speech.kind, speech.provider, speech.kind === "speech" && speech.audioMs], ["speech", "openai", null]);
+  assertEquals(text, {
+    kind: "text",
+    path: "upload",
+    plan: "basic",
+    provider: "anthropic",
+    model: "claude-haiku-5-5",
+    // Every input token: Anthropic's 50 uncached and the 1900 it read from the cache.
+    inputTokens: 1950,
+    cachedTokens: 1900,
+    cacheWriteTokens: 0,
+    outputTokens: 12,
+  });
+});
+
+Deno.test("a transcription is paid for whatever becomes of its text; a failed one costs nothing", async () => {
+  const speechOnly = (recorded: { costs: { calls: CostCall[] }[] }) => recorded.costs.map(({ calls }) => calls.map((call) => call.kind));
+
+  const silent = setup({ costs: true, transcription: () => Response.json({ text: " ", languages: [] }) });
+  await silent.handler(clipRequest(wordForWord, 900));
+  assertEquals(speechOnly(silent.recorded), [["speech"]], "an empty transcript");
+  assertEquals(silent.recorded.usage, []);
+
+  const unwritten = setup({ costs: true, responses: () => Response.json({ error: { code: "server_error" } }, { status: 500 }) });
+  await quietly(() => unwritten.handler(clipRequest(metadata, 900)));
+  assertEquals(speechOnly(unwritten.recorded), [["speech"]], "the model call failed and left no count");
+  assertEquals(unwritten.recorded.usage, []);
+
+  const short = setup({ costs: true, transcription: () => Response.json({ text: "Спасибо большое.", languages: [{ code: "ru" }] }) });
+  await short.handler(clipRequest({ ...metadata, targetLanguage: undefined }, 900));
+  assertEquals(speechOnly(short.recorded), [["speech"]], "three words or fewer ask no model");
+
+  const unheard = setup({ costs: true, transcription: () => Response.json({ error: { type: "server_error" } }, { status: 503 }) });
+  const response = await quietly(() => unheard.handler(clipRequest(wordForWord, 900)));
+  assertEquals(response.status, 502);
+  assertEquals(unheard.recorded.costs, []);
+  assertEquals(unheard.recorded.background, []);
+});
+
+Deno.test("a text call costs its model's tokens alone; a warm-up and a refusal cost nothing", async () => {
+  const { handler, recorded } = setup({ costs: true });
+  await handler(textRequest());
+  assertEquals(recorded.costs.map(({ dictationId, calls }) => [dictationId, calls.map((call) => call.kind)]), [[DICTATION, ["text"]]]);
+
+  const idle = setup({ costs: true, preflight: { allowed: false, reason: "limit_reached" } });
+  await idle.handler(warmRequest());
+  assertEquals((await idle.handler(audioRequest(wordForWord))).status, 402);
+  assertEquals(idle.recorded.costs, []);
 });
 
 Deno.test("Word for word without OpenAI's key gets 503, like every audio request", async () => {

@@ -85,6 +85,7 @@ targets:
         MurmurURLScheme: $(MURMUR_URL_SCHEME)
         MurmurSupabaseHost: $(SUPABASE_HOST)
         MurmurSupabaseAnonKey: $(SUPABASE_ANON_KEY)
+        MurmurEdgeHost: $(MURMUR_EDGE_HOST)
         MurmurTermsURL: $(MURMUR_TERMS_URL)
         MurmurPrivacyURL: $(MURMUR_PRIVACY_URL)
         MurmurSupportURL: $(MURMUR_SUPPORT_URL)

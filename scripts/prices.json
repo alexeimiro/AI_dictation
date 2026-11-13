@@ -1,0 +1,162 @@
+{
+  "checked": "2026-11-13",
+  "note": "US dollars. Read by scripts/cost_report.ts. A row is priced by the entry of its provider whose `model` its own model name starts with (the longest such, then the latest `effective` not after the row's date). To change a price, add an entry with the new `effective` date and leave the old one. `estimated` marks a price no pricing page states.",
+  "speech": [
+    {
+      "provider": "openai",
+      "model": "gpt-transcribe",
+      "usdPerMinute": 0.0045,
+      "effective": "2026-01-01",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "soniox",
+      "model": "stt-rt",
+      "usdPerMinute": 0.002,
+      "effective": "2026-01-01",
+      "source": "https://soniox.com/pricing"
+    },
+    {
+      "provider": "soniox",
+      "model": "stt-async",
+      "usdPerMinute": 0.0017,
+      "effective": "2026-01-01",
+      "source": "https://soniox.com/pricing"
+    },
+    {
+      "provider": "own",
+      "model": "",
+      "usdPerMinute": 0,
+      "effective": "2026-01-01",
+      "note": "Your own model: nothing per minute. Its server is under `fixed` once it runs."
+    }
+  ],
+  "text": [
+    {
+      "provider": "openai",
+      "model": "gpt-6.1-terra",
+      "input": 1,
+      "cachedInput": 0.1,
+      "output": 5,
+      "estimated": ["cachedInput"],
+      "effective": "2026-01-01",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6-luna",
+      "input": 0.1,
+      "cachedInput": 0.01,
+      "output": 0.5,
+      "estimated": ["cachedInput"],
+      "effective": "2026-01-01",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6.1-sol",
+      "input": 2,
+      "cachedInput": 0.2,
+      "output": 10,
+      "estimated": ["cachedInput"],
+      "effective": "2026-01-01",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-6-astra",
+      "input": 10,
+      "cachedInput": 1,
+      "output": 50,
+      "estimated": ["cachedInput"],
+      "effective": "2026-01-01",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-haiku-5-5",
+      "input": 0.1,
+      "cachedInput": 0.01,
+      "cacheWrite": 0.125,
+      "output": 0.5,
+      "effective": "2026-01-01",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5",
+      "input": 2,
+      "cachedInput": 0.1,
+      "cacheWrite": 2.5,
+      "output": 10,
+      "effective": "2026-01-01",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "input": 4,
+      "cachedInput": 0.2,
+      "cacheWrite": 5,
+      "output": 20,
+      "effective": "2026-01-01",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    }
+  ],
+  "fixed": [
+    {
+      "name": "Supabase (Free plan)",
+      "usdPerMonth": 0,
+      "note": "Pro is $25 a month: change this line when the project moves to it."
+    },
+    {
+      "name": "Apple Developer Program",
+      "usdPerMonth": 8.25,
+      "note": "$99 a year."
+    }
+  ],
+  "servers": [
+    {
+      "name": "Hetzner GEX45, a dedicated 24 GB GPU (€214)",
+      "usdPerMonth": 236.76,
+      "note": "€214 at 1.1063 dollars to the euro on 2026-11-13, plus €209 once. Helsinki.",
+      "source": "https://www.hetzner.com/dedicated-rootserver/matrix-gpu/"
+    },
+    {
+      "name": "A 24 GB GPU rented by the hour (RunPod L4, $0.69)",
+      "usdPerMonth": 503.7,
+      "note": "730 hours. $0.44 an hour on its community cloud.",
+      "source": "https://www.runpod.io/pricing"
+    },
+    {
+      "name": "Google Cloud L4 in the Netherlands ($0.743 an hour)",
+      "usdPerMonth": 542.39,
+      "note": "730 hours on demand; about $342 a month with a one-year commitment. Second-hand price index.",
+      "source": "https://gcloud-compute.com/g2-standard-4.html"
+    }
+  ],
+  "alternatives": [
+    { "name": "OpenAI gpt-transcribe", "usdPerMinute": 0.0045, "source": "https://developers.openai.com/api/docs/pricing" },
+    { "name": "ElevenLabs Scribe v3", "usdPerMinute": 0.0033, "source": "https://elevenlabs.io/pricing/api" },
+    { "name": "Soniox, live", "usdPerMinute": 0.002, "source": "https://soniox.com/pricing" },
+    { "name": "Soniox, upload", "usdPerMinute": 0.0017, "source": "https://soniox.com/pricing" },
+    { "name": "Together, Parakeet v3", "usdPerMinute": 0.0015, "source": "https://www.together.ai/pricing" },
+    {
+      "name": "Groq, Whisper turbo",
+      "usdPerMinute": 0.000667,
+      "minimumSeconds": 10,
+      "source": "https://console.groq.com/docs/speech-to-text"
+    },
+    {
+      "name": "Cloudflare, Whisper turbo",
+      "usdPerMinute": 0.0005,
+      "source": "https://developers.cloudflare.com/workers-ai/platform/pricing/"
+    }
+  ],
+  "revenue": {
+    "monthlyUsd": 9.99,
+    "yearlyUsd": 79.99,
+    "storeCommission": 0.3,
+    "note": "Apple keeps 30% until the account is enrolled in the App Store Small Business Program; then 15%."
+  }
+}

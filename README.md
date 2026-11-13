@@ -37,6 +37,7 @@ Keyboard ext ──command file + Darwin notify──► App session (hot mic) �
 | `Tools/BrandKit/` | Draws the app icon and launch assets from the mark (`scripts/build_brand.sh`) |
 | `site/` | The website's pages and stylesheet (`scripts/build_site.mjs`, `scripts/publish_site.sh`) |
 | `supabase/` | Backend: migrations, the `cleanup` Edge Function (English and Russian language packs), tests |
+| `server/` | The dictation server: the same dictation functions in one always-on Deno process, for a host of your own (`server/README.md`) |
 
 ## Setup
 
@@ -160,6 +161,7 @@ Requires Docker, the Supabase CLI and Deno (`brew install supabase/tap/supabase 
 supabase start                       # local Postgres, Auth, Edge Runtime; applies supabase/migrations
 supabase test db                     # pgTAP: RLS, quota, rate limits (supabase/tests)
 deno test --allow-env supabase/functions/          # offline cleanup tests: prompt blocks, guards, validation (English, Russian, translation)
+deno test --allow-env server/ scripts/cost_report_test.ts   # the dictation server's routes, and the cost report
 supabase functions serve             # serve functions locally; loads supabase/functions/.env (put OPENAI_API_KEY there)
 scripts/smoke_functions.sh           # HTTP checks: auth, 401/400/402, an English and a Russian cleanup, auth helpers, delete-account
 
@@ -196,6 +198,25 @@ picks the provider the same way. Environment knobs (`supabase/functions/.env` lo
 | `TRANSCRIBE_MODEL` | `gpt-transcribe` | OpenAI's transcription model. Older models (`gpt-4o-transcribe`, shut down 2027-02-26) get the language and terms as `language` / `prompt`. |
 | `TRANSCRIBE_DEADLINE_MS` | `20000` | Bound on the OpenAI call; keep it below the app's 25 s request timeout. |
 | `TRANSCRIBE_DISABLED` | unset | `1` answers 503 before any database or model call (kill switch). |
+| `TRANSCRIBE_FAIL_CLOSED` | unset | `1` makes `transcribe` answer 503 when its limit or quota check can't run. Unset, as it always was, a dictation goes through unchecked while the database is out. |
+
+**What dictations cost.** Each transcription and each model call adds a row to `dictation_costs`
+(`record_cost`, service role only): the audio's length or the token counts, the provider and the
+model, the path (upload or live), the caller's plan and which home served it. Counts only, never
+text or audio. `scripts/cost_rows.sql` exports the rows with each account as a pseudonym, and
+`deno run --allow-read scripts/cost_report.ts <rows.json>` turns them into dollars with the dated
+prices in `scripts/prices.json`: the period's total and the month it adds up to, the cost of a
+dictation, of a person and of each plan against what a subscription brings in, what the same audio
+would cost at other services, and the volume at which a server of your own is cheaper than paying
+by the minute. A function deployed before the migration skips the recording and says so once.
+
+**The dictation server.** `server/` runs `dictate`, `transcribe`, `cleanup` and `live` from the
+same handlers in one always-on process on a host of your own: no cold start, and no limit on how
+long a worker lives (`server/README.md`). A build with `MURMUR_EDGE_HOST` set sends those calls
+there first. Whatever the server can't answer for good (no connection, a 5xx, a 401 or a 404), and
+any call it is too slow on (2.5 s for a warm-up, 6 s for a dictation), goes to the Supabase
+function, and the server is then left alone for a minute, doubling up to fifteen. Sign-in, sync and
+purchases always use the project.
 
 **Translation.** With the keyboard's *Translate as you speak* on, the request carries a
 `targetLanguage` and `cleanup` translates instead: its own system prompt (translation rules with

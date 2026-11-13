@@ -21,6 +21,10 @@ enum BackendError: LocalizedError {
 final class Backend: SessionRenewing {
     /// The project's base URL; the edge functions live under it (`EdgeFunctionClient`).
     let url: URL
+    /// The dictation server (`MURMUR_EDGE_HOST`), which serves the dictation functions under the
+    /// same paths; nil without one. Only `EdgeFunctionClient` uses it: sign-in, sync and purchases
+    /// stay with the project.
+    let edgeURL: URL?
     let client: SupabaseClient
     /// The account this install signs in with. While its session is gone, `ensureSession` keeps
     /// the cloud closed until the user signs in again or continues as a guest.
@@ -34,9 +38,10 @@ final class Backend: SessionRenewing {
     /// `options`: tests pass in-memory auth storage and a stubbed URLSession; the default is
     /// what `SupabaseClient(supabaseURL:supabaseKey:)` uses, with its Keychain storage cached.
     /// `defaults`: where the account is remembered; tests pass a suite of their own.
-    init(url: URL, anonKey: String, options: SupabaseClientOptions = Backend.defaultOptions(),
+    init(url: URL, anonKey: String, edgeURL: URL? = nil, options: SupabaseClientOptions = Backend.defaultOptions(),
          defaults: UserDefaults = .standard) {
         self.url = url
+        self.edgeURL = edgeURL
         let client = SupabaseClient(supabaseURL: url, supabaseKey: anonKey, options: options)
         self.client = client
         let account = AccountModel(defaults: defaults)
@@ -62,7 +67,9 @@ final class Backend: SessionRenewing {
         guard let host = infoString("MurmurSupabaseHost", bundle),
               let key = infoString("MurmurSupabaseAnonKey", bundle),
               let url = baseURL(forHost: host) else { return nil }
-        return Backend(url: url, anonKey: key, options: options, defaults: defaults)
+        // Left empty in a build, the functions are the project's alone, as before.
+        let edgeURL = infoString("MurmurEdgeHost", bundle).flatMap(baseURL(forHost:))
+        return Backend(url: url, anonKey: key, edgeURL: edgeURL, options: options, defaults: defaults)
     }
 
     /// supabase-swift's defaults, with the session read from the Keychain once rather than on

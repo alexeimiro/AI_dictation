@@ -65,8 +65,33 @@ export function clientInfo(request: Request): string | null {
 
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
 
-/** Runs work after the response is sent (usage accounting, logs). */
+/** What was handed to `background` and hasn't settled yet. */
+const pending = new Set<Promise<unknown>>();
+
+/**
+ * Runs work after the response is sent (usage accounting, logs, a live session's sockets). On
+ * Supabase the worker is kept alive for it; a long-running server waits for it before it stops
+ * (`drainBackground`).
+ */
 export function background(promise: PromiseLike<unknown>): void {
   const task = Promise.resolve(promise).catch((error) => console.error("background task failed", error));
+  pending.add(task);
+  task.then(() => pending.delete(task));
   if (typeof EdgeRuntime !== "undefined") EdgeRuntime.waitUntil(task);
+}
+
+/**
+ * Settles once everything handed to `background` has settled, or after `timeoutMs`, whichever is
+ * first: what a server about to stop waits for. Resolves to how much was still unfinished.
+ */
+export async function drainBackground(timeoutMs: number): Promise<number> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((resolve) => timer = setTimeout(resolve, timeoutMs));
+  const settled = (async () => {
+    // Work can hand over more work while it is waited for.
+    while (pending.size > 0) await Promise.allSettled([...pending]);
+  })();
+  await Promise.race([settled, deadline]);
+  clearTimeout(timer);
+  return pending.size;
 }

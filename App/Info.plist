@@ -35,6 +35,8 @@
 	<false/>
 	<key>MurmurAppGroupID</key>
 	<string>$(MURMUR_APP_GROUP)</string>
+	<key>MurmurEdgeHost</key>
+	<string>$(MURMUR_EDGE_HOST)</string>
 	<key>MurmurInviteURL</key>
 	<string>$(MURMUR_INVITE_URL)</string>
 	<key>MurmurPrivacyURL</key>

@@ -3,6 +3,7 @@
 // that service's adapter (live/adapter.ts), sends back the words as they settle and, at the end,
 // the final text. Everything the handler talks to is injected (`LiveDeps`), so the tests drive it
 // offline, with fake sockets and a clock of their own.
+import type { CostCall } from "./cost.ts";
 import { type Caller, clientInfo, json } from "./http.ts";
 import type { LiveAdapter, LiveEvent, LiveFrame, LiveProvider, LiveTarget } from "./live/adapter.ts";
 import { DEFAULT_SONIOX_MODEL } from "./live/soniox.ts";
@@ -24,9 +25,10 @@ export interface LiveConfig {
   maxSessionMs: number;
   /**
    * How long the platform lets a worker live from its boot, its open sockets included: 150 s on
-   * the Free plan, 400 s on a paid one.
+   * Supabase's Free plan, 400 s on a paid one. Null where nothing ends the process by its age (the
+   * dictation server): a socket's time is then `maxSessionMs` alone.
    */
-  wallClockMs: number;
+  wallClockMs: number | null;
   /** With this key on its request, a bench run may choose the service for its socket (`?provider=`). */
   benchKey: string | undefined;
   /** Each service's key and model, by the service's name. */
@@ -45,15 +47,17 @@ function envNumber(env: Env, name: string, fallback: number): number {
 
 /**
  * `live`: LIVE_DISABLED=1, LIVE_PROVIDER (soniox), LIVE_MAX_SESSION_MS (140000), LIVE_WALL_CLOCK_MS
- * (150000), LIVE_BENCH_KEY, and per service its key and model: SONIOX_API_KEY, LIVE_SONIOX_MODEL
- * (stt-rt-v6). Read here and not in config.ts, which would load the model SDKs into this worker.
+ * (150000; 0 for a server no platform ends by its age), LIVE_BENCH_KEY, and per service its key and
+ * model: SONIOX_API_KEY, LIVE_SONIOX_MODEL (stt-rt-v6). Read here and not in config.ts, which would
+ * load the model SDKs into this worker.
  */
 export function liveConfig(env: Env = Deno.env): LiveConfig {
   return {
     disabled: env.get("LIVE_DISABLED") === "1",
     provider: env.get("LIVE_PROVIDER")?.trim().toLowerCase() || "soniox",
     maxSessionMs: envNumber(env, "LIVE_MAX_SESSION_MS", 140_000),
-    wallClockMs: envNumber(env, "LIVE_WALL_CLOCK_MS", 150_000),
+    // Only a plain 0 turns the limit off: anything else that isn't a time keeps the Free plan's.
+    wallClockMs: env.get("LIVE_WALL_CLOCK_MS")?.trim() === "0" ? null : envNumber(env, "LIVE_WALL_CLOCK_MS", 150_000),
     benchKey: env.get("LIVE_BENCH_KEY") || undefined,
     providers: {
       soniox: { apiKey: env.get("SONIOX_API_KEY") || undefined, model: env.get("LIVE_SONIOX_MODEL") || DEFAULT_SONIOX_MODEL },
@@ -96,8 +100,10 @@ const MIN_SESSION_MS = 20_000;
  * How long a socket opened now may last. The platform ends a worker `wallClockMs` after it booted,
  * with every socket on it, and a new socket can land on a worker that is already old. So the
  * budget is what is left of the worker's time, less a margin, and never above `maxSessionMs`.
+ * Where no platform ends the process (`wallClockMs` null), its age takes nothing from a socket.
  */
 export function sessionBudgetMs(config: LiveConfig, worker: RequestStart): number {
+  if (config.wallClockMs === null) return config.maxSessionMs;
   return Math.max(0, Math.min(config.maxSessionMs, config.wallClockMs - worker.workerAgeMs - WALL_CLOCK_MARGIN_MS));
 }
 
@@ -194,6 +200,11 @@ export interface LiveDeps {
   preflight(caller: Caller, scope: string, dictationId: string, perMinute: number): Promise<Preflight>;
   /** `record_usage`, handed to `background`. */
   recordUsage(caller: Caller, dictationId: string, words: number): PromiseLike<unknown>;
+  /**
+   * `record_cost`, handed to `background`: the audio a session sent to the service
+   * (`_shared/cost.ts`). Left out, nothing is recorded.
+   */
+  recordCost?(caller: Caller, dictationId: string, calls: CostCall[]): PromiseLike<unknown>;
   /** Keeps the worker alive until `work` settles (`EdgeRuntime.waitUntil`). */
   background(work: PromiseLike<unknown>): void;
   /** `Deno.upgradeWebSocket`. */
@@ -445,6 +456,17 @@ export function createLiveHandler(deps: LiveDeps): (request: Request) => Promise
           if (outbound.readyState <= WebSocket.OPEN) outbound.close(1000);
         }
         writeLog(closeCode, detail);
+        // A service bills the audio it was sent, whether or not the dictation ended in text.
+        if (piping && counts.bytes > 0 && deps.recordCost) {
+          deps.background(deps.recordCost(caller, dictationId, [{
+            kind: "speech",
+            path: "live",
+            plan: admitted?.plan ?? null,
+            provider: session.providerName,
+            model: access.model,
+            audioMs: audioMs(),
+          }]));
+        }
       } finally {
         // Whatever went wrong above, the app isn't left on an open socket with no timer running.
         if (socket.readyState === WebSocket.OPEN) closeWith(socket, closeCode, result);

@@ -9,3 +9,8 @@ DEVELOPMENT_TEAM = YOUR_TEAM_ID
 // comes from `supabase status -o env` (ANON_KEY).
 SUPABASE_HOST =
 SUPABASE_ANON_KEY =
+
+// Optional: the dictation server's host (server/README.md), e.g. api.simplymurmur.com, or
+// 192.168.1.20:8080 for one running on this Mac. Dictations go to it first and to the Supabase
+// functions when it fails or is slow. Leave it out to use the Supabase functions alone.
+// MURMUR_EDGE_HOST =

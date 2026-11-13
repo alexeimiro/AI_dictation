@@ -4,6 +4,7 @@
 // already has, and warm mode
 // opens the connections a dictation needs while the user is still speaking. Everything the handler
 // talks to is injected (`DictateDeps`), so the tests drive it offline.
+import { audioDurationMs } from "./audio_duration.ts";
 import {
   apiKeyName,
   type CleanupOutcome,
@@ -14,6 +15,7 @@ import {
   runCleanup,
 } from "./cleanup.ts";
 import type { DictateConfig } from "./config.ts";
+import { type CostCall, textCall } from "./cost.ts";
 import { type Caller, clientInfo, corsHeaders, json } from "./http.ts";
 import type { Preflight } from "./preflight.ts";
 import { countWords, primarySubtag } from "./text.ts";
@@ -82,6 +84,11 @@ export interface DictateDeps {
   readQuota(caller: Caller, signal: AbortSignal): Promise<void>;
   /** `record_usage`, handed to `background`. */
   recordUsage(caller: Caller, dictationId: string, words: number): PromiseLike<unknown>;
+  /**
+   * `record_cost`, handed to `background`: the transcription and the model call a reply was made
+   * of (`_shared/cost.ts`). Left out, nothing is recorded.
+   */
+  recordCost?(caller: Caller, dictationId: string, calls: CostCall[]): PromiseLike<unknown>;
   /** Runs work after the reply is sent. */
   background(work: PromiseLike<unknown>): void;
   /** Replaces `fetch` for the OpenAI and Anthropic calls. */
@@ -475,12 +482,38 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
     }));
   }
 
+  /**
+   * What a reply's calls are billed for: the transcription by its audio's length, and the model's
+   * answer by its tokens. A model call that failed left no count to record.
+   */
+  function costCalls(d: Dictation, outcome: CleanupOutcome | null): CostCall[] {
+    const { body, heard, preflight } = d;
+    const shared = { path: "upload" as const, plan: preflight.plan };
+    const calls: CostCall[] = [];
+    if (body.mode === "audio" && heard) {
+      calls.push({
+        kind: "speech",
+        ...shared,
+        provider: "openai",
+        model: config.transcribe.model,
+        audioMs: audioDurationMs(body.transcription.audio, body.transcription.format),
+      });
+    }
+    if (outcome) calls.push(textCall(outcome, shared, modelConfig(body.translation).model));
+    return calls;
+  }
+
   /** The 200 reply, `cleanup`'s fields plus the transcription's. Records the usage and writes the log line. */
   function reply(d: Dictation, result: Translated, extra: Record<string, unknown> = {}): Response {
     const { body, caller, preflight, heard, translation } = d;
     const { outcome } = result;
     if (result.usage !== null) {
       deps.background(deps.recordUsage(caller, body.translation.dictationId, result.usage));
+    }
+    if (deps.recordCost) {
+      // Whatever the reply's status: an empty or unusable transcript was still transcribed.
+      const calls = costCalls(d, outcome);
+      if (calls.length > 0) deps.background(deps.recordCost(caller, body.translation.dictationId, calls));
     }
     const words = result.usage ?? 0;
     const timings = d.phases.toJSON();
