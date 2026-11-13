@@ -40,9 +40,17 @@ struct HomeView: View {
         .plainList()
         .toast($toast)
         .safeAreaBar(edge: .bottom) {
-            SessionBar()
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+            VStack(spacing: 8) {
+                SessionBar()
+                // Only while the microphone is on: once it's off there is nothing to go back for.
+                if let hint = model.returnHint, model.session.isLive {
+                    ReturnHintLine(hint: hint)
+                        .transition(.opacity)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .animation(.easeInOut(duration: 0.2), value: model.returnHint)
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -292,6 +300,23 @@ struct SessionBar: View {
         case .needsReconnect: "Murmur lost the microphone"
         case .failed: "Couldn’t start"
         }
+    }
+}
+
+/// After the keyboard opened Murmur and Murmur couldn't take the user back to their app: the
+/// swipe that does, in one line under the session bar, next to the edge the swipe starts from.
+struct ReturnHintLine: View {
+    let hint: ReturnHint
+
+    var body: some View {
+        Text(hint.text)
+            .font(.murmur(.footnote))
+            .foregroundStyle(Theme.second)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 12)
+            .accessibilityIdentifier(AccessibilityID.returnHint)
     }
 }
 

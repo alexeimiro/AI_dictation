@@ -88,9 +88,9 @@ enum AIConsentCopy {
     static let settingDetail = "Send your recordings to OpenAI and their text to Anthropic, which write what you say. Murmur can’t dictate without them."
 }
 
-/// The question, in a window of its own above whatever is on screen: a sheet, the swipe-back
-/// screen, onboarding. UIKit presents one thing at a time, and a session that is starting can't
-/// wait for the others to close.
+/// The question, in a window of its own above whatever is on screen: a sheet, the paywall,
+/// onboarding. UIKit presents one thing at a time, and a session that is starting can't wait for
+/// the others to close.
 @MainActor
 enum AIConsentPrompt {
     private static var window: UIWindow?

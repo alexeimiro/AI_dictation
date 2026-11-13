@@ -19,6 +19,8 @@ enum AccessibilityID {
 
     /// Home's session control, in the bar at the bottom.
     static let sessionControl = "home.session"
+    /// The line under it that says how to swipe back to the app the keyboard was used in.
+    static let returnHint = "home.returnHint"
     static let newNote = "home.newNote"
 
     /// The two answers on "Before Murmur listens" (`AIConsentView`); its title is `screen.aiConsent`.

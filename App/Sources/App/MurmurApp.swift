@@ -40,10 +40,6 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.35), value: model.onboarding.isComplete)
-        .fullScreenCover(isPresented: Binding(get: { model.showSwipeBack && !held },
-                                              set: { model.showSwipeBack = $0 })) {
-            SwipeBackView()
-        }
         .confirmationDialog("Turn on Murmur?",
                             isPresented: Binding(get: { model.confirmUntrustedStart && !held },
                                                  set: { model.confirmUntrustedStart = $0 }),

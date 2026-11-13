@@ -14,8 +14,8 @@ is first turned on, "Before Murmur listens" asks for the OK to send recordings t
 text to Anthropic (`AIConsent`); without it no session starts, and Settings › Data and privacy has
 the switch. The first dictation
 opens the app briefly: it starts a background audio session, shows a Live Activity, starts
-recording, and sends you back to the app you were typing in (or, for apps it can't reopen, asks
-you to swipe back). Later dictations reuse that session until it times out ("Turn off after"),
+recording, and sends you back to the app you were typing in (or, for apps it can't reopen, shows
+Home with a line that says how to swipe back). Later dictations reuse that session until it times out ("Turn off after"),
 which only counts while the keyboard is off screen.
 
 ```

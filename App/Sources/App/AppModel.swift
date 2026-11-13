@@ -31,8 +31,20 @@ final class AppModel {
     let practiceBuffer: PracticeTranscriptBuffer
     let practice: any PracticeDictationClient
 
-    /// "Murmur is on — swipe back" after the keyboard opened us.
-    var showSwipeBack = false
+    /// After the keyboard opened us and Murmur couldn't take the user back to their app: the line
+    /// under Home's session bar that says how to swipe back.
+    private(set) var returnHint: ReturnHint?
+    /// The return to the keyboard's app that is under way. A newer link, a shortcut or leaving
+    /// Murmur ends it.
+    @ObservationIgnored private var returnAttempt: UUID?
+    /// After a return that left the user to swipe back by hand: the dictation they tapped the mic
+    /// for is owed to them until `until`. The session drops a recording the keyboard hasn't joined
+    /// in time (`SessionController.keyboardReturnWindow`); if that happened before they were back,
+    /// the dictation starts again when the keyboard reappears (`keyboardStatusChanged`).
+    @ObservationIgnored private var owedDictation: (linkAt: Date, until: Date)?
+    /// How long after Home said how to swipe back a dictation is still owed: time to read the line
+    /// and swipe, and short enough that the mic tap is still what the user has in mind.
+    nonisolated static let owedDictationWindow: TimeInterval = 45
     /// Takes the user back to the app the keyboard opened us from. Created at launch, so the
     /// first word from UIKit about that app isn't missed.
     let hostReturn = HostReturn()
@@ -58,7 +70,7 @@ final class AppModel {
     /// Murmur Pro's plans are on screen.
     var showsPaywall = false
     /// The "Sign in again" sheet while it's up, and where it opened. RootView presents it, so it
-    /// also opens during onboarding; the swipe-back screen and the start dialog close it first.
+    /// also opens during onboarding; the keyboard's start and the start dialog close it first.
     var signInSheet: SignInAgainView.Start?
     let router = Router()
     /// `-route <name>` and `-fixtures` launch arguments (screenshot runs).
@@ -73,6 +85,7 @@ final class AppModel {
     @ObservationIgnored private var routedAt: Date?
     @ObservationIgnored private var autoNoteTask: Task<Void, Never>?
     @ObservationIgnored private var dictionaryObservation: IPCObservation?
+    @ObservationIgnored private var keyboardObservation: IPCObservation?
     private let backend: Backend?
 
     init(arguments: [String] = ProcessInfo.processInfo.arguments) {
@@ -167,7 +180,7 @@ final class AppModel {
         if launchOptions.route == .menu { router.isMenuOpen = true }
         feedLibraryToPipeline()
         library.onChange = { [weak self] in self?.feedLibraryToPipeline() }
-        if launchOptions.route == .swipeBack { showSwipeBack = true }
+        returnHint = launchOptions.returnHint
         if launchOptions.route == .transcript, let first = history.recent(limit: 1).first {
             router.path = [.transcript(first.id)]
         }
@@ -186,6 +199,9 @@ final class AppModel {
         }
         dictionaryObservation = transport.observe(.dictionaryAdded) { [weak self] in
             MainActor.assumeIsolated { self?.importKeyboardAdditions() }
+        }
+        keyboardObservation = transport.observe(.keyboardStatus) { [weak self] in
+            MainActor.assumeIsolated { self?.keyboardStatusChanged() }
         }
         importKeyboardAdditions()
         dataSharing = UserDefaults.standard.object(forKey: Self.dataSharingKey) as? Bool
@@ -543,7 +559,7 @@ final class AppModel {
         guard onboarding.isComplete else { return }
         routedAt = Date()
         autoNoteTask?.cancel()
-        showSwipeBack = false
+        endReturn()
         signInSheet = nil
         router.isMenuOpen = false
         router.tab = .scratchpad
@@ -565,7 +581,9 @@ final class AppModel {
         autoNoteTask?.cancel()
         autoNoteTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(700))
-            guard let self, !Task.isCancelled, !showSwipeBack, signInSheet == nil else { return }
+            // Not while the keyboard's start is taking the user back, or has left them on Home.
+            guard let self, !Task.isCancelled, returnAttempt == nil, returnHint == nil, signInSheet == nil
+            else { return }
             if let routedAt, Date().timeIntervalSince(routedAt) < 3 { return }
             openNewNote(dictating: false)
         }
@@ -590,24 +608,26 @@ final class AppModel {
                 guard setup.microphone == .granted else { return }
             }
             if let token, let launch = transport.payloads.consumeLaunchToken(token, maxAge: 20, now: Date()) {
-                startSessionFromKeyboard(showSwipeBack: openedByAnotherApp, request: launch.requestId)
+                startSessionFromKeyboard(
+                    fromAnotherApp: Self.cameFromAnotherApp(activeSince: activeSince, tappedAt: launch.createdAt),
+                    request: launch.requestId)
             } else {
                 // The dialog can't open over the sign-in sheet: RootView holds it until that's gone.
                 signInSheet = nil
                 confirmUntrustedStart = true
             }
         case .pro:
-            showSwipeBack = false
+            endReturn()
             guard onboarding.isComplete else { return }
             signInSheet = nil
             router.isMenuOpen = false
             showsPaywall = true
         case .invite(let code):
-            showSwipeBack = false
+            endReturn()
             router.isMenuOpen = false
             receiveInvite(code)
         case .openSettings:
-            showSwipeBack = false
+            endReturn()
             guard onboarding.isComplete else { return }
             // Settings would open under it, out of sight.
             signInSheet = nil
@@ -627,29 +647,95 @@ final class AppModel {
 
     /// The keyboard opened us to start a session. The dictation it asked for (`request`, proven by
     /// the one-time token) records as soon as the microphone is on. When the keyboard was used in
-    /// another app, Murmur sends the user back there, or shows "swipe back" if it can't; when it
-    /// was used inside Murmur itself there's nowhere to go back to.
-    func startSessionFromKeyboard(showSwipeBack: Bool = true, request: UUID? = nil) {
-        // Swipe-back can't open over the sign-in sheet: RootView holds it until that's gone. Used
-        // inside Murmur, the keyboard may be typing into the sheet, so it stays.
-        if showSwipeBack { signInSheet = nil }
-        self.showSwipeBack = showSwipeBack
+    /// another app, Murmur shows Home and sends the user back there, or says on Home how to swipe
+    /// back if it can't (`returnHint`); when it was used inside Murmur itself nothing moves.
+    func startSessionFromKeyboard(fromAnotherApp: Bool = true, request: UUID? = nil) {
+        endReturn()
+        // Home's bar shows the start, and what went wrong if it fails. Used inside Murmur, the
+        // keyboard may be typing into a sheet or a note, so everything stays where it is; during
+        // onboarding there is no Home to show.
+        if fromAnotherApp, onboarding.isComplete {
+            signInSheet = nil
+            showsPaywall = false
+            router.showHome()
+        }
         let linkAt = Date()
         let pending = transport.payloads.readPendingStart().flatMap { $0.requestId == request ? $0 : nil }
+        let attempt = UUID()
+        returnAttempt = attempt
         Task {
             await session.start(beginning: pending)
-            guard showSwipeBack, let request else { return }
-            await hostReturn.returnToHost(requestId: request, linkAt: linkAt, session: session) { [weak self] in
-                self?.showSwipeBack == true
+            defer { if returnAttempt == attempt { returnAttempt = nil } }
+            guard fromAnotherApp, let request, returnAttempt == attempt else { return }
+            let outcome = await hostReturn.returnToHost(requestId: request, linkAt: linkAt, session: session) {
+                [weak self] in self?.returnAttempt == attempt
             }
+            // Still on Home with the microphone on: say how to go back by hand.
+            guard returnAttempt == attempt, let hint = outcome.hint, session.isLive, onboarding.isComplete
+            else { return }
+            returnHint = hint
+            owedDictation = (linkAt, Date().addingTimeInterval(Self.owedDictationWindow))
+            UIAccessibility.post(notification: .announcement, argument: hint.text)
         }
     }
 
-    /// True unless the app had already been active for a while when the link arrived, which
-    /// means it came from our own keyboard in one of Murmur's text fields.
-    private var openedByAnotherApp: Bool {
+    /// Ends the return that is under way and takes its line off Home: a newer link or a shortcut
+    /// leads somewhere else, or Murmur left the screen. Leaving the screen is how the user swipes
+    /// back, so then the dictation they were left to go back for stays owed.
+    private func endReturn(keepingOwedDictation: Bool = false) {
+        returnAttempt = nil
+        returnHint = nil
+        if !keepingOwedDictation { owedDictation = nil }
+    }
+
+    /// The keyboard appeared or went away somewhere. When the user was left to swipe back by hand
+    /// and took longer than the session keeps their recording, the dictation starts again now that
+    /// they are back in their app, so their words aren't lost.
+    ///
+    /// The keyboard's own word is the signal, not its "on screen" status: coming back, iOS takes
+    /// down the keyboard's old view and puts up a new one in either order, and both write that
+    /// status, so it can read "hidden" under a keyboard that is showing. And "Murmur left" means
+    /// no longer active: the keyboard reappears about a second after the swipe begins, while iOS
+    /// still calls Murmur inactive, not yet in the background (seen on an iPhone 16 Pro).
+    private func keyboardStatusChanged() {
+        guard let owed = owedDictation else { return }
+        let now = Date()
+        let step = Self.owedDictationStep(now: now, until: owed.until, phase: session.phase,
+                                          murmurInFront: UIApplication.shared.applicationState == .active)
+        guard step != .keep else { return }
+        owedDictation = nil
+        let sinceLink = now.timeIntervalSince(owed.linkAt)
+        if step == .start, session.beginDictationForKeyboard() {
+            hostReturn.noteOwedDictation("listeningAgain", sinceLink: sinceLink)
+        } else {
+            hostReturn.noteOwedDictation(step == .start ? "couldNotListenAgain" : "notOwedAnyMore", sinceLink: sinceLink)
+        }
+    }
+
+    /// What becomes of an owed dictation when the keyboard reports itself.
+    enum OwedDictationStep: Equatable {
+        /// The user is back in their app without a recording: start one.
+        case start
+        /// Murmur is still in front (the keyboard is hiding as Murmur opens, or is in one of
+        /// Murmur's own fields): the user hasn't gone back yet.
+        case keep
+        /// Nothing is owed any more: the recording is still running and the keyboard joins it
+        /// itself, the session is off, or the tap was too long ago to start listening unasked.
+        case drop
+    }
+
+    nonisolated static func owedDictationStep(now: Date, until: Date, phase: SessionController.Phase,
+                                              murmurInFront: Bool) -> OwedDictationStep {
+        guard !murmurInFront else { return .keep }
+        return phase == .ready && now <= until ? .start : .drop
+    }
+
+    /// True unless Murmur was already on screen when the mic was tapped, which means the keyboard
+    /// was used in one of Murmur's own text fields. `activeSince`: when Murmur became active, nil
+    /// until it is; `tappedAt`: when the keyboard made its link.
+    nonisolated static func cameFromAnotherApp(activeSince: Date?, tappedAt: Date) -> Bool {
         guard let activeSince else { return true }
-        return Date().timeIntervalSince(activeSince) < 1
+        return activeSince > tappedAt
     }
 
     func scenePhaseChanged(_ phase: ScenePhase) {
@@ -676,7 +762,7 @@ final class AppModel {
             activeSince = nil
             returningFromBackground = true
             autoNoteTask?.cancel()
-            showSwipeBack = false
+            endReturn(keepingOwedDictation: true)
             session.appDidEnterBackground()
         case .inactive:
             activeSince = nil
@@ -721,7 +807,7 @@ enum DeepLink: Equatable {
 
 /// Screens reachable with `-route <name>` for screenshot comparison.
 enum LaunchRoute: String {
-    case home, settings, languages, debug, transcript, swipeBack
+    case home, settings, languages, debug, transcript
     case dictionary, snippets, style, scratchpad, menu, account, paywall, referral
     /// The newest note, open in its editor.
     case note
@@ -773,6 +859,10 @@ enum LaunchRoute: String {
 /// The AI question (UI tests and screenshots, DEBUG builds only): a run on fake services is
 /// allowed without asking; `-ai-consent` has it ask "Before Murmur listens" when a real run would,
 /// and `-ai-consent show` puts the question over the launch. Neither keeps the answer.
+///
+/// The way back (UI tests and screenshots, DEBUG builds only): `-return-hint [<app name>]` puts the
+/// line that says how to swipe back under Home's session bar, naming the app if one is given. It
+/// shows while the session is on, so use it with `-session-fixture listening`.
 struct LaunchOptions: Equatable {
     var route: LaunchRoute?
     var useFixtures = false
@@ -790,6 +880,7 @@ struct LaunchOptions: Equatable {
     var emptyLibrary = false
     var asksAIConsent = false
     var showsAIConsent = false
+    var returnHint: ReturnHint?
 
     init(arguments: [String]) {
         route = LaunchRoute(arguments: arguments)
@@ -812,6 +903,11 @@ struct LaunchOptions: Equatable {
         emptyLibrary = Self.value(after: "-library-fixture", in: arguments) == "empty"
         asksAIConsent = arguments.contains("-ai-consent")
         showsAIConsent = Self.value(after: "-ai-consent", in: arguments) == "show"
+        if arguments.contains("-return-hint") {
+            // The next argument is the app's name, unless it is another flag.
+            let name = Self.value(after: "-return-hint", in: arguments).flatMap { $0.hasPrefix("-") ? nil : $0 }
+            returnHint = ReturnHint(appName: name)
+        }
         #endif
     }
 

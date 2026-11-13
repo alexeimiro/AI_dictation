@@ -47,6 +47,13 @@ final class Router {
         paths[.home] = [route]
     }
 
+    /// Closes the side menu and shows Home's root. The other places keep what was open in them.
+    func showHome() {
+        isMenuOpen = false
+        tab = .home
+        paths[.home] = []
+    }
+
     /// The stack to show for a `-route` launch argument (screenshot runs).
     static func initialPath(for route: LaunchRoute?) -> [Route] {
         switch route {
@@ -55,8 +62,7 @@ final class Router {
         case .debug: [.settings, .debug]
         case .account: [.account]
         case .referral: [.referral]
-        case .home, .transcript, .swipeBack, .dictionary, .snippets, .style, .scratchpad, .menu, .paywall, .note,
-             nil: []
+        case .home, .transcript, .dictionary, .snippets, .style, .scratchpad, .menu, .paywall, .note, nil: []
         }
     }
 

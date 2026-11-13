@@ -27,10 +27,9 @@ struct DeepLinkTests {
     }
 
     @Test func parsesLaunchRoutes() {
-        #expect(LaunchRoute(arguments: ["Murmur", "-route", "swipeBack"]) == .swipeBack)
         #expect(LaunchRoute(arguments: ["Murmur", "-route", "languages"]) == .languages)
         #expect(LaunchRoute(arguments: ["Murmur"]) == nil)
-        for name in ["home", "settings", "languages", "debug", "transcript", "swipeBack", "dictionary", "snippets",
+        for name in ["home", "settings", "languages", "debug", "transcript", "dictionary", "snippets",
                      "style", "scratchpad", "menu", "account", "paywall", "referral", "note"] {
             #expect(LaunchRoute(arguments: ["Murmur", "-route", name])?.rawValue == name)
         }
@@ -38,6 +37,57 @@ struct DeepLinkTests {
         #expect(LaunchRoute(arguments: ["Murmur", "-route", "notes"]) == .scratchpad)
         #expect(LaunchRoute(arguments: ["Murmur", "-route", "invite"]) == .referral)
         #expect(LaunchRoute(arguments: ["Murmur", "-route", "nope"]) == nil)
+        // The "Murmur is on" page is gone, and its route with it.
+        #expect(LaunchRoute(arguments: ["Murmur", "-route", "swipeBack"]) == nil)
+    }
+
+    /// Screenshot runs and UI tests put the line that says how to swipe back under Home's session
+    /// bar (DEBUG builds only).
+    @Test func parsesTheReturnHint() {
+        #expect(LaunchOptions(arguments: ["Murmur", "-return-hint", "Safari"]).returnHint
+                == ReturnHint(appName: "Safari"))
+        #expect(LaunchOptions(arguments: ["Murmur", "-return-hint"]).returnHint == ReturnHint(appName: nil))
+        #expect(LaunchOptions(arguments: ["Murmur", "-return-hint", "-fixtures"]).returnHint
+                == ReturnHint(appName: nil))
+        #expect(LaunchOptions(arguments: ["Murmur"]).returnHint == nil)
+    }
+
+    /// The keyboard's link came from another app unless Murmur was already on screen at the tap.
+    @Test func aLinkFromMurmursOwnFieldsIsToldApart() {
+        let tap = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(AppModel.cameFromAnotherApp(activeSince: nil, tappedAt: tap), "still coming to the front")
+        #expect(AppModel.cameFromAnotherApp(activeSince: tap.addingTimeInterval(0.4), tappedAt: tap),
+                "the link brought Murmur to the front")
+        #expect(AppModel.cameFromAnotherApp(activeSince: tap.addingTimeInterval(2.5), tappedAt: tap),
+                "a slow launch")
+        #expect(!AppModel.cameFromAnotherApp(activeSince: tap.addingTimeInterval(-0.5), tappedAt: tap),
+                "on screen just before the tap")
+        #expect(!AppModel.cameFromAnotherApp(activeSince: tap.addingTimeInterval(-600), tappedAt: tap))
+    }
+
+    /// Someone left to swipe back by hand may take longer than the 10 s the session keeps their
+    /// recording. The dictation then starts again when the keyboard reports itself in their app,
+    /// for 45 s after Home said how to swipe back, and only then.
+    @Test func aDictationOwedAfterALateSwipeStartsWhenTheKeyboardIsBack() {
+        let link = Date(timeIntervalSince1970: 1_800_000_000)
+        let until = link.addingTimeInterval(AppModel.owedDictationWindow)
+        func step(after seconds: TimeInterval, phase: SessionController.Phase,
+                  murmurInFront: Bool = false) -> AppModel.OwedDictationStep {
+            AppModel.owedDictationStep(now: link.addingTimeInterval(seconds), until: until, phase: phase,
+                                       murmurInFront: murmurInFront)
+        }
+        #expect(AppModel.owedDictationWindow == 45)
+        #expect(step(after: 17, phase: .ready) == .start, "the recording was dropped at 10 s; the swipe came at 17 s")
+        #expect(step(after: 45, phase: .ready) == .start)
+        #expect(step(after: 45.1, phase: .ready) == .drop, "too long after the tap to start listening unasked")
+        #expect(step(after: 6, phase: .recording(UUID())) == .drop,
+                "back in time: the keyboard joins the recording itself")
+        #expect(step(after: 17, phase: .off) == .drop, "Murmur was turned off meanwhile")
+        #expect(step(after: 17, phase: .needsReconnect) == .drop)
+        // Murmur still in front: the keyboard is hiding as Murmur opens, or is in one of Murmur's
+        // own fields. The user hasn't gone back yet, so the dictation stays owed.
+        #expect(step(after: 1.2, phase: .recording(UUID()), murmurInFront: true) == .keep)
+        #expect(step(after: 17, phase: .ready, murmurInFront: true) == .keep)
     }
 
     @Test func parsesLaunchOptions() {
@@ -136,6 +186,24 @@ struct DeepLinkTests {
         #expect(router.paths[.scratchpad] == [.note(note)])
         router.popToRoot()
         #expect(router.path == [])
+    }
+
+    /// The keyboard's start shows Home's root, where the session bar is; the other places keep
+    /// what was open in them.
+    @Test @MainActor func showingHomeLeavesTheOtherPlacesAsTheyWere() {
+        let router = Router()
+        let note = UUID()
+        router.tab = .scratchpad
+        router.open(.note(note))
+        router.tab = .home
+        router.open(.settings)
+        router.tab = .dictionary
+        router.isMenuOpen = true
+        router.showHome()
+        #expect(!router.isMenuOpen)
+        #expect(router.tab == .home)
+        #expect(router.path == [])
+        #expect(router.paths[.scratchpad] == [.note(note)])
     }
 
     /// The menu lists the five places. Choosing one closes the menu and shows the place with

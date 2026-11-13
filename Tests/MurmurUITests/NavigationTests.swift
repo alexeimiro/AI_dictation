@@ -120,7 +120,6 @@ final class NavigationTests: XCTestCase {
             ("style", "style", []),
             ("scratchpad", "notes", []),
             ("notes", "notes", []),
-            ("swipeBack", "swipeBack", ["-session-fixture", "on"]),
         ]
         for (route, screen, extra) in routes {
             launch(route: route, extra: extra)
@@ -193,6 +192,30 @@ final class NavigationTests: XCTestCase {
         XCTAssertTrue(live.waitForExistence(timeout: 10))
         XCTAssertEqual(live.label, "Murmur is on")
         XCTAssertEqual(live.value as? String, "On")
+    }
+
+    /// After the keyboard opened Murmur and Murmur couldn't take the user back to their app, Home
+    /// says how to swipe back: one line under the session bar, and only while the microphone is
+    /// on (`-return-hint` pins it).
+    func testHomeSaysHowToSwipeBack() {
+        launch(extra: ["-session-fixture", "listening", "-return-hint", "Safari"])
+        let hint = element(AccessibilityID.returnHint)
+        XCTAssertTrue(hint.waitForExistence(timeout: 10), "no line under the session bar")
+        XCTAssertEqual(hint.label, "Swipe right along the bottom edge to go back to Safari")
+        let control = element(AccessibilityID.sessionControl)
+        XCTAssertTrue(control.exists)
+        XCTAssertGreaterThanOrEqual(hint.frame.minY, control.frame.maxY, "the line isn't under the bar")
+        expectNoTabBar("home")
+
+        app.terminate()
+        launch(extra: ["-session-fixture", "off", "-return-hint", "Safari"])
+        XCTAssertTrue(element(AccessibilityID.sessionControl).waitForExistence(timeout: 10))
+        XCTAssertFalse(element(AccessibilityID.returnHint).exists, "the line shows with the microphone off")
+
+        app.terminate()
+        launch(extra: ["-session-fixture", "listening"])
+        XCTAssertTrue(element(AccessibilityID.sessionControl).waitForExistence(timeout: 10))
+        XCTAssertFalse(element(AccessibilityID.returnHint).exists, "the line shows though nothing put it there")
     }
 
     /// Turning Murmur on asks "Before Murmur listens" first, on whatever screen it happens

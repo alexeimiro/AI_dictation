@@ -37,8 +37,11 @@ Keyboard ext ── Darwin post + command file (one-time token) ──► Murmur
    - It walks the responder chain to the `UIApplication` and calls `open(_:options:completionHandler:)`, which compiles against the 26.5 SDK.
    - The app starts the session only if the token is fresh (under 20 s). Otherwise it asks for confirmation, so a web page can't turn on the mic.
    - As soon as the mic is on, the app records the requested dictation (`SessionController.start(beginning:)`), so the user can talk on the way back. In the cloud path the on-device fallback is prepared afterwards, off this critical path.
-   - Once it's recording, `HostReturn` reopens the app the keyboard was used in: it learns its bundle id from UIKit (above) and opens it by a URL scheme from `HostAppCatalog`. Within 3 s of the link, or not at all.
-   - Otherwise it shows "Murmur is on — Swipe right along the bottom edge of the screen to go back to your app", with a finger animated over the real home indicator (iOS shows no ◀︎ breadcrumb for keyboard-initiated opens).
+   - Meanwhile the app shows Home, whose session bar says "Turning on…" and then "Listening".
+   - Once it's recording, `HostReturn` reopens the app the keyboard was used in: it learns its bundle id from UIKit (above) and opens it by a URL scheme from `HostAppCatalog`. It waits for the recording however long the start takes (a question, a permission alert), then gives UIKit until 3 s after the link, or 1.5 s after the recording began, to name the app (`ReturnPlan`). On an iPhone 16 Pro the app is named about 0.9 s after the tap and the user is back after about 1.2 s.
+   - Otherwise (an app that isn't listed, such as Safari, or one UIKit never named) one line appears under Home's session bar: "Swipe right along the bottom edge to go back to Safari", or "your app" when the name isn't known (`ReturnHint`). iOS shows no ◀︎ breadcrumb for keyboard-initiated opens.
+   - Someone left to swipe back may take longer than the 10 s a recording waits for the keyboard (below). The dictation they tapped the mic for then starts again when the keyboard reports itself in their app, up to 45 s after Home said how to swipe back (`AppModel.keyboardStatusChanged`). The trigger is the keyboard's own notification while Murmur is no longer active: its "on screen" status can read "hidden" under a showing keyboard, and iOS still calls Murmur inactive, not in the background, when the keyboard reappears.
+   - Every build logs how the return ended and when (`Auto-return: <outcome>, decided … ms after the link, recording at … ms`); app names are logged only by development builds.
    - When the keyboard reappears it attaches to that recording (`attachToPendingStart`); its first listening heartbeat tells the app. A recording nobody attaches to within 10 s is discarded. iOS gives the field a new `documentIdentifier` after the trip to the app (found on the iPhone on 2026-11-10), so the keyboard can't tell it from another field: it types the dictation into the field it comes back to.
 3. **Hot mic.**
    - **Audio session:** `.playAndRecord`, mode `.default`, options `[.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]`. Without HFP, the mic is the built-in one and AirPods music quality is kept. Also `setAllowHapticsAndSystemSoundsDuringRecording(true)`.
@@ -368,7 +371,7 @@ Every `-route` name still opens its screen; `menu` opens the menu.
 - **Build:** `xcodebuild -scheme Murmur -destination 'platform=iOS Simulator,name=iPhone 16' build test`.
 - **Simulator vs device:**
   - The simulator covers UI, layouts, and `simctl openurl` deep links.
-  - The device covers the background mic, speech latency, swipe-back, AirPods, calls and memory.
+  - The device covers the background mic, speech latency, the return to the app, AirPods, calls and memory.
 - **UI:**
   - `scripts/screenshots.sh` launches every `-route` with sample data and takes a screenshot; DEBUG launch arguments pin the session, the plan, the keyboard and each onboarding step.
   - `MurmurBrandTests` holds the contrast of text and graphics on every background they sit on.

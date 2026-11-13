@@ -20,7 +20,8 @@ WAIT="${WAIT:-2.5}"
 SLOW_WAIT="${SLOW_WAIT:-18}"
 SHOTS=("$@")
 [ ${#SHOTS[@]} -eq 0 ] && SHOTS=(home menu scratchpad dictionary snippets style settings languages account
-                                 paywall referral transcript swipeBack debug note)
+                                 paywall referral transcript debug note
+                                 "home-return-hint=-route home -session-fixture listening -return-hint Safari")
 mkdir -p "$OUT"
 
 xcrun simctl boot "$SIM" 2>/dev/null || true
