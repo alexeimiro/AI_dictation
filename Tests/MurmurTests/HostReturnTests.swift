@@ -13,7 +13,12 @@ struct HostReturnTests {
     }
 
     @Test func knownAppsReopenByTheirScheme() {
-        #expect(HostAppCatalog.entry(forBundleID: "net.whatsapp.WhatsApp")?.url.absoluteString == "whatsapp://")
+        // WhatsApp and WhatsApp Business share `whatsapp://`, which opens Business when both are
+        // installed: each is reopened by the address only it answers.
+        #expect(HostAppCatalog.entry(forBundleID: "net.whatsapp.WhatsApp")?.url.absoluteString
+                == "whatsapp-consumer://")
+        #expect(HostAppCatalog.entry(forBundleID: "net.whatsapp.WhatsAppSMB")?.url.absoluteString == "whatsapp-smb://")
+        #expect(HostAppCatalog.name(forBundleID: "net.whatsapp.WhatsAppSMB") == "WhatsApp Business")
         #expect(HostAppCatalog.entry(forBundleID: "com.apple.mobilenotes")?.name == "Notes")
         #expect(HostAppCatalog.entry(forBundleID: "com.apple.MobileSMS")?.url.absoluteString == "ichat://",
                 "sms: and messages:// put a New Message sheet over the conversation")

@@ -385,7 +385,10 @@ enum HostAppCatalog {
         // Not `sms:` or `messages://`: both put a New Message sheet over the conversation.
         "com.apple.MobileSMS": Entry(name: "Messages", url: URL(string: "ichat://")!),
         "com.apple.mobilemail": Entry(name: "Mail", url: URL(string: "message://")!),
-        "net.whatsapp.WhatsApp": Entry(name: "WhatsApp", url: URL(string: "whatsapp://")!),
+        // Not `whatsapp://`: WhatsApp and WhatsApp Business both answer it, and with both installed
+        // iOS opens Business. Each has an address of its own.
+        "net.whatsapp.WhatsApp": Entry(name: "WhatsApp", url: URL(string: "whatsapp-consumer://")!),
+        "net.whatsapp.WhatsAppSMB": Entry(name: "WhatsApp Business", url: URL(string: "whatsapp-smb://")!),
         "ph.telegra.Telegraph": Entry(name: "Telegram", url: URL(string: "tg://")!),
         "com.facebook.Messenger": Entry(name: "Messenger", url: URL(string: "fb-messenger://")!),
         "com.tinyspeck.chatlyio": Entry(name: "Slack", url: URL(string: "slack://")!),
