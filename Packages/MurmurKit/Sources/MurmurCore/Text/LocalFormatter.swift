@@ -44,11 +44,19 @@ public struct LocalFormatter: Sendable {
     }
 
     public func format(_ raw: String) -> String {
+        SnippetPlaceholders.substitute(in: formatMarkingSnippets(raw), snippets: snippets)
+    }
+
+    /// As `format`, with each snippet that was said left as its placeholder. Everything that
+    /// tidies the text (spacing, the first capital, and the caller's own restyling, such as
+    /// Casual's lowercase) works on the speaker's words only, and the snippets' text goes in last
+    /// with `SnippetPlaceholders.substitute`, exactly as the user typed it.
+    public func formatMarkingSnippets(_ raw: String) -> String {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return "" }
         if removesFillers { text = Self.removeFillers(text, language: language) }
         text = applyDictionary(text)
-        text = applySnippets(text)
+        text = SnippetPlaceholders.mark(in: text, snippets: snippets)
         text = Self.collapseWhitespace(text)
         return Self.capitalizeFirstLetter(text)
     }
@@ -150,26 +158,22 @@ public struct LocalFormatter: Sendable {
         return output
     }
 
-    func applySnippets(_ text: String) -> String {
-        var output = text
-        // Longest triggers first so "my work email" wins over "my email".
-        for snippet in snippets.sorted(by: { $0.trigger.count > $1.trigger.count }) {
-            output = Self.replaceWholePhrase(snippet.trigger, with: snippet.expansion, in: output)
-        }
-        return output
-    }
-
     // MARK: Helpers
 
     static func replaceWholePhrase(_ phrase: String, with replacement: String, in text: String) -> String {
-        let escaped = yoInsensitive(NSRegularExpression.escapedPattern(for: phrase))
         guard let regex = try? NSRegularExpression(
-            pattern: #"(?<![\p{L}\p{N}])"# + escaped + #"(?![\p{L}\p{N}])"#, options: [.caseInsensitive]) else {
+            pattern: #"(?<![\p{L}\p{N}])"# + phrasePattern(phrase) + #"(?![\p{L}\p{N}])"#,
+            options: [.caseInsensitive]) else {
             return text
         }
         let range = NSRange(text.startIndex..., in: text)
         return regex.stringByReplacingMatches(
             in: text, range: range, withTemplate: NSRegularExpression.escapedTemplate(for: replacement))
+    }
+
+    /// `phrase` as a pattern that matches it literally, in either spelling of "ё".
+    static func phrasePattern(_ phrase: String) -> String {
+        yoInsensitive(NSRegularExpression.escapedPattern(for: phrase))
     }
 
     /// Russian "ё" is routinely written and recognized as "е", so a term matches either spelling.
@@ -193,25 +197,14 @@ public struct LocalFormatter: Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// The first letter of the speaker's own words. A snippet that opens the text keeps the first
+    /// letter the user typed ("anton@example.com", not "Anton@example.com").
     static func capitalizeFirstLetter(_ text: String) -> String {
         guard let index = text.firstIndex(where: \.isLetter), text[index].isLowercase else { return text }
-        return text.replacingCharacters(in: index...index, with: text[index].uppercased())
-    }
-}
-
-/// The AI cleanup returns `⟦s:<id>⟧` where a snippet trigger was spoken; the app swaps in the
-/// expansion locally, so expansions never leave the device and are never expanded twice.
-public enum SnippetPlaceholders {
-    public static func token(for snippet: SnippetDefinition) -> String {
-        "⟦s:\(snippet.id.uuidString.prefix(8).lowercased())⟧"
-    }
-
-    public static func substitute(in text: String, snippets: [SnippetDefinition]) -> String {
-        var output = text
-        for snippet in snippets {
-            output = output.replacingOccurrences(of: token(for: snippet), with: snippet.expansion)
+        if let placeholder = text.range(of: SnippetPlaceholders.pattern, options: .regularExpression),
+           placeholder.lowerBound < index {
+            return text
         }
-        // Drop placeholders we don't recognize rather than inserting them.
-        return output.replacingOccurrences(of: #"⟦s:[0-9a-f]{8}⟧"#, with: "", options: .regularExpression)
+        return text.replacingCharacters(in: index...index, with: text[index].uppercased())
     }
 }

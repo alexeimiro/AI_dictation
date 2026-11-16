@@ -12,6 +12,7 @@ import {
   TRANSLATION_RULES,
   VERBATIM_RULES,
 } from "./prompt.ts";
+import { markSnippets, repairSnippets } from "./snippets.ts";
 import { countWords, guardOutput, guardTranslation, tidyOutput } from "./text.ts";
 import { type CleanupRequest, writesWithModel } from "./types.ts";
 
@@ -152,9 +153,30 @@ interface ResponsesReply {
  * One cleanup call, on the provider `options.model` names. A deadline abort surfaces as a
  * DOMException from OpenAI and as the SDK's abort or timeout error from Anthropic (see
  * `isCleanupDeadline`).
+ *
+ * The model reads the transcript with the user's snippets already marked (`markSnippets`): a
+ * trigger said word for word is a placeholder before the model sees it, which it keeps far more
+ * reliably than it puts one in. A reply that keeps the transcript ("raw") returns it as heard.
+ * When nothing but snippets was said there is no text for a model to write, and none is asked:
+ * the placeholders are the reply.
  */
 export async function runCleanup(request: CleanupRequest, options: CleanupOptions): Promise<CleanupOutcome> {
-  return isClaudeModel(options.model) ? await runClaude(request, options) : await runOpenAI(request, options);
+  const marked = { ...request, transcript: markSnippets(request.transcript, request.snippets ?? []) };
+  if (marked.transcript !== request.transcript && countWords(marked.transcript, request.language) === 0) {
+    return {
+      text: marked.transcript.trim(),
+      status: "cleaned",
+      model: options.model,
+      language: resolveLanguage(request.language).key,
+      stopReason: "snippets_only",
+      ttftMs: null,
+      totalMs: 0,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      cacheReadTokens: 0,
+    };
+  }
+  const outcome = isClaudeModel(options.model) ? await runClaude(marked, options) : await runOpenAI(marked, options);
+  return outcome.status === "raw" ? { ...outcome, text: request.transcript } : outcome;
 }
 
 async function runOpenAI(request: CleanupRequest, options: CleanupOptions): Promise<CleanupOutcome> {
@@ -316,14 +338,17 @@ export function countedWords(outcome: Pick<CleanupOutcome, "status" | "text">, r
   return countWords(outcome.text, request.targetLanguage ?? request.language);
 }
 
-/** Either provider's reply text through the output guards: one that fails them keeps the transcript. */
+/**
+ * Either provider's reply text through the output guards: one that fails them keeps the
+ * transcript. A snippet the model missed in its reply is marked first (`repairSnippets`).
+ */
 function judged(
   request: CleanupRequest,
   language: ResolvedLanguage,
   base: Omit<CleanupOutcome, "text" | "status" | "reason">,
   reply: string,
 ): CleanupOutcome {
-  const text = tidyOutput(reply);
+  const text = repairSnippets(tidyOutput(reply), request.snippets ?? []);
   const guard = request.targetLanguage
     ? guardTranslation(request.transcript, text, { source: language.tag, target: request.targetLanguage })
     : guardOutput(request.transcript, text, language.tag ?? "en");

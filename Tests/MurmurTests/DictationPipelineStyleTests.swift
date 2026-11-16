@@ -11,6 +11,7 @@ private final class StyleCleanup: Cleaning {
     /// Nil while the model was never asked.
     private(set) var receivedStyle: StylePreset?
     private(set) var receivedLanguage: String?
+    private(set) var receivedSnippets: [SnippetDefinition]?
 
     func clean(
         dictationId: UUID, transcript: String, language: String?, targetLanguage: String?,
@@ -18,6 +19,7 @@ private final class StyleCleanup: Cleaning {
     ) async throws(CleanupClient.Failure) -> CleanupClient.Response {
         receivedStyle = style
         receivedLanguage = language
+        receivedSnippets = snippets
         return CleanupClient.Response(
             text: text, status: "cleaned", words: 2, model: "test", ttftMs: 10, totalMs: 20, remaining: nil)
     }
@@ -316,5 +318,113 @@ struct DictationPipelineStyleTests {
         let outcome = await DictationPipeline(cleanup: cleanup).complete(
             dictation, transcriber: SpokenTranscriber(spoken), audioSeconds: 2, stoppedAt: ContinuousClock.now)
         return (outcome.result, outcome.transcript)
+    }
+}
+
+/// Snippets through the pipeline: a snippet's text goes in as the user typed it, whichever way
+/// the dictation was written.
+@MainActor
+struct DictationPipelineSnippetTests {
+    private let email = SnippetDefinition(trigger: "my email address", expansion: "anton@example.com")
+    private let address = SnippetDefinition(trigger: "my home address", expansion: "12 Garden Road. London N1.")
+    private let signature = SnippetDefinition(trigger: "my signature", expansion: "Best regards,\nAnton")
+
+    /// Saying only the snippet's name types its text: no capital, no full stop and no model call,
+    /// in every style. The recognizer writes the name as a sentence of its own.
+    @Test func aSnippetSaidAloneIsItsTextInEveryStyle() async {
+        for style in StylePreset.allCases {
+            let cleanup = StyleCleanup()
+            let result = await dictate("My email address.", style: style, cleanup: cleanup)
+            #expect(cleanup.receivedStyle == nil, "\(style)")
+            #expect(result.text == "anton@example.com", "\(style)")
+        }
+    }
+
+    /// Word for word swaps the snippet in on the iPhone, in the middle of a sentence too.
+    @Test func wordForWordExpandsASnippetWithoutTheModel() async {
+        let cleanup = StyleCleanup()
+        let result = await dictate("Send the invoice to my email address, please.", style: .verbatim, cleanup: cleanup)
+        #expect(cleanup.receivedStyle == nil)
+        #expect(result.text == "Send the invoice to anton@example.com, please.")
+    }
+
+    /// The model is told the snippets' names and returns placeholders; the text goes in here.
+    @Test func theModelsPlaceholderBecomesTheSnippetsText() async {
+        let cleanup = StyleCleanup()
+        cleanup.text = "Could you send the invoice to \(SnippetPlaceholders.token(for: email)) by Friday?"
+        let result = await dictate(
+            "Hey, can you send the invoice to my email address by Friday?", style: .professional, cleanup: cleanup)
+        #expect(cleanup.receivedSnippets?.map(\.trigger).sorted() == ["my email address", "my home address", "my signature"])
+        #expect(result.text == "Could you send the invoice to anton@example.com by Friday?")
+        #expect(result.status == .cleaned)
+    }
+
+    /// The same when the request that transcribes writes the text (`dictate`): it carries the
+    /// snippets, and its reply's placeholder is swapped here.
+    @Test func aDictatedReplysPlaceholderBecomesTheSnippetsText() async throws {
+        let transcriber = CloudLikeTranscriber(UtteranceOutput(
+            transcript: "Hey, can you send the invoice to my email address by Friday?",
+            modelReply: .success(CleanupClient.Response(
+                text: "Hey, can you send the invoice to \(SnippetPlaceholders.token(for: email)) by Friday?",
+                status: "cleaned", words: 9, model: "test", ttftMs: nil, totalMs: 400, remaining: nil))))
+        let pipeline = DictationPipeline(cleanup: StyleCleanup())
+        pipeline.snippets = [email]
+        let outcome = await pipeline.complete(
+            dictation(style: .grammar), transcriber: transcriber, audioSeconds: 2, stoppedAt: ContinuousClock.now)
+        #expect(outcome.result.text == "Hey, can you send the invoice to anton@example.com by Friday?")
+        #expect(try #require(transcriber.request).snippets == [email])
+    }
+
+    /// The model doesn't mark every snippet (live check, November 2026): one it left as words, or
+    /// replaced only in part ("My ⟦…⟧"), still goes in whole.
+    @Test func aSnippetTheModelMissedIsStillExpanded() async {
+        let cleanup = StyleCleanup()
+        cleanup.text = "Please send the parcel to my home address by Friday."
+        var result = await dictate("Send the parcel to my home address by Friday.", style: .grammar, cleanup: cleanup)
+        #expect(result.text == "Please send the parcel to 12 Garden Road. London N1. by Friday.")
+
+        cleanup.text = "My \(SnippetPlaceholders.token(for: address)) is where the parcel should go."
+        result = await dictate("My home address is where the parcel should go.", style: .professional, cleanup: cleanup)
+        #expect(result.text == "12 Garden Road. London N1. is where the parcel should go.")
+    }
+
+    /// Casual restyles the speaker's words and leaves the snippet's text as typed, with the model
+    /// and without it.
+    @Test func casualLeavesTheSnippetsTextAsTyped() async {
+        // Three words or fewer never reach the model.
+        var result = await dictate("My signature.", style: .casual, cleanup: StyleCleanup())
+        #expect(result.text == "Best regards,\nAnton")
+        result = await dictate("Thanks. My signature.", style: .casual, cleanup: StyleCleanup())
+        #expect(result.text == "thanks. Best regards,\nAnton")
+
+        // Written by the model: the sentence's full stop goes, the snippet's own stays.
+        let cleanup = StyleCleanup()
+        cleanup.text = "thanks, send it to \(SnippetPlaceholders.token(for: address))."
+        result = await dictate("Thanks, send it to my home address.", style: .casual, cleanup: cleanup)
+        #expect(result.text == "thanks, send it to 12 Garden Road. London N1.")
+    }
+
+    /// Regenerate swaps the snippets into the new text too.
+    @Test func regenerateExpandsSnippets() async throws {
+        let cleanup = StyleCleanup()
+        cleanup.text = "Write to \(SnippetPlaceholders.token(for: email))."
+        let pipeline = DictationPipeline(cleanup: cleanup)
+        pipeline.snippets = [email]
+        let stored = Transcript(language: "en-US", style: .grammar, rawText: "write to my email address", status: .raw)
+        let updated = try await pipeline.recleanup(stored)
+        #expect(updated.cleanedText == "Write to anton@example.com.")
+    }
+
+    private func dictation(style: StylePreset) -> ActiveDictation {
+        ActiveDictation(requestId: UUID(), documentIdentifier: nil, style: style, language: "en-US",
+                        translationTargetLanguage: nil, source: .keyboard, startedAt: Date())
+    }
+
+    private func dictate(_ spoken: String, style: StylePreset, cleanup: StyleCleanup) async -> DictationResult {
+        let pipeline = DictationPipeline(cleanup: cleanup)
+        pipeline.snippets = [email, address, signature]
+        let outcome = await pipeline.complete(
+            dictation(style: style), transcriber: SpokenTranscriber(spoken), audioSeconds: 2, stoppedAt: ContinuousClock.now)
+        return outcome.result
     }
 }

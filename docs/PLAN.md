@@ -85,6 +85,8 @@ Keyboard ext ── Darwin post + command file (one-time token) ──► Murmur
    - So do Word for word transcripts `CleanupGate` finds nothing to write differently in: punctuated (in any script), with no spoken punctuation command or spelled-out address. They get `LocalFormatter` only. The styles the model writes (Improve my grammar, Professional, Casual, Concise) always ask it.
    - Otherwise `CleanupClient` calls `cleanup` with an 8 s timeout.
    - Snippet triggers come back from Claude as `⟦s:<id>⟧` placeholders, and the app substitutes the expansion. Expansions never go to the server, and nothing is expanded twice.
+   - A trigger said word for word is marked before Claude reads the transcript (`markSnippets` in the functions, `SnippetPlaceholders.mark` in the app for a text no model writes): Claude keeps a placeholder far more reliably than it puts one in (live checks, November 2026). Claude is left the other forms of a trigger, and both sides repair a reply that kept part of a trigger beside its placeholder.
+   - The expansion goes in last, after every tidy-up and style, exactly as typed. A dictation that is one snippet and nothing else is the expansion alone, without the recognizer's capital or full stop.
 3. **`TextJoiner`.**
    - Adds a leading space and fixes capitalization from `documentContextBeforeInput`.
    - When `returnKeyType` is `.send/.go/.search/.done`, it flattens newlines and lists to one line, because a newline can send the message.

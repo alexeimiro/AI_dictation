@@ -227,6 +227,138 @@ struct LocalFormatterTests {
     }
 }
 
+/// A snippet's text goes in exactly as the user typed it, wherever its name was said.
+struct SnippetTests {
+    private let email = SnippetDefinition(trigger: "my email address", expansion: "anton@example.com")
+    private let link = SnippetDefinition(trigger: "my calendar link", expansion: "https://cal.example/me")
+    private let signature = SnippetDefinition(trigger: "my signature", expansion: "Best regards,\nAnton")
+    private let address = SnippetDefinition(trigger: "my home address", expansion: "12 Garden Road. London N1.")
+
+    private func expanded(_ reply: String, _ snippets: [SnippetDefinition]) -> String {
+        SnippetPlaceholders.substitute(in: SnippetPlaceholders.repair(reply, snippets: snippets), snippets: snippets)
+    }
+
+    /// The commonest use: the snippet's name and nothing else. The recognizer writes it as a
+    /// sentence ("My email address."); what goes in is the snippet's text, with no capital and no
+    /// full stop added.
+    @Test func aDictationThatIsOneSnippetIsItsTextAlone() {
+        let formatter = LocalFormatter(snippets: [email, link, signature])
+        #expect(formatter.format("My email address.") == "anton@example.com")
+        #expect(formatter.format("my email address") == "anton@example.com")
+        #expect(formatter.format("My calendar link?") == "https://cal.example/me")
+        #expect(formatter.format("Um, my signature.") == "Best regards,\nAnton")
+        let russian = LocalFormatter(
+            snippets: [SnippetDefinition(trigger: "моя почта", expansion: "anton@example.com")], language: "ru-RU")
+        #expect(russian.format("Моя почта.") == "anton@example.com")
+    }
+
+    /// A snippet that opens the text keeps the first letter the user typed; the speaker's own
+    /// first word still gets its capital.
+    @Test func aSnippetAtTheStartKeepsItsOwnFirstLetter() {
+        let formatter = LocalFormatter(snippets: [email, link])
+        #expect(formatter.format("My calendar link is the easiest way to book.")
+                == "https://cal.example/me is the easiest way to book.")
+        #expect(formatter.format("my email address works best") == "anton@example.com works best")
+        #expect(formatter.format("send it to my email address") == "Send it to anton@example.com")
+    }
+
+    /// The spaces and marks inside a snippet's text are the user's.
+    @Test func aSnippetsTextGoesInAsTyped() {
+        let table = SnippetDefinition(trigger: "my table", expansion: "Name:    Anton\nRole:    Founder")
+        let greeting = SnippetDefinition(trigger: "my greeting", expansion: "Bonjour ! Ça va ?")
+        let formatter = LocalFormatter(snippets: [table, greeting])
+        #expect(formatter.format("Here it is, my table, thanks.") == "Here it is, Name:    Anton\nRole:    Founder, thanks.")
+        #expect(formatter.format("Start with my greeting and wait.") == "Start with Bonjour ! Ça va ? and wait.")
+    }
+
+    /// The sentence's full stop doesn't double the expansion's own, and doesn't sign a block of
+    /// lines; after an address or a link it ends the sentence as after any word.
+    @Test func noFullStopAfterAnExpansionThatEndsItsOwnSentence() {
+        let formatter = LocalFormatter(snippets: [address, signature, email])
+        #expect(formatter.format("Send the parcel to my home address.") == "Send the parcel to 12 Garden Road. London N1.")
+        #expect(formatter.format("Thanks for the call. My signature.") == "Thanks for the call. Best regards,\nAnton")
+        #expect(formatter.format("Send it to my email address.") == "Send it to anton@example.com.")
+        #expect(formatter.format("Send it to my email address...") == "Send it to anton@example.com...")
+    }
+
+    /// A shorter snippet's name inside a longer snippet's text is text, not a cue.
+    @Test func aSnippetNeverFiresInsideAnothersText() {
+        let line = SnippetDefinition(trigger: "my booking line", expansion: "Book a slot in my calendar: https://cal.example/me")
+        let calendar = SnippetDefinition(trigger: "my calendar", expansion: "https://cal.example/me")
+        #expect(LocalFormatter(snippets: [calendar, line]).format("Use my booking line today")
+                == "Use Book a slot in my calendar: https://cal.example/me today")
+    }
+
+    @Test func theLongerOfTwoTriggersWins() {
+        let work = SnippetDefinition(trigger: "my work email", expansion: "anton@work.example")
+        let home = SnippetDefinition(trigger: "my email", expansion: "anton@home.example")
+        #expect(LocalFormatter(snippets: [home, work]).format("Write to my work email, not my email.")
+                == "Write to anton@work.example, not anton@home.example.")
+    }
+
+    /// Casual restyles the speaker's words, never a snippet's text.
+    @Test func casualLeavesASnippetsTextAlone() {
+        let snippets = [address, signature]
+        let formatter = LocalFormatter(snippets: snippets)
+        func casual(_ said: String) -> String {
+            SnippetPlaceholders.substitute(
+                in: StyleFormatter.apply(.casual, to: formatter.formatMarkingSnippets(said)), snippets: snippets)
+        }
+        #expect(casual("My home address.") == "12 Garden Road. London N1.")
+        #expect(casual("Thanks. Send it to my home address.") == "thanks. send it to 12 Garden Road. London N1.")
+        #expect(casual("See you soon. My signature.") == "see you soon. Best regards,\nAnton")
+        // The model's Casual text ends on a snippet: the full stop that stays is the snippet's own.
+        let written = "send it to \(SnippetPlaceholders.token(for: address))"
+        #expect(SnippetPlaceholders.substitute(in: StyleFormatter.apply(.casual, to: written, written: true), snippets: snippets)
+                == "send it to 12 Garden Road. London N1.")
+    }
+
+    /// The model usually returns the placeholder, but not every time (live check, November 2026:
+    /// «на мой адрес» came back as words from two styles). The trigger is the cue either way.
+    @Test func aTriggerTheModelLeftAsWordsIsStillExpanded() {
+        let courier = SnippetDefinition(trigger: "мой адрес", expansion: "ул. Садовая, д. 12")
+        #expect(expanded("Скинь договор на мою почту и пришли курьера на мой адрес.", [courier])
+                == "Скинь договор на мою почту и пришли курьера на ул. Садовая, д. 12.")
+        // One it did mark is expanded once.
+        let reply = "Write to \(SnippetPlaceholders.token(for: email)) or use my calendar link."
+        #expect(expanded(reply, [email, link]) == "Write to anton@example.com or use https://cal.example/me.")
+    }
+
+    /// "My ⟦…⟧" for "my home address" (the same live check, five times of five when the sentence
+    /// began with the trigger): the part of the trigger the model left beside its own placeholder
+    /// goes; any other word stays.
+    @Test func aTriggerTheModelHalfReplacedLeavesNoStrayWords() {
+        let token = SnippetPlaceholders.token(for: address)
+        #expect(SnippetPlaceholders.repair("My \(token) is where the parcel should go.", snippets: [address])
+                == "\(token) is where the parcel should go.")
+        #expect(SnippetPlaceholders.repair("Send it to my home \(token) today.", snippets: [address]) == "Send it to \(token) today.")
+        #expect(SnippetPlaceholders.repair("Send it to \(token) address today.", snippets: [address]) == "Send it to \(token) today.")
+        #expect(SnippetPlaceholders.repair("Send it to our \(token) today.", snippets: [address]) == "Send it to our \(token) today.")
+        #expect(SnippetPlaceholders.repair("Is that my, \(token)?", snippets: [address]) == "Is that my, \(token)?")
+    }
+
+    /// «на мой адрес ⟦…⟧»: the model kept the trigger's words and added its placeholder. The
+    /// snippet goes in once, in their place.
+    @Test func aTriggerTheModelKeptBesideItsPlaceholderIsExpandedOnce() {
+        let courier = SnippetDefinition(trigger: "мой адрес", expansion: "ул. Садовая, д. 12")
+        let token = SnippetPlaceholders.token(for: courier)
+        #expect(expanded("Пришли курьера на мой адрес \(token) до пятницы, пожалуйста.", [courier])
+                == "Пришли курьера на ул. Садовая, д. 12 до пятницы, пожалуйста.")
+        #expect(expanded("Пришли курьера на \(token) мой адрес до пятницы.", [courier])
+                == "Пришли курьера на ул. Садовая, д. 12 до пятницы.")
+        let sign = SnippetDefinition(trigger: "sig", expansion: "Best, Anton")
+        #expect(expanded("Thanks, sig \(SnippetPlaceholders.token(for: sign))", [sign]) == "Thanks, Best, Anton")
+    }
+
+    /// A placeholder already in a reply stays as it is, also when a snippet's name is inside it.
+    @Test func markingLeavesPlaceholdersAlone() {
+        let letter = SnippetDefinition(trigger: "s", expansion: "sincerely")
+        let token = SnippetPlaceholders.token(for: email)
+        #expect(SnippetPlaceholders.mark(in: "Write to \(token).", snippets: [email, letter]) == "Write to \(token).")
+        #expect(SnippetPlaceholders.mark(in: "No snippet here.", snippets: []) == "No snippet here.")
+    }
+}
+
 struct CleanupGateTests {
     /// Word for word keeps hedges, self-corrections, repeats, numbers and lists as spoken, so none
     /// of those is worth a model call.

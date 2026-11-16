@@ -220,11 +220,12 @@ final class DictationPipeline {
     // MARK: Cleanup
 
     /// The text when no model writes it: the transcript tidied on the iPhone, and the part of the
-    /// style that needs no model (Casual's lowercase and missing full stop).
+    /// style that needs no model (Casual's lowercase and missing full stop). The snippets' text
+    /// goes in after both, so neither changes what the user typed for them.
     private func localText(for transcript: String, language: String?, style: StylePreset) -> String {
-        let formatted = LocalFormatter(dictionary: dictionary, snippets: snippets, language: language,
-                                       removesFillers: settings.smartFormatting).format(transcript)
-        return StyleFormatter.apply(style, to: formatted)
+        let marked = LocalFormatter(dictionary: dictionary, snippets: snippets, language: language,
+                                    removesFillers: settings.smartFormatting).formatMarkingSnippets(transcript)
+        return SnippetPlaceholders.substitute(in: StyleFormatter.apply(style, to: marked), snippets: snippets)
     }
 
     private struct CleanupOutcome {
@@ -294,9 +295,11 @@ final class DictationPipeline {
                 outcome.errorReason = "The cleanup service didn't translate. Deploy the latest cleanup function."
                 outcome.message = "Translation isn't available right now. Please try again later."
             } else if response.status == "cleaned" {
-                // The model wrote the style; only what it may have left (Casual's last full stop) is enforced.
-                outcome.text = StyleFormatter.apply(
-                    style, to: SnippetPlaceholders.substitute(in: response.text, snippets: snippets), written: true)
+                // The model wrote the style; only what it may have left is enforced: Casual's last
+                // full stop, and a snippet it didn't mark. The snippets' text goes in last, as typed.
+                let marked = SnippetPlaceholders.repair(response.text, snippets: snippets)
+                outcome.text = SnippetPlaceholders.substitute(
+                    in: StyleFormatter.apply(style, to: marked, written: true), snippets: snippets)
                 outcome.status = .cleaned
             } else if targetLanguage != nil {
                 outcome.errorReason = response.reason == "untranslated"
