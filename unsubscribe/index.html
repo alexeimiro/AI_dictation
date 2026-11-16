@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Unsubscribe · Murmur</title>
+<meta name="description" content="Stop Murmur's tips and reminders.">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<header class="site"><a class="brand" href="../" aria-label="Murmur"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor"/><circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg><span>murmur</span></a></header>
+<main>
+<h1 id="unsubscribe-title">Unsubscribe from Murmur’s emails?</h1>
+<p id="unsubscribe-line">You’ll stop getting Murmur’s tips and reminders. Sign-in codes still come whenever you ask for one.</p>
+<button id="unsubscribe-go" class="button" type="button">Unsubscribe</button>
+<button id="unsubscribe-undo" class="button secondary" type="button" hidden>Subscribe again</button>
+<p id="unsubscribe-error" class="fineprint" hidden></p>
+
+<script>
+  // The token comes from the email's link: …/unsubscribe/?t=<token>. Nothing changes until the
+  // button is pressed, so a link scanner opening the page unsubscribes nobody.
+  (() => {
+    const endpoint = "https://aljjzxfzqbbmyfmardaj.supabase.co/functions/v1/email-preferences";
+    const token = (new URLSearchParams(location.search).get("t") || "").trim();
+    const title = document.getElementById("unsubscribe-title");
+    const line = document.getElementById("unsubscribe-line");
+    const go = document.getElementById("unsubscribe-go");
+    const undo = document.getElementById("unsubscribe-undo");
+    const error = document.getElementById("unsubscribe-error");
+    if (!/^[0-9a-f-]{36}$/i.test(token)) {
+      title.textContent = "This link is incomplete";
+      line.innerHTML = "Open the Unsubscribe link in the email again, or ask us from the <a href=\"../support/\">Support page</a> and we’ll do it for you.";
+      go.hidden = true;
+      return;
+    }
+    async function send(action, button) {
+      button.disabled = true;
+      error.hidden = true;
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, action }),
+        });
+        if (!response.ok) throw new Error(String(response.status));
+        return true;
+      } catch {
+        error.innerHTML = "That didn’t work. Try again in a moment, or ask us from the <a href=\"../support/\">Support page</a>.";
+        error.hidden = false;
+        return false;
+      } finally {
+        button.disabled = false;
+      }
+    }
+    go.addEventListener("click", async () => {
+      if (!await send("unsubscribe", go)) return;
+      title.textContent = "You’re unsubscribed";
+      line.textContent = "You won’t get Murmur’s tips and reminders any more. Sign-in codes still come whenever you ask for one.";
+      go.hidden = true;
+      undo.hidden = false;
+    });
+    undo.addEventListener("click", async () => {
+      if (!await send("resubscribe", undo)) return;
+      title.textContent = "You’re subscribed again";
+      line.textContent = "Murmur’s tips and reminders will come again.";
+      undo.hidden = true;
+    });
+  })();
+</script>
+</main>
+<footer class="site">
+<nav><a href="../support/">Support</a><a href="../privacy/">Privacy Policy</a><a href="../terms/">Terms of Use</a></nav>
+<p>© 2026 OKNENOR L.L.C-FZ</p>
+</footer>
+</body>
+</html>
