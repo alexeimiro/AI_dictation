@@ -10,6 +10,8 @@ final class AppModel {
     let transport: IPCTransport
     let session: SessionController
     let setup: SetupStatus
+    /// The card that floats over Settings while the keyboard is turned on.
+    let settingsGuide: SettingsGuide
     let assets: SpeechAssetManager
     let languages: LanguageSettingsModel
     let history: HistoryStore
@@ -168,7 +170,10 @@ final class AppModel {
         self.session = session
         noteDictation = NoteDictation(session: session, library: library)
         self.languages = LanguageSettingsModel(assets: assets, session: session)
-        self.setup = SetupStatus(payloads: transport.payloads)
+        let setup = SetupStatus(payloads: transport.payloads)
+        self.setup = setup
+        settingsGuide = SettingsGuide(openURL: { setup.openSettings() },
+                                      sessionIsLive: { [weak session] in session?.isLive ?? false })
         if launchOptions.usesOnboardingFixtures {
             onboardingServices = .fixtures(
                 offer: OnboardingFixtures.offer(variant: launchOptions.onboardingVariant), account: account)
@@ -315,11 +320,21 @@ final class AppModel {
 
     /// "Go to Settings" on the keyboard setup screen.
     func openKeyboardSettings() {
+        openSettingsWithGuide(.enableKeyboard)
+    }
+
+    /// Settings, with the steps floating over it (`SettingsGuide`). Fixture runs never leave the
+    /// app: the keyboard page gets its result at once.
+    func openSettingsWithGuide(_ variant: SettingsGuide.Variant) {
         if launchOptions.usesOnboardingFixtures {
-            onboarding.send(.keyboardStatusChanged(added: true, fullAccess: true))
-        } else {
-            setup.openSettings()
+            if variant == .enableKeyboard {
+                onboarding.send(.keyboardStatusChanged(added: true, fullAccess: true))
+            } else {
+                setup.openSettings()
+            }
+            return
         }
+        settingsGuide.open(variant)
     }
 
     /// The system microphone prompt (shown once; later calls report the decision).
@@ -934,6 +949,8 @@ final class AppModel {
         switch phase {
         case .active:
             if activeSince == nil { activeSince = Date() }
+            // First: the floating guide comes down before the checks below move onboarding on.
+            settingsGuide.appDidBecomeActive()
             // Back in Murmur: only what happens after the user leaves again counts.
             owedDictation?.keyboardBackAt = nil
             owedDictation?.awayReport = nil

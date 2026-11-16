@@ -45,7 +45,12 @@ on the pages that open a part, `ready` and `trialOffer`, which have none.
   answers.
 - **Keyboard setup.** `SetupStatus` is the source of truth. The page opens the app's Settings, and
   on every return to the foreground the app checks again. Each confirmed requirement is saved,
-  because turning on Full Access can terminate the app.
+  because turning on Full Access can terminate the app. On an iPhone the page first lifts a card
+  with the steps into a Picture in Picture window (`SettingsGuide`), the one thing iOS lets float
+  over Settings; coming back closes it. The practice page's Full Access hint does the same.
+  Simulators have no such window, so only a phone can check it; without one, Settings opens on
+  its own. iOS ends the app when Allow Full Access is switched on, and the window with it, so
+  the card's last line is all that reminds the user to come back.
 - **Full Access is confirmed in practice, not on return from Settings.** iOS only shows it once the
   keyboard has run. Setup moves on when the keyboard is detected; the first exercise checks Full
   Access once the Murmur keyboard is up and points to Settings if the keyboard never reports in.

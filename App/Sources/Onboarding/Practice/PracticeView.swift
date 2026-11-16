@@ -243,7 +243,7 @@ struct PracticeView: View {
                     .font(.murmur(.subhead))
                     .foregroundStyle(Theme.ink)
                     .fixedSize(horizontal: false, vertical: true)
-                Button(OnboardingCopy.openSettings) { model.setup.openSettings() }
+                Button(OnboardingCopy.openSettings) { model.openSettingsWithGuide(.fullAccess) }
                     .buttonStyle(.murmur(.secondary, size: .compact))
             }
         } else if case .failed(let message) = model.practice.state {

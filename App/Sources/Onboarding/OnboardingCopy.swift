@@ -120,6 +120,32 @@ enum OnboardingCopy {
         static let button = "Go to Settings"
     }
 
+    /// The card that floats over Settings while the switches are flipped (`SettingsGuide`):
+    /// each line's words, with the thing to find in Settings set apart.
+    enum Guide {
+        struct Line: Equatable {
+            let lead: String
+            let key: String
+            let tail: String
+            var text: String { lead + key + tail }
+        }
+
+        /// The keyboard page's trip.
+        static let enableKeyboard: [Line] = [
+            Line(lead: "Tap ", key: Keyboard.keyboards, tail: ""),
+            Line(lead: "Turn on ", key: Keyboard.murmur, tail: ""),
+            Line(lead: "Turn on ", key: Keyboard.fullAccess, tail: ""),
+            Line(lead: "Tap ", key: "Allow", tail: ", then come back"),
+        ]
+        /// The practice page's, for Full Access alone.
+        static let fullAccess: [Line] = [
+            Line(lead: "Tap ", key: Keyboard.keyboards, tail: ""),
+            Line(lead: "Turn on ", key: Keyboard.fullAccess, tail: ""),
+            Line(lead: "Tap ", key: "Allow", tail: ""),
+            Line(lead: "Come back to ", key: Keyboard.murmur, tail: ""),
+        ]
+    }
+
     enum PracticeIntro {
         static let title = "Now try it."
         static let line = "One short dictation, so you know how it feels."

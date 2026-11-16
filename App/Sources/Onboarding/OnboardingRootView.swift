@@ -16,6 +16,8 @@ struct OnboardingRootView: View {
                 .id(store.step)
                 .transition(transition(back: store.movedBack))
         }
+        // The card on its way into, and back from, the window that floats over Settings.
+        .overlay { SettingsGuideOverlay() }
         .animation(.smooth(duration: 0.35), value: store.step)
         // Text scales up to XXXL; the accessibility sizes beyond it are capped here.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
