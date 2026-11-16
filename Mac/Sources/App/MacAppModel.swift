@@ -414,14 +414,22 @@ final class MacAppModel {
 
     // MARK: Sign-in
 
-    func signInWithGoogle() async {
+    func signInWithGoogle() async { await signInOnTheWeb(.google, name: "Google") }
+
+    /// Apple's sign-in also runs on the web: Apple doesn't give Developer ID apps (Murmur for Mac is
+    /// a download) the Sign in with Apple entitlement, so the native sheet is out. The web flow goes
+    /// through the Supabase project's Services ID and reaches the same account as the iPhone app,
+    /// because Apple's user ID is the same for every app of one team.
+    func signInWithApple() async { await signInOnTheWeb(.apple, name: "Apple") }
+
+    private func signInOnTheWeb(_ provider: Provider, name: String) async {
         guard let backend else { return }
         signInBusy = true
         signInError = nil
         defer { signInBusy = false }
         do {
             let web = WebSignIn()
-            try await backend.client.auth.signInWithOAuth(provider: .google, redirectTo: Self.callbackURL) { url in
+            try await backend.client.auth.signInWithOAuth(provider: provider, redirectTo: Self.callbackURL) { url in
                 try await web.run(url, callbackScheme: Brand.urlScheme)
             }
             backend.didSignIn()
@@ -429,31 +437,8 @@ final class MacAppModel {
         } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
             return
         } catch {
-            logger.error("Google sign-in failed: \(error.localizedDescription, privacy: .public)")
-            signInError = "Couldn't sign in with Google: \(error.localizedDescription)"
-        }
-    }
-
-    func signInWithApple() async {
-        guard let backend else { return }
-        signInBusy = true
-        signInError = nil
-        defer { signInBusy = false }
-        do {
-            let apple = try await AppleSignIn().run()
-            try await backend.client.auth.signInWithIdToken(
-                credentials: OpenIDConnectCredentials(provider: .apple, idToken: apple.idToken, nonce: apple.nonce))
-            backend.didSignIn()
-            if let name = apple.fullName {
-                // Apple sends the name only on the first sign-in.
-                _ = try? await backend.client.auth.update(user: UserAttributes(data: ["full_name": .string(name)]))
-            }
-            await syncAccountData()
-        } catch let error as ASAuthorizationError where error.code == .canceled {
-            return
-        } catch {
-            logger.error("Apple sign-in failed: \(error.localizedDescription, privacy: .public)")
-            signInError = "Couldn't sign in with Apple: \(error.localizedDescription)"
+            logger.error("\(name, privacy: .public) sign-in failed: \(error.localizedDescription, privacy: .public)")
+            signInError = "Couldn't sign in with \(name): \(error.localizedDescription)"
         }
     }
 

@@ -59,8 +59,10 @@ targets:
         # Downloaded from simplymurmur.com (the user's choice), so no App Sandbox: pasting into other
         # apps and the fn hotkey need Accessibility, which the user grants once.
         ENABLE_APP_SANDBOX: NO
-        # Sign in with Apple is a restricted entitlement, so builds carry a profile
-        # (Mac/scripts/provision_mac.mjs makes both): development for Debug, Developer ID for Release.
+        # Builds carry a profile (Mac/scripts/provision_mac.mjs makes both), which gives the app its
+        # application identifier: development for Debug, Developer ID for Release. Apple gives
+        # Developer ID apps no Sign in with Apple entitlement, so the Mac signs in with Apple on the
+        # web, like Google (MacAppModel.signInWithApple).
         CODE_SIGN_STYLE: Manual
       configs:
         Debug:
@@ -96,7 +98,6 @@ targets:
       properties:
         # Hardened Runtime blocks the microphone without this.
         com.apple.security.device.audio-input: true
-        com.apple.developer.applesignin: [Default]
 
   MurmurMacTests:
     type: bundle.unit-test
