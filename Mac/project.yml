@@ -1,0 +1,136 @@
+# Murmur for Mac. A project of its own, so the iPhone project (../project.yml) is untouched.
+# It compiles the iPhone app's platform-neutral code (backend, dictation, data) from ../App/Sources
+# and the shared MurmurKit package; only the Mac shell, hotkey, recorder, floating bar and text
+# insertion live in Mac/Sources. Generate with `xcodegen generate` in this folder.
+name: MurmurMac
+options:
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+  developmentLanguage: en
+configFiles:
+  Debug: ../Config/Base.xcconfig
+  Release: ../Config/Base.xcconfig
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    SWIFT_EMIT_LOC_STRINGS: YES
+packages:
+  MurmurKit:
+    path: ../Packages/MurmurKit
+  Supabase:
+    url: https://github.com/supabase/supabase-swift
+    from: 2.55.3
+
+targets:
+  MurmurMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+      - path: ../App/Sources/Backend
+      - path: ../App/Sources/Dictation
+      - path: ../App/Sources/Data
+      # The privacy choice AccountService records; the rest of onboarding is iPhone UI.
+      - path: ../App/Sources/Onboarding/OnboardingState.swift
+      - path: ../App/Sources/Onboarding/OnboardingPersistence.swift
+      - path: ../App/Sources/Session/NetworkConditions.swift
+      - path: ../App/Sources/Session/ProcessAge.swift
+    dependencies:
+      - package: MurmurKit
+        product: MurmurCore
+      - package: MurmurKit
+        product: MurmurBrand
+      - package: MurmurKit
+        product: MurmurUI
+      - package: Supabase
+        product: Supabase
+    settings:
+      base:
+        PRODUCT_NAME: Murmur
+        PRODUCT_BUNDLE_IDENTIFIER: $(MURMUR_BUNDLE_PREFIX).murmur.mac
+        ENABLE_HARDENED_RUNTIME: YES
+        COMBINE_HIDPI_IMAGES: YES
+        # Downloaded from simplymurmur.com (the user's choice), so no App Sandbox: pasting into other
+        # apps and the fn hotkey need Accessibility, which the user grants once.
+        ENABLE_APP_SANDBOX: NO
+        # Sign in with Apple is a restricted entitlement, so builds carry a profile
+        # (Mac/scripts/provision_mac.mjs makes both): development for Debug, Developer ID for Release.
+        CODE_SIGN_STYLE: Manual
+      configs:
+        Debug:
+          CODE_SIGN_IDENTITY: Apple Development
+          PROVISIONING_PROFILE_SPECIFIER: Murmur Mac Dev
+        Release:
+          CODE_SIGN_IDENTITY: Developer ID Application
+          PROVISIONING_PROFILE_SPECIFIER: Murmur Mac Direct
+          OTHER_CODE_SIGN_FLAGS: --timestamp
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleDisplayName: $(MURMUR_APP_NAME)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSApplicationCategoryType: public.app-category.productivity
+        LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
+        NSHumanReadableCopyright: © 2026 OKNENOR L.L.C-FZ
+        NSMicrophoneUsageDescription: Murmur listens only while you hold your dictation shortcut, then writes what you said.
+        MurmurSupabaseHost: $(SUPABASE_HOST)
+        MurmurSupabaseAnonKey: $(SUPABASE_ANON_KEY)
+        MurmurEdgeHost: $(MURMUR_EDGE_HOST)
+        # Shared settings live in this plain defaults suite: the Mac has no extensions, and a `group.`
+        # suite would need an App Group entitlement and profile.
+        MurmurAppGroupID: $(MURMUR_BUNDLE_PREFIX).murmur.mac.settings
+        MurmurURLScheme: $(MURMUR_URL_SCHEME)
+        MurmurTermsURL: $(MURMUR_TERMS_URL)
+        MurmurPrivacyURL: $(MURMUR_PRIVACY_URL)
+        MurmurSupportURL: $(MURMUR_SUPPORT_URL)
+        MurmurInviteURL: $(MURMUR_INVITE_URL)
+    entitlements:
+      path: Resources/MurmurMac.entitlements
+      properties:
+        # Hardened Runtime blocks the microphone without this.
+        com.apple.security.device.audio-input: true
+        com.apple.developer.applesignin: [Default]
+
+  MurmurMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    # No host app: the tests compile the pure logic they check, so running them never launches a
+    # second Murmur with its own shortcut and bar.
+    sources:
+      - path: Tests
+      - path: Sources/Engine/InsightsMath.swift
+      - path: Sources/Engine/DictationAppLog.swift
+    dependencies:
+      - package: MurmurKit
+        product: MurmurCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MURMUR_BUNDLE_PREFIX).murmur.mac.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_STYLE: $(MURMUR_SIGN_STYLE)
+        CODE_SIGN_IDENTITY: $(MURMUR_SIGN_IDENTITY)
+
+schemes:
+  MurmurMac:
+    build:
+      targets:
+        MurmurMac: all
+    run:
+      config: Debug
+    archive:
+      config: Release
+  MurmurMacTests:
+    build:
+      targets:
+        MurmurMacTests: [test]
+    test:
+      config: Debug
+      targets:
+        - MurmurMacTests

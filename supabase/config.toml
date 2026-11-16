@@ -460,3 +460,9 @@ verify_jwt = false
 
 [functions.support]
 verify_jwt = false
+
+[functions.lifecycle-emails]
+verify_jwt = false
+
+[functions.email-preferences]
+verify_jwt = false

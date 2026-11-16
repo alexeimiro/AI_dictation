@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Builds Murmur's website into build/site: the privacy policy and terms (docs/legal), the support
-// page (site/support.md), the home and invite pages (site/*.html) and the stylesheet.
+// page (site/support.md), the home and invite pages, the pages the lifecycle emails link to
+// (site/*.html) and the stylesheet.
 // scripts/publish_site.sh publishes it to GitHub Pages; the app and App Store Connect link to its
 // pages.
 //
@@ -31,6 +32,19 @@ const PAGES = [
   {
     file: "invite/index.html", source: "site/invite.html", title: "Your invite to Murmur",
     description: "A month of Murmur Pro, from a friend.",
+  },
+  // Where the lifecycle emails' links go (supabase/functions/_shared/lifecycle_emails.ts).
+  {
+    file: "open/index.html", source: "site/open.html", title: "Open Murmur",
+    description: "Opens Murmur on your iPhone.",
+  },
+  {
+    file: "unsubscribe/index.html", source: "site/unsubscribe.html", title: "Unsubscribe · Murmur",
+    description: "Stop Murmur's tips and reminders.",
+  },
+  {
+    file: "score/index.html", source: "site/score.html", title: "Thanks for answering · Murmur",
+    description: "How likely are you to recommend Murmur to a friend?",
   },
 ];
 

@@ -1,0 +1,18 @@
+<h1>Opening Murmur…</h1>
+<p>If Murmur doesn’t open by itself, tap the button. Open this page on the iPhone where you use Murmur.</p>
+<a id="open-app" class="button" href="murmur://">Open Murmur</a>
+<a class="button secondary" href="https://apps.apple.com/app/id6829429992">Get Murmur on the App Store</a>
+
+<script>
+  // The lifecycle emails link here (…/open/?to=pro): an https link that mail apps don't block,
+  // handing over to Murmur's own link. Only screens the app's links know are offered.
+  (() => {
+    const routes = { pro: "murmur://pro", settings: "murmur://settings" };
+    const target = routes[new URLSearchParams(location.search).get("to")] || "murmur://";
+    document.getElementById("open-app").href = target;
+    // Only an iPhone or iPad can open it; elsewhere the page just explains.
+    if (/iPhone|iPad|iPod/.test(navigator.platform) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform))) {
+      location.href = target;
+    }
+  })();
+</script>

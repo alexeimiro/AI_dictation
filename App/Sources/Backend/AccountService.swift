@@ -2,7 +2,9 @@ import Foundation
 import MurmurCore
 import os
 import Supabase
+#if canImport(UIKit)
 import UIKit
+#endif
 
 /// The account screens' server calls: the plan and this week's words (`my_quota`), invites
 /// (`my_referrals`, `redeem_referral`), support messages (`issue_reports`), the default style
@@ -400,10 +402,18 @@ final class AccountService: StyleRemote {
     /// App and system versions, so a report can be matched to a build.
     static func diagnostics(bundle: Bundle = .main) -> [String: String] {
         let info = bundle.infoDictionary
+        #if canImport(UIKit)
+        let os = "iOS \(UIDevice.current.systemVersion)"
+        let device = UIDevice.current.model
+        #else
+        // Murmur for Mac compiles this file too.
+        let os = "macOS \(ProcessInfo.processInfo.operatingSystemVersionString)"
+        let device = "Mac"
+        #endif
         return [
             "app": "\(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?"))",
-            "os": "iOS \(UIDevice.current.systemVersion)",
-            "device": UIDevice.current.model,
+            "os": os,
+            "device": device,
             "locale": Locale.preferredLanguages.first ?? "?",
         ]
     }

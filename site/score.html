@@ -1,0 +1,77 @@
+<h1 id="score-title">Thanks for answering</h1>
+<p id="score-line">How likely are you to recommend Murmur to a friend?</p>
+<div id="score-form">
+  <div class="scale" id="score-scale" role="group" aria-label="Your score, 1 to 10"></div>
+  <div class="scale-ends"><span>1 = not likely</span><span>10 = very likely</span></div>
+  <label for="score-comment">What’s the main reason for your score?</label>
+  <textarea id="score-comment" rows="4" maxlength="2000" placeholder="Optional"></textarea>
+  <button id="score-send" class="button" type="button">Send</button>
+</div>
+<p id="score-status" class="fineprint" hidden></p>
+
+<script>
+  // The email's numbers link here: …/score/?t=<token>&s=7. The score is saved as the page opens;
+  // another number, or a reason, can follow.
+  (() => {
+    const endpoint = "https://aljjzxfzqbbmyfmardaj.supabase.co/functions/v1/email-preferences";
+    const params = new URLSearchParams(location.search);
+    const token = (params.get("t") || "").trim();
+    let score = Number(params.get("s"));
+    const scale = document.getElementById("score-scale");
+    const status = document.getElementById("score-status");
+    const send = document.getElementById("score-send");
+    const comment = document.getElementById("score-comment");
+    if (!/^[0-9a-f-]{36}$/i.test(token)) {
+      document.getElementById("score-title").textContent = "This link is incomplete";
+      document.getElementById("score-line").textContent = "Tap a number in the email again.";
+      document.getElementById("score-form").hidden = true;
+      return;
+    }
+    const valid = () => Number.isInteger(score) && score >= 1 && score <= 10;
+    const buttons = Array.from({ length: 10 }, (_, index) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = String(index + 1);
+      button.addEventListener("click", () => {
+        score = index + 1;
+        mark();
+        save(null);
+      });
+      scale.appendChild(button);
+      return button;
+    });
+    function mark() {
+      buttons.forEach((button, index) => button.setAttribute("aria-pressed", String(index + 1 === score)));
+    }
+    function say(text) {
+      status.textContent = text;
+      status.hidden = false;
+    }
+    async function save(text) {
+      if (!valid()) return false;
+      try {
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token, action: "score", score, ...(text ? { comment: text } : {}) }),
+        });
+        if (!response.ok) throw new Error(String(response.status));
+        return true;
+      } catch {
+        say("That didn’t save. Try again in a moment.");
+        return false;
+      }
+    }
+    send.addEventListener("click", async () => {
+      if (!valid()) return say("Pick a number first.");
+      send.disabled = true;
+      const saved = await save(comment.value.trim());
+      send.disabled = false;
+      if (!saved) return;
+      document.getElementById("score-form").hidden = true;
+      say("Thanks. We read every answer.");
+    });
+    mark();
+    save(null);
+  })();
+</script>

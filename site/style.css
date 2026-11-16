@@ -77,3 +77,14 @@ footer.site a { color: var(--second); }
 .button { display: flex; align-items: center; justify-content: center; min-height: 56px; border-radius: 999px; padding: 8px 20px; margin: 10px 0; font-weight: 600; text-decoration: none; background: var(--ink); color: var(--on-ink); }
 .button.secondary { background: none; color: var(--ink); border: 1.5px solid var(--ink); }
 .fineprint { color: var(--third); font-size: 14px; }
+
+/* The pages the lifecycle emails link to: open, unsubscribe, score. */
+button.button { width: 100%; font: inherit; font-weight: 600; border: 0; cursor: pointer; }
+button.button.secondary { border: 1.5px solid var(--ink); }
+button.button[disabled] { opacity: 0.5; cursor: default; }
+.scale { display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; margin: 18px 0 8px; }
+.scale button { min-height: 44px; padding: 0; border: 0; border-radius: 10px; background: var(--fill); color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; }
+.scale button[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); }
+.scale-ends { display: flex; justify-content: space-between; margin: 0 0 24px; color: var(--third); font-size: 14px; }
+label { display: block; margin: 0 0 8px; font-weight: 600; }
+textarea { width: 100%; padding: 12px 14px; border: 0; border-radius: 14px; background: var(--fill); color: var(--ink); font: inherit; resize: vertical; }

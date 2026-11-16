@@ -24,5 +24,7 @@ scripts/out/
 # Third-party reference screenshots (Mobbin / Wispr Flow) — local only, not for a public repo
 Wispr Flow iOS Onboarding/
 Wispr Flow iOS App/
+Wispr Flow Mac Onboarding/
+Wispr Flow Mac App/
 
 *.p8

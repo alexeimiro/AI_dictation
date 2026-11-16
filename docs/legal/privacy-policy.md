@@ -1,6 +1,6 @@
 # Murmur Privacy Policy
 
-Effective November 13, 2026
+Effective November 16, 2026
 
 Murmur is a voice keyboard for iPhone made by OKNENOR L.L.C-FZ ("we"). This policy explains what
 Murmur collects, why, and the choices you have. Questions: miralex13@gmail.com.
@@ -41,6 +41,12 @@ Murmur collects, why, and the choices you have. Questions: miralex13@gmail.com.
 - **Your answers during setup:** what you plan to use Murmur for, how you heard about it, your
   languages and default style, your data-sharing choice and, if you ask for the link to Murmur for
   Mac and PC, the email address to send it to.
+- **The emails we send you:** a welcome when you create your account, a few tips in your first
+  two weeks, one question about how likely you are to recommend Murmur, and a reminder the day
+  before a free trial ends. To write them we use your first name, your plan, and how much you've
+  dictated (words, and on how many days), never what you said. We record which emails we sent.
+  Each has an Unsubscribe link; sign-in codes still come whenever you ask for one. If you answer
+  the question, we keep your score and anything you write with it.
 - **Feedback and support messages:** what you write to us, with the app version, iOS version,
   device model and language, to look into the problem. Each message is also emailed to us, with
   your account's email address so we can reply. When you rate a dictation and have turned
@@ -55,7 +61,8 @@ We don't track you across apps and websites, show ads, or sell or rent your data
 - **Anthropic** tidies and translates the text of dictations.
 - **Apple** handles Sign in with Apple, App Store purchases and the free-trial check
   (DeviceCheck). **Google** handles Sign in with Google.
-- **Resend** sends our emails: sign-in codes, and your support messages to us.
+- **Resend** sends our emails: sign-in codes, the emails described above, and your support
+  messages to us.
 
 Each processes data only to provide its service to us.
 
