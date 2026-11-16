@@ -183,20 +183,19 @@ export class OpenAIError extends Error {
  * own id. `cleanup` and `dictate` report the same dictation under that id, and `record_usage`
  * keeps the largest count, so a dictation is counted once whichever requests it takes.
  *
- * Null when there is nothing to count, or when the request doesn't vouch for its id with
- * `x-murmur-dictation: <dictationId>`, as `dictate` requires. Builds before the header sent a
- * random id here; counting under it would count the dictation again when `cleanup` reports it.
+ * Every transcript with words is counted. Until 2026-11-17 one was counted only when the request
+ * vouched for its id with `x-murmur-dictation: <dictationId>`, so leaving the header out was free
+ * transcription for any client that isn't the app. The only builds that send none are TestFlight
+ * builds from before 2026-11-13: their id here is a random one, so their dictation is counted again
+ * when `cleanup` reports it. A request without an id is counted under one of its own.
  */
 export function transcriptUsage(
   request: TranscribeRequest,
-  dictationHeader: string | null,
   result: TranscriptionResult,
 ): { dictationId: string; words: number } | null {
-  const { dictationId } = request;
-  if (!dictationId || dictationHeader?.trim().toLowerCase() !== dictationId.toLowerCase()) return null;
   // In the language it was spoken in: the one asked for, else the one heard first.
   const words = countWords(result.text, request.language ?? result.languages[0]);
-  return words > 0 ? { dictationId, words } : null;
+  return words > 0 ? { dictationId: request.dictationId ?? crypto.randomUUID(), words } : null;
 }
 
 function decodeBase64(value: string): Uint8Array<ArrayBuffer> | null {

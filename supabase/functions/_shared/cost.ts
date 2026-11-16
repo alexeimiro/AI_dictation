@@ -61,8 +61,8 @@ export function textCall(
 }
 
 /**
- * The dictation's own id when the request vouches for it with `x-murmur-dictation`, as
- * `transcriptUsage` requires; else null. Builds before the header sent a random id in the body.
+ * The dictation's own id when the request vouches for it with `x-murmur-dictation`; else null.
+ * Builds before the header sent a random id in the body, which would name no dictation here.
  */
 export function vouchedDictationId(dictationId: string | null, header: string | null): string | null {
   return dictationId && header?.trim().toLowerCase() === dictationId.toLowerCase() ? dictationId : null;

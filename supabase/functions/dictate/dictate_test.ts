@@ -764,7 +764,7 @@ Deno.test("an automatic source is the language the transcription heard first", a
   }
 });
 
-Deno.test("an anonymous transcript over the trial limit comes back raw, untranslated", async () => {
+Deno.test("an anonymous transcript over the trial limit comes back raw, untranslated, and counted", async () => {
   const long = "слово ".repeat(1200).trim();
   const transcription = () => Response.json({ text: long, languages: [{ code: "ru" }] });
   const { handler, recorded } = setup({ transcription });
@@ -772,9 +772,11 @@ Deno.test("an anonymous transcript over the trial limit comes back raw, untransl
   assertEquals([reply.status, reply.reason, reply.text, reply.transcript], ["raw", "transcript_too_long", "", long]);
   assertEquals(paths(recorded), ["/v1/audio/transcriptions"]);
   assertEquals(recorded.preflights[0].perMinute, 10, "the anonymous limit");
-  assertEquals(recorded.usage, [], "the app inserts no translation it didn't get, so nothing counts");
+  // The reply carries the whole transcript, so it counts: a long recording with a target language
+  // must not be free transcription. The app stops a dictation long before this length.
+  assertEquals([reply.words, recorded.usage.map((usage) => usage.words)], [1200, [1200]]);
 
-  // A style's transcript is what the app inserts instead, so it counts.
+  // A style's transcript is what the app inserts instead, so it counts too.
   const styled = setup({ transcription });
   const kept = await (await styled.handler(audioRequest({ ...metadata, targetLanguage: undefined }, { token: "guest" }))).json();
   assertEquals([kept.status, kept.reason, kept.words], ["raw", "transcript_too_long", 1200]);

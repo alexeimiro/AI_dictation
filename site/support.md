@@ -50,4 +50,5 @@ OpenAI and its text to Anthropic; neither trains on them, and Murmur asks before
 can change that in Settings › Data and privacy). The [Privacy Policy](../privacy/) has the details.
 
 To delete your account and its data, open the menu, tap your account at the bottom, then Delete
-account. That doesn't cancel an App Store subscription.
+account. That doesn't cancel an App Store subscription, and it doesn't reset the free plan: if you
+sign up again within 30 days, you carry on with the words, trial and invites you had.

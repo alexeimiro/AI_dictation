@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# HTTP smoke test for the Edge Functions against the local stack.
+# HTTP smoke test for the Edge Functions against the local stack: real sign-ups, real database.
 #   supabase start && supabase functions serve   (in another terminal; after a new migration,
 #   supabase db reset first)
 #   scripts/smoke_functions.sh
@@ -9,7 +9,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-eval "$(supabase status -o env 2>/dev/null | grep -E '^(API_URL|ANON_KEY)=')"
+eval "$(supabase status -o env 2>/dev/null | grep -E '^(API_URL|ANON_KEY|SERVICE_ROLE_KEY)=')"
 FN="$API_URL/functions/v1"
 DB_CONTAINER="supabase_db_murmur"
 pass=0; fail=0
@@ -38,12 +38,29 @@ dictate_body() { # dictation-id transcript: a text-mode translation from Russian
   printf '{"dictationId":"%s","transcript":"%s","language":"ru-RU","targetLanguage":"en-US","style":"grammar"}' "$1" "$2"
 }
 
-echo "Anonymous sign-in"
-curl -s -X POST "$API_URL/auth/v1/signup" -H "apikey: $ANON_KEY" -H 'Content-Type: application/json' -d '{"data":{}}' \
-  > /tmp/murmur_smoke_session
-TOKEN=$(python3 -I -c "import json; print(json.load(open('/tmp/murmur_smoke_session'))['access_token'])")
-USER_ID=$(python3 -I -c "import json; print(json.load(open('/tmp/murmur_smoke_session'))['user']['id'])")
+# An account as someone has after entering their email code: made with the local stack's service
+# key, with its address confirmed, then signed in. Prints "<access token> <user id>". (A guest no
+# longer does for these checks: an anonymous sign-in has no free words.)
+RUN=$(date +%s)
+PASSWORD="smoke-$RUN-$RANDOM"
+sign_up() { # email
+  curl -s -o /dev/null -X POST "$API_URL/auth/v1/admin/users" -H "apikey: $SERVICE_ROLE_KEY" \
+    -H "Authorization: Bearer $SERVICE_ROLE_KEY" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$1\",\"password\":\"$PASSWORD\",\"email_confirm\":true}"
+  curl -s -X POST "$API_URL/auth/v1/token?grant_type=password" -H "apikey: $ANON_KEY" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$1\",\"password\":\"$PASSWORD\"}" \
+    | python3 -I -c "import json,sys; s = json.load(sys.stdin); print(s['access_token'], s['user']['id'])"
+}
+quota_field() { # token field: what the app's own quota call answers
+  curl -s -X POST "$API_URL/rest/v1/rpc/my_quota" -H "apikey: $ANON_KEY" -H "Authorization: Bearer $1" \
+    -H 'Content-Type: application/json' -d '{}' | python3 -I -c "import json,sys; print(json.load(sys.stdin)[0]['$2'])"
+}
+sql() { docker exec -i "$DB_CONTAINER" psql -U postgres -At -q -c "$1"; }
+
+echo "Sign-in"
+read -r TOKEN USER_ID < <(sign_up "smoke-$RUN@example.com")
 check "got an access token" "yes" "$([[ -n "$TOKEN" ]] && echo yes || echo no)"
+check "a new account has a full week" 1000 "$(quota_field "$TOKEN" remaining)"
 
 BODY='{"dictationId":"7c9e6679-7425-40de-944b-e07fc1f90ae7","transcript":"um so can you send me the report by friday","language":"en-US","style":"grammar"}'
 BODY_RU='{"dictationId":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","transcript":"э-э ну короче можешь скинуть отчёт до пятницы вопросительный знак спасибо большое","language":"ru-RU","style":"grammar"}'
@@ -150,7 +167,7 @@ check "its 7th → 429" 429 "$(dictate_text "$TOKEN" "$ID" "$(dictate_body "$ID"
 check "error code too_many_attempts" "too_many_attempts" "$(json_field error)"
 
 echo "quota"
-docker exec -i "$DB_CONTAINER" psql -U postgres -q -c "
+sql "
   update public.entitlements set trial_ends_at = now() - interval '1 day' where user_id = '$USER_ID';
   insert into public.usage_events (user_id, dictation_id, words) values ('$USER_ID', gen_random_uuid(), 1000);" >/dev/null
 check "over the weekly limit → 402" 402 "$(status_of POST "$FN/cleanup" "$TOKEN" "$BODY")"
@@ -166,8 +183,31 @@ check "unknown email → exists false" "False" "$(json_field exists)"
 check "signup-status responds" 200 "$(status_of POST "$FN/signup-status" "" "{\"userId\":\"$USER_ID\"}")"
 
 echo "delete-account"
+# The account is over its week (the 1,000 words above). Deleting it and signing up again with the
+# same address must not reset that.
+USED=$(quota_field "$TOKEN" words_this_week)
 check "deletes the caller" 200 "$(status_of POST "$FN/delete-account" "$TOKEN" '{}')"
-check "user is gone" "0" "$(docker exec -i "$DB_CONTAINER" psql -U postgres -At -c "select count(*) from auth.users where id = '$USER_ID'")"
+check "and remembers its sign-in" "kept" "$(json_field kept)"
+check "user is gone" "0" "$(sql "select count(*) from auth.users where id = '$USER_ID'")"
+check "its words went with it" "0" "$(sql "select count(*) from public.usage_events where user_id = '$USER_ID'")"
+read -r TOKEN_BACK USER_BACK < <(sign_up "smoke-$RUN@example.com")
+check "the same address signs up as a new account" "yes" "$([[ -n "$USER_BACK" && "$USER_BACK" != "$USER_ID" ]] && echo yes || echo no)"
+check "which has the words the deleted one had used" "$USED" "$(quota_field "$TOKEN_BACK" words_this_week)"
+check "and none left" 0 "$(quota_field "$TOKEN_BACK" remaining)"
+check "so it is still over the weekly limit → 402" 402 "$(status_of POST "$FN/cleanup" "$TOKEN_BACK" "$BODY")"
+read -r TOKEN_OTHER _ < <(sign_up "smoke-$RUN-other@example.com")
+check "another address starts with a full week" 1000 "$(quota_field "$TOKEN_OTHER" remaining)"
+for token in "$TOKEN_BACK" "$TOKEN_OTHER"; do status_of POST "$FN/delete-account" "$token" '{}' >/dev/null; done
+
+echo "guests"
+GUEST=$(curl -s -X POST "$API_URL/auth/v1/signup" -H "apikey: $ANON_KEY" -H 'Content-Type: application/json' -d '{"data":{}}' \
+  | python3 -I -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
+check "a guest has no free words → 402" 402 "$(status_of POST "$FN/cleanup" "$GUEST" "$BODY")"
+check "error code limit_reached" "limit_reached" "$(json_field error)"
+check "a guest's trial claim decides nothing → 400" 400 "$(status_of POST "$FN/claim-trial" "$GUEST" '{}')"
+check "error code sign_in_required" "sign_in_required" "$(json_field error)"
+check "deletes the guest" 200 "$(status_of POST "$FN/delete-account" "$GUEST" '{}')"
+check "with nothing to remember" "none" "$(json_field kept)"
 
 echo "$pass passed, $fail failed"
 [[ $fail -eq 0 ]]

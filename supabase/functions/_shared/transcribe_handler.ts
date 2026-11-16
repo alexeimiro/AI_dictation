@@ -98,7 +98,7 @@ export function createTranscribeHandler(deps: TranscribeDeps): (request: Request
       const result = await phases.mark("transcribeMs", transcribeWithOpenAI(body, { apiKey, model, deadlineMs, fetcher }));
       const totalMs = Date.now() - started;
       const dictationHeader = request.headers.get("x-murmur-dictation");
-      const usage = transcriptUsage(body, dictationHeader, result);
+      const usage = transcriptUsage(body, result);
       if (usage) {
         deps.background(admin.rpc("record_usage", {
           p_user: caller.userId,

@@ -595,7 +595,7 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
     if (words === 0) return reply(d, EMPTY);
     if (modelKey === null) {
       // The transcript is the text, whatever its length, and is counted as `transcribe` counts it.
-      const usage = transcriptUsage(body.transcription, request.headers.get("x-murmur-dictation"), d.heard)?.words ?? null;
+      const usage = transcriptUsage(body.transcription, d.heard)?.words ?? null;
       return reply(d, { status: "raw", reason: "transcribed", text: "", usage, outcome: null });
     }
     // What the app inserts when no model writes the text here, which is what counts: a style's
@@ -603,8 +603,10 @@ export function createDictateHandler(deps: DictateDeps): (request: Request) => P
     // no translation at all (the app asks `cleanup` again, which counts the one it gets).
     const unwritten = body.translation.targetLanguage ? null : words;
     if (transcript.length > transcriptLimit(d.caller)) {
-      // Longer than `cleanup` would take for this caller.
-      return reply(d, { status: "raw", reason: "transcript_too_long", text: "", usage: unwritten, outcome: null });
+      // Longer than `cleanup` would take for this caller, so the reply is the transcript, and it
+      // counts whatever was asked for. The app stops a dictation long before this length; counting
+      // nothing for a translation made a long recording with a target language free transcription.
+      return reply(d, { status: "raw", reason: "transcript_too_long", text: "", usage: words, outcome: null });
     }
     if (!body.translation.targetLanguage && words <= SHORT_WORDS) {
       return reply(d, { status: "raw", reason: "short", text: "", usage: words, outcome: null });

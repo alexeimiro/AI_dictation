@@ -163,7 +163,7 @@ supabase test db                     # pgTAP: RLS, quota, rate limits (supabase/
 deno test --allow-env supabase/functions/          # offline cleanup tests: prompt blocks, guards, validation (English, Russian, translation)
 deno test --allow-env server/ scripts/cost_report_test.ts   # the dictation server's routes, and the cost report
 supabase functions serve             # serve functions locally; loads supabase/functions/.env (put OPENAI_API_KEY there)
-scripts/smoke_functions.sh           # HTTP checks: auth, 401/400/402, an English and a Russian cleanup, auth helpers, delete-account
+scripts/smoke_functions.sh           # HTTP checks: auth, 401/400/402, an English and a Russian cleanup, auth helpers, delete-account and signing up again, guests
 
 # Live model checks (cost money): English, Russian and translation goldens plus a Russian latency / token-size probe.
 RUN_GOLDEN=1 OPENAI_API_KEY=... deno test --allow-env --allow-net supabase/functions/cleanup/golden_test.ts

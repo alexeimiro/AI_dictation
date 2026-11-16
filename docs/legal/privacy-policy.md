@@ -70,10 +70,17 @@ Each processes data only to provide its service to us.
 
 We keep your account data until you delete your account. Deleting it (Menu › Account › Delete
 account) erases your account, library, usage and purchase records from our server, and revokes
-Sign in with Apple. The records of what your dictations cost us to serve stay, no longer tied to
-your account. Signing out deletes Murmur's data from that iPhone. Deleting the account
-doesn't cancel an App Store subscription: manage that in Settings › Apple Account ›
-Subscriptions.
+Sign in with Apple. Two things stay:
+
+- The records of what your dictations cost us to serve, no longer tied to your account.
+- For 30 days, a scrambled fingerprint of the sign-in you used (not your email address or your
+  Apple or Google ID itself), with how many words you had dictated that week and whether your
+  free trial and invite month were used. It is there so that deleting an account and making a new
+  one can't reset the free plan: if you sign up again within those 30 days, you carry on where you
+  left off. After 30 days it is erased. You can ask us to erase it sooner.
+
+Signing out deletes Murmur's data from that iPhone. Deleting the account doesn't cancel an App
+Store subscription: manage that in Settings › Apple Account › Subscriptions.
 
 ## Your rights
 

@@ -153,13 +153,23 @@ Deno.test("an anonymous caller gets the tighter limit, and a plan without a week
   assertEquals(recorded.costs[0].calls[0].plan, "pro");
 });
 
-Deno.test("an id the header doesn't vouch for is neither counted nor named in the cost", async () => {
-  // A build before the header sent a random id in the body.
+Deno.test("without the header the words are counted all the same; only the cost names no dictation", async () => {
+  // Leaving the header out must not be free transcription. (A build before the header sent a
+  // random id in the body, which names no dictation in the cost records.)
   const { handler, recorded } = setup();
   const reply = await (await handler(request({ dictation: null }))).json();
-  assertEquals([reply.words, reply.remaining], [0, 870]);
-  assertEquals(rpcNames(recorded), ["consume_bucket", "quota_status"]);
+  assertEquals([reply.words, reply.remaining], [7, 863]);
+  assertEquals(rpcNames(recorded), ["consume_bucket", "quota_status", "record_usage"]);
+  assertEquals(recorded.rpcs[2].args, { p_user: USER.userId, p_dictation: DICTATION, p_words: 7 });
   assertEquals(recorded.costs.map(({ dictationId, calls }) => [dictationId, calls.length]), [[null, 1]], "still paid for");
+
+  // No id at all: counted under one made for the request.
+  const bare = setup();
+  const body = { audio: wavOf(2500), format: "wav", language: "ru-RU", keywords: [] };
+  assertEquals((await (await bare.handler(request({ dictation: null, body }))).json()).words, 7);
+  const counted = bare.recorded.rpcs.find((rpc) => rpc.name === "record_usage")?.args;
+  assertEquals([counted?.p_user, counted?.p_words], [USER.userId, 7]);
+  assertEquals(typeof counted?.p_dictation, "string");
 });
 
 Deno.test("no caller is 401 and a body that isn't a request is 400, before any check", async () => {

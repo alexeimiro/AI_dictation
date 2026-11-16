@@ -1,6 +1,6 @@
 # Murmur Terms of Use
 
-Effective November 13, 2026
+Effective November 16, 2026
 
 These terms are between you and OKNENOR L.L.C-FZ ("we"), the maker of Murmur. By using Murmur you
 agree to them, and to Apple's Licensed Application End User License Agreement
@@ -16,6 +16,8 @@ at any time in the app.
 - Murmur is free with a weekly word limit, after a free trial of Murmur Pro. The trial is one
   per iPhone: a later account on the same iPhone starts on the free plan. Murmur Pro has no
   weekly limit.
+- Deleting your account doesn't reset the weekly limit, the free trial or invites: an account you
+  make within 30 days of deleting one carries on where that one left off.
 - Murmur Pro is an auto-renewing subscription, monthly or yearly, bought through the App Store.
   Payment is charged to your Apple Account when you confirm the purchase. It renews
   automatically, at the same price and for the same period, unless you cancel it at least 24

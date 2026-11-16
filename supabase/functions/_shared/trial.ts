@@ -5,8 +5,10 @@
 // - already: the account stays on Basic (device_used);
 // - Apple can't answer, or the server has no DeviceCheck key: the trial is granted unchecked, so
 //   nobody loses a trial to our key or to Apple's outage;
-// - no token, or one Apple refuses: nothing is decided, and the app asks again later.
-// The first decision stands; later claims return it.
+// - no token, or one Apple refuses: nothing is decided, and the app asks again later;
+// - a guest (an anonymous sign-in): nothing is decided either.
+// The first decision stands; later claims return it. An account that replaces one deleted in the
+// last 30 days comes with that account's decision (`restore_account`), which is its first.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
 import { deviceToken, type TrialBit } from "./devicecheck.ts";
 import { background, type Caller, corsHeaders, json } from "./http.ts";
@@ -42,6 +44,9 @@ export function createTrialHandler(deps: TrialDeps): (request: Request) => Promi
     if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
     const caller = await deps.authenticate(request);
     if (!caller) return json({ error: "unauthorized" }, 401);
+    // A guest decides nothing: the trial is for the account someone signs in with, and a throwaway
+    // guest session must not use up the iPhone's one trial before that account exists.
+    if (caller.isAnonymous) return json({ error: "sign_in_required" }, 400);
     const body = await request.json().catch(() => null) as { deviceToken?: unknown } | null;
     const sent = body?.deviceToken;
     const token = deviceToken(sent);

@@ -1,8 +1,9 @@
 // POST /functions/v1/transcribe
 // Turns a dictation's audio into text with OpenAI. The audio is passed through, never stored.
 // Body: { dictationId?, audio (base64), format: "m4a" | "wav", language? (BCP-47), keywords? }.
-// Header x-murmur-dictation: <dictationId> vouches that the id is the dictation's own; its words
-// then count toward the free plan's week (`transcriptUsage`). Without it nothing is counted here.
+// Header x-murmur-dictation: <dictationId> vouches that the id is the dictation's own, which names
+// the dictation in the cost records. Its words count toward the free plan's week with or without
+// the header (`transcriptUsage`).
 // Responses:
 //   200 { text, languages, model, words, remaining, totalMs, timings }
 //       `words` is what was counted (0 when nothing was) and `remaining` the free plan's words left

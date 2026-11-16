@@ -103,7 +103,7 @@ sips -z 2796 1290 build/app-store-screenshots/6-paywall.png --out build/app-stor
 > Recordings are transcribed by OpenAI's API, and the transcript is tidied or translated by Anthropic's Claude API, both through Murmur's server. Before anything is recorded, the page "Before Murmur listens" names both services, says what each receives, and offers Allow and Not now (guideline 5.1.2(i)). In setup it comes after the system's microphone question, on the first exercise. Without Allow, Murmur doesn't turn the microphone on, so nothing is recorded or sent. The same permission is a switch in Settings › Data and privacy ("Write with AI services"). Neither service trains its models on the data. The user's words are typed into their own text field and aren't shared with other users.
 >
 > ACCOUNT DELETION
-> Open the menu, tap the account's row at the bottom, then Delete account. It deletes the account and its data on the server and revokes Sign in with Apple.
+> Open the menu, tap the account's row at the bottom, then Delete account. It deletes the account and its data on the server and revokes Sign in with Apple. For 30 days the server keeps a hashed fingerprint of the sign-in with that week's word count and the trial and invite state, so that deleting and signing up again can't reset the free plan (the privacy policy says so); an account made again in that time carries on where the deleted one left off.
 
 **Sign-in information**: leave "Sign-in required" unticked: Sign in with Apple works with any Apple ID (the user decided on 13 Nov 2026 to keep sign-in required, and the notes say so). If Apple asks for a demo account anyway, create one with an email you can read for the 6-digit code.
 

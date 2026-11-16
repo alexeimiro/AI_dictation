@@ -5,6 +5,7 @@
 // sign-in and again at launch until it has a 200.
 //   200 { trial: "granted" | "device_used" | "unchecked" | "legacy", trialEndsAt: string | null }
 //   400 device_token_required | bad_device_token: nothing decided; ask again with a token
+//   400 sign_in_required: a guest's claim; nothing decided
 //   401 unauthorized · 503 unavailable
 // Env: DEVICECHECK_KEY_ID, DEVICECHECK_PRIVATE_KEY, APPLE_TEAM_ID, DEVICECHECK_HOST. Without the key
 // every trial is granted unchecked, as before this check.

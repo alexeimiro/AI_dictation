@@ -72,6 +72,16 @@ Deno.test("only a signed-in POST is answered", async () => {
   assertEquals((await claim(world(), undefined, "GET")).status, 405);
 });
 
+Deno.test("a guest's claim decides nothing, so it can't use up the iPhone's trial", async () => {
+  const w = world({ bit: { kind: "clear" }, caller: { userId: USER, isAnonymous: true } });
+  assertEquals(await claim(w), { status: 400, body: { error: "sign_in_required" } });
+  assertEquals([w.queried, w.decided, w.marked], [[], [], []]);
+  // Without the DeviceCheck key too, where every account's trial is granted unchecked.
+  const noKey = world({ caller: { userId: USER, isAnonymous: true } });
+  assertEquals((await claim(noKey)).status, 400);
+  assertEquals(noKey.decided, []);
+});
+
 Deno.test("an iPhone's first account gets the trial, and the iPhone is marked after", async () => {
   const w = world({ bit: { kind: "clear" } });
   assertEquals(await claim(w), { status: 200, body: { trial: "granted", trialEndsAt: ENDS } });
