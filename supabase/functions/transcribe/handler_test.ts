@@ -172,6 +172,15 @@ Deno.test("without the header the words are counted all the same; only the cost 
   assertEquals(typeof counted?.p_dictation, "string");
 });
 
+Deno.test("a request from an iPhone is checked and counted for that iPhone too", async () => {
+  const device = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  const { handler, recorded } = setup({ deps: { authenticate: () => Promise.resolve({ ...USER, device }) } });
+  assertEquals((await handler(request())).status, 200);
+  assertEquals(rpcNames(recorded), ["consume_bucket", "quota_status", "record_usage"]);
+  assertEquals(recorded.rpcs[1].args, { p_user: USER.userId, p_device: device });
+  assertEquals(recorded.rpcs[2].args, { p_user: USER.userId, p_dictation: DICTATION, p_words: 7, p_device: device });
+});
+
 Deno.test("no caller is 401 and a body that isn't a request is 400, before any check", async () => {
   const { handler, recorded } = setup();
   assertEquals((await handler(request({ token: null }))).status, 401);

@@ -2,7 +2,8 @@ import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.1
 
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-murmur-warm, x-murmur-dictation",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-murmur-warm, x-murmur-dictation, x-murmur-device",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -41,6 +42,29 @@ export function serverKey(secretKeys: string | undefined, legacyKey: string | un
 export interface Caller {
   userId: string;
   isAnonymous: boolean;
+  /**
+   * The id the app keeps in the iPhone's Keychain (`deviceOf`); null or absent when the request
+   * has none. The free plan's week is counted for it as well as for the account, so a second
+   * account on the same iPhone doesn't get a second week (migration 20261118000000). It is the
+   * client's word: good for that count and for nothing else.
+   */
+  device?: string | null;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Header x-murmur-device as the app sends it, a UUID, in lower case; null for anything else. */
+export function deviceOf(request: Request): string | null {
+  const sent = request.headers.get("x-murmur-device")?.trim().toLowerCase() ?? "";
+  return UUID.test(sent) ? sent : null;
+}
+
+/**
+ * The device as an argument of the quota and usage RPCs. Left out, not null, without one: a call
+ * that names no device is then exactly the call the functions made before there were devices.
+ */
+export function deviceArg(caller: Caller): { p_device?: string } {
+  return caller.device ? { p_device: caller.device } : {};
 }
 
 /** Verifies the bearer JWT (locally with JWKS when available) and returns the caller. */
@@ -51,7 +75,7 @@ export async function authenticate(request: Request, admin: SupabaseClient): Pro
   const { data, error } = await admin.auth.getClaims(jwt);
   const claims = data?.claims;
   if (error || !claims?.sub) return null;
-  return { userId: claims.sub, isAnonymous: claims.is_anonymous === true };
+  return { userId: claims.sub, isAnonymous: claims.is_anonymous === true, device: deviceOf(request) };
 }
 
 export function clientIP(request: Request): string {

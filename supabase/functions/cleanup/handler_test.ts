@@ -161,6 +161,19 @@ Deno.test("a translation runs with the translation settings and is counted in th
   assertEquals(recorded.costs[0].calls[0].model, "gpt-6-luna");
 });
 
+Deno.test("a request from an iPhone is checked and counted for that iPhone too", async () => {
+  const device = "0f8fad5b-d9cb-469f-a165-70867728950e";
+  const { handler, recorded } = setup({ deps: { authenticate: () => Promise.resolve({ ...USER, device }) } });
+  assertEquals((await handler(request())).status, 200);
+  assertEquals(rpcNames(recorded), ["cleanup_preflight", "record_usage"]);
+  assertEquals(recorded.rpcs[0].args, { p_user: USER.userId, p_device: device });
+  assertEquals(recorded.rpcs[1].args, { p_user: USER.userId, p_dictation: DICTATION, p_words: 7, p_device: device });
+
+  const guest = setup({ deps: { authenticate: () => Promise.resolve({ ...GUEST, device }) } });
+  await guest.handler(request());
+  assertEquals(guest.recorded.rpcs[0].args, { p_user: GUEST.userId, p_per_minute: 10, p_device: device });
+});
+
 Deno.test("an anonymous caller gets the tighter limit and the shorter transcript", async () => {
   const { handler, recorded } = setup();
   assertEquals((await handler(request(cleanupBody, "guest"))).status, 200);

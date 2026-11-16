@@ -31,8 +31,10 @@ dictate_of() { # token dictation-id [curl args…]: a POST to dictate, with x-mu
   curl -s -o /tmp/murmur_smoke_body -w '%{http_code}' -X POST "$FN/dictate" -H "apikey: $ANON_KEY" \
     ${token:+-H "Authorization: Bearer $token"} ${dictation:+-H "x-murmur-dictation: $dictation"} "$@"
 }
-dictate_text() { # token dictation-id body: text mode
-  dictate_of "$1" "$2" -H 'Content-Type: application/json' -d "$3"
+dictate_text() { # token dictation-id body [curl args…]: text mode
+  local token=$1 dictation=$2 body=$3
+  shift 3
+  dictate_of "$token" "$dictation" -H 'Content-Type: application/json' -d "$body" "$@"
 }
 dictate_body() { # dictation-id transcript: a text-mode translation from Russian into English
   printf '{"dictationId":"%s","transcript":"%s","language":"ru-RU","targetLanguage":"en-US","style":"grammar"}' "$1" "$2"
@@ -51,9 +53,12 @@ sign_up() { # email
     -d "{\"email\":\"$1\",\"password\":\"$PASSWORD\"}" \
     | python3 -I -c "import json,sys; s = json.load(sys.stdin); print(s['access_token'], s['user']['id'])"
 }
-quota_field() { # token field: what the app's own quota call answers
+quota_field() { # token field [device]: what the app's own quota call answers, on that iPhone
+  local body='{}'
+  [[ -n "${3:-}" ]] && body="{\"p_device\":\"$3\"}"
   curl -s -X POST "$API_URL/rest/v1/rpc/my_quota" -H "apikey: $ANON_KEY" -H "Authorization: Bearer $1" \
-    -H 'Content-Type: application/json' -d '{}' | python3 -I -c "import json,sys; print(json.load(sys.stdin)[0]['$2'])"
+    -H 'Content-Type: application/json' -d "$body" \
+    | python3 -I -c "import json,sys; print(json.load(sys.stdin)[0]['$2'])"
 }
 sql() { docker exec -i "$DB_CONTAINER" psql -U postgres -At -q -c "$1"; }
 
@@ -198,6 +203,27 @@ check "so it is still over the weekly limit → 402" 402 "$(status_of POST "$FN/
 read -r TOKEN_OTHER _ < <(sign_up "smoke-$RUN-other@example.com")
 check "another address starts with a full week" 1000 "$(quota_field "$TOKEN_OTHER" remaining)"
 for token in "$TOKEN_BACK" "$TOKEN_OTHER"; do status_of POST "$FN/delete-account" "$token" '{}' >/dev/null; done
+
+echo "one week per iPhone"
+# Two accounts on one iPhone (the id the app keeps in its Keychain and sends as x-murmur-device)
+# share one free week. The database writes the words; the functions and my_quota read them back.
+PHONE=$(new_id)
+read -r TOKEN_A USER_A < <(sign_up "smoke-$RUN-a@example.com")
+read -r TOKEN_B _ < <(sign_up "smoke-$RUN-b@example.com")
+sql "select public.record_usage('$USER_A', gen_random_uuid(), 1000, '$PHONE');" >/dev/null
+check "the first account used up its week on the iPhone" 0 "$(quota_field "$TOKEN_A" remaining "$PHONE")"
+check "a second account on that iPhone has none left" 0 "$(quota_field "$TOKEN_B" remaining "$PHONE")"
+check "though its own week is untouched" 1000 "$(quota_field "$TOKEN_B" remaining)"
+ID=$(new_id)
+check "dictate from that iPhone → 402" 402 "$(dictate_text "$TOKEN_B" "$ID" "$(dictate_body "$ID" "привет как дела")" -H "x-murmur-device: $PHONE")"
+check "error code limit_reached" "limit_reached" "$(json_field error)"
+check "cleanup from that iPhone → 402" 402 "$(curl -s -o /tmp/murmur_smoke_body -w '%{http_code}' -X POST "$FN/cleanup" \
+  -H "apikey: $ANON_KEY" -H "Authorization: Bearer $TOKEN_B" -H "x-murmur-device: $PHONE" -H 'Content-Type: application/json' -d "$BODY")"
+ID=$(new_id)
+check "a build that sends no id is checked by the account alone" 200 "$(dictate_text "$TOKEN_B" "$ID" "$(dictate_body "$ID" " ")")"
+ID=$(new_id)
+check "and so is a made-up id" 200 "$(dictate_text "$TOKEN_B" "$ID" "$(dictate_body "$ID" " ")" -H "x-murmur-device: my-iphone")"
+for token in "$TOKEN_A" "$TOKEN_B"; do status_of POST "$FN/delete-account" "$token" '{}' >/dev/null; done
 
 echo "guests"
 GUEST=$(curl -s -X POST "$API_URL/auth/v1/signup" -H "apikey: $ANON_KEY" -H 'Content-Type: application/json' -d '{"data":{}}' \

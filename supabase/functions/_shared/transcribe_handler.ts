@@ -5,7 +5,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
 import { audioDurationMs } from "./audio_duration.ts";
 import type { TranscribeConfig } from "./config.ts";
 import { type CostCall, vouchedDictationId } from "./cost.ts";
-import { type Caller, clientInfo, corsHeaders, json } from "./http.ts";
+import { type Caller, clientInfo, corsHeaders, deviceArg, json } from "./http.ts";
 import { beginRequest, Phases, type RequestStart } from "./timing.ts";
 import { OpenAIError, parseTranscribeRequest, transcribeWithOpenAI, transcriptUsage } from "./transcribe.ts";
 
@@ -78,7 +78,7 @@ export function createTranscribeHandler(deps: TranscribeDeps): (request: Request
 
     // Once the free plan's weekly words are used up, stop paying for transcription.
     const { data: quota, error: quotaError } = await phases.mark("preflightMs", admin
-      .rpc("quota_status", { p_user: caller.userId })
+      .rpc("quota_status", { p_user: caller.userId, ...deviceArg(caller) })
       .single<Quota>());
     if (quotaError) {
       console.error("quota check failed", quotaError);
@@ -104,6 +104,7 @@ export function createTranscribeHandler(deps: TranscribeDeps): (request: Request
           p_user: caller.userId,
           p_dictation: usage.dictationId,
           p_words: usage.words,
+          ...deviceArg(caller),
         }));
       }
       if (deps.recordCost) {

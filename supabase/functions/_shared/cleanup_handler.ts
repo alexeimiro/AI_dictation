@@ -5,7 +5,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
 import { apiKeyName, countedWords, describeCleanupError, runCleanup } from "./cleanup.ts";
 import type { ModelConfig } from "./config.ts";
 import { type CostCall, textCall } from "./cost.ts";
-import { type Caller, clientInfo, corsHeaders, json } from "./http.ts";
+import { type Caller, clientInfo, corsHeaders, deviceArg, json } from "./http.ts";
 import { countWords } from "./text.ts";
 import { beginRequest, Phases, type RequestStart } from "./timing.ts";
 import { LIMITS, parseCleanupRequest } from "./types.ts";
@@ -72,8 +72,8 @@ export function createCleanupHandler(deps: CleanupDeps): (request: Request) => P
       .rpc(
         "cleanup_preflight",
         caller.isAnonymous
-          ? { p_user: caller.userId, p_per_minute: ANONYMOUS_PER_MINUTE }
-          : { p_user: caller.userId },
+          ? { p_user: caller.userId, p_per_minute: ANONYMOUS_PER_MINUTE, ...deviceArg(caller) }
+          : { p_user: caller.userId, ...deviceArg(caller) },
       )
       .single<Preflight>());
     if (preflightError || !preflight) {
@@ -120,6 +120,7 @@ export function createCleanupHandler(deps: CleanupDeps): (request: Request) => P
           p_user: caller.userId,
           p_dictation: body.dictationId,
           p_words: counted,
+          ...deviceArg(caller),
         }));
       }
       if (deps.recordCost) {

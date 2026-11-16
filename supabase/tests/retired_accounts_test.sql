@@ -329,7 +329,7 @@ select ok(
    from unnest(array['anon', 'authenticated']) r,
         unnest(array['public.retire_account(uuid)', 'public.restore_account(uuid)', 'public.forget_retired(text)',
                      'public.account_keys(uuid)', 'public.account_key_hash(text, text)', 'public.account_secret()',
-                     'public.normal_email(text)', 'public.quota_status(uuid)']) f),
+                     'public.normal_email(text)', 'public.quota_status(uuid, text)']) f),
   'users can''t call any of it');
 select ok(
   has_function_privilege('service_role', 'public.retire_account(uuid)', 'execute')
