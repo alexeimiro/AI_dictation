@@ -1,6 +1,7 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { countedWords, runCleanup } from "../_shared/cleanup.ts";
-import { markSnippets, repairSnippets } from "../_shared/snippets.ts";
+import { inventedSnippets, markSnippets, repairSnippets } from "../_shared/snippets.ts";
+import { isUnstyled, lowercaseSentenceStarts } from "../_shared/text.ts";
 import type { CleanupRequest, SnippetRef } from "../_shared/types.ts";
 
 const email: SnippetRef = { token: "⟦s:1a2b3c4d⟧", trigger: "my email address" };
@@ -187,3 +188,98 @@ Deno.test("a request without snippets is sent as it was", async () => {
   await runCleanup(plain, options(fakeFetch(reply("My home address is where the parcel should go."), captured)));
   assertStringIncludes(captured.input!, "<transcript>\nMy home address is where the parcel should go, so please confirm it.");
 });
+
+// --- A snippet nobody named ---
+
+const mail: SnippetRef = { token: "⟦s:4d5e6f7a⟧", trigger: "моя почта" };
+
+Deno.test("a snippet the reply marks is the speaker's when its trigger was said, in any form", () => {
+  // Marked in the transcript already.
+  assertEquals(inventedSnippets("Вот ⟦s:4d5e6f7a⟧, напиши мне.", "Вот ⟦s:4d5e6f7a⟧. Напиши мне.", [mail, courier]), []);
+  // Another form of the trigger, which only the model can mark.
+  assertEquals(
+    inventedSnippets("Скинь договор на мою почту до пятницы.", "Скинь договор на ⟦s:4d5e6f7a⟧ до пятницы.", [mail, courier]),
+    [],
+  );
+  assertEquals(inventedSnippets("Send it to my e-mail addresses.", "Send it to ⟦s:1a2b3c4d⟧.", all), []);
+  // No placeholder in the reply at all.
+  assertEquals(inventedSnippets("Вот моя почта.", "Вот моя почта.", [mail, courier]), []);
+});
+
+Deno.test("a snippet the reply marks is invented when nothing like its trigger was said", () => {
+  // The live case: «вот моя почта» came back as «вот ⟦мой адрес⟧: ⟦моя почта⟧».
+  assertEquals(
+    inventedSnippets(
+      "глянь договор вот ⟦s:4d5e6f7a⟧ ответь сегодня",
+      "Посмотри договор, вот ⟦s:5e6f7a8b⟧: ⟦s:4d5e6f7a⟧. Ответь сегодня.",
+      [mail, courier],
+    ),
+    [courier],
+  );
+  assertEquals(inventedSnippets("Send me the report by Friday.", "Send me the report to ⟦s:1a2b3c4d⟧ by Friday.", all), [email]);
+});
+
+Deno.test("a reply that marks an invented snippet is refused: the transcript is kept", async () => {
+  const spoken: CleanupRequest = {
+    ...request,
+    transcript: "глянь договор вот моя почта ответь сегодня",
+    language: "ru-RU",
+    snippets: [mail, courier],
+  };
+  const outcome = await runCleanup(
+    spoken,
+    options(fakeFetch(reply("Посмотри договор, вот ⟦s:5e6f7a8b⟧: ⟦s:4d5e6f7a⟧. Ответь сегодня."))),
+  );
+  assertEquals(outcome.status, "raw");
+  assertEquals(outcome.reason, "snippet_added");
+  assertEquals(outcome.text, spoken.transcript, "the app writes the text itself, from what was said");
+  // The same reply without the invented one is fine.
+  const fine = await runCleanup(spoken, options(fakeFetch(reply("Посмотри договор. Вот ⟦s:4d5e6f7a⟧. Ответь сегодня."))));
+  assertEquals(fine.status, "cleaned");
+});
+
+// --- Casual around a snippet ---
+
+Deno.test("sentence starts go lowercase; \"I\" and words with a capital inside keep theirs", () => {
+  assertEquals(lowercaseSentenceStarts("Thanks. See you soon! Are we on?"), "thanks. see you soon! are we on?");
+  assertEquals(lowercaseSentenceStarts("I'm on my way. NASA called. I think so."), "I'm on my way. NASA called. I think so.");
+  assertEquals(lowercaseSentenceStarts("Привет. Я дома.\nНапиши мне."), "привет. я дома.\nнапиши мне.");
+  assertEquals(lowercaseSentenceStarts("“Hello,” she said. McDonald's is closed."), "“hello,” she said. McDonald's is closed.");
+  assertEquals(lowercaseSentenceStarts("⟦s:1a2b3c4d⟧ is where it goes."), "⟦s:1a2b3c4d⟧ is where it goes.");
+  assertEquals(lowercaseSentenceStarts("send it to John on Monday"), "send it to John on Monday");
+});
+
+Deno.test("a reply is unstyled when it is the transcript, around a placeholder", () => {
+  const spoken = "You can book a time with me here, ⟦s:2b3c4d5e⟧.";
+  assert(isUnstyled(spoken, spoken));
+  assert(isUnstyled(spoken, "You can book a time with me here, ⟦s:2b3c4d5e⟧"), "give or take the last full stop");
+  // Twice running: the placeholder pattern is global, and must not remember the first look.
+  assert(isUnstyled(spoken, spoken));
+  assert(!isUnstyled(spoken, "you can book a time with me here, ⟦s:2b3c4d5e⟧"), "the model restyled it");
+  assert(!isUnstyled("You can book a time with me.", "You can book a time with me."), "no snippet: the model's casing stands");
+});
+
+Deno.test("Casual lowercases a reply the model left as the transcript around a snippet", async () => {
+  const casual: CleanupRequest = {
+    ...request,
+    transcript: "Please send the contract to my email address, and book a call using my calendar link.",
+    style: "chat",
+  };
+  const unstyled = "Please send the contract to ⟦s:1a2b3c4d⟧, and book a call using ⟦s:2b3c4d5e⟧.";
+  const outcome = await runCleanup(casual, options(fakeFetch(reply(unstyled))));
+  assertEquals(outcome.status, "cleaned");
+  assertEquals(outcome.text, "please send the contract to ⟦s:1a2b3c4d⟧, and book a call using ⟦s:2b3c4d5e⟧.");
+  // What the model did restyle is left as it wrote it, capitals and all.
+  const styled = "Hey, send the contract to ⟦s:1a2b3c4d⟧ and book a call using ⟦s:2b3c4d5e⟧";
+  assertEquals((await runCleanup(casual, options(fakeFetch(reply(styled))))).text, styled);
+  // Another style keeps its capitals.
+  const grammar = await runCleanup({ ...casual, style: "grammar" }, options(fakeFetch(reply(unstyled))));
+  assertEquals(grammar.text, unstyled);
+  // Russian, and a sentence that opens with the snippet (nothing to lowercase).
+  const russian = await runCleanup(
+    { ...casual, transcript: "Вот моя почта, напиши мне, когда договор будет готов.", language: "ru-RU", snippets: [mail] },
+    options(fakeFetch(reply("Вот ⟦s:4d5e6f7a⟧, напиши мне, когда договор будет готов."))),
+  );
+  assertEquals(russian.text, "вот ⟦s:4d5e6f7a⟧, напиши мне, когда договор будет готов.");
+});
+

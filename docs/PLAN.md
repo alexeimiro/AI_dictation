@@ -86,6 +86,7 @@ Keyboard ext ── Darwin post + command file (one-time token) ──► Murmur
    - Otherwise `CleanupClient` calls `cleanup` with an 8 s timeout.
    - Snippet triggers come back from Claude as `⟦s:<id>⟧` placeholders, and the app substitutes the expansion. Expansions never go to the server, and nothing is expanded twice.
    - A trigger said word for word is marked before Claude reads the transcript (`markSnippets` in the functions, `SnippetPlaceholders.mark` in the app for a text no model writes): Claude keeps a placeholder far more reliably than it puts one in (live checks, November 2026). Claude is left the other forms of a trigger, and both sides repair a reply that kept part of a trigger beside its placeholder.
+   - A reply that marks a snippet nobody named (not its trigger, nor another form of it) is refused, and the app writes the text itself: the snippet's text is the user's and may be private. A Casual reply that came back as the transcript around a snippet gets Casual's lowercase on the server.
    - The expansion goes in last, after every tidy-up and style, exactly as typed. A dictation that is one snippet and nothing else is the expansion alone, without the recognizer's capital or full stop.
 3. **`TextJoiner`.**
    - Adds a leading space and fixes capitalization from `documentContextBeforeInput`.

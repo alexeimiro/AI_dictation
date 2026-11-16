@@ -12,8 +12,8 @@ import {
   TRANSLATION_RULES,
   VERBATIM_RULES,
 } from "./prompt.ts";
-import { markSnippets, repairSnippets } from "./snippets.ts";
-import { countWords, guardOutput, guardTranslation, tidyOutput } from "./text.ts";
+import { inventedSnippets, markSnippets, repairSnippets } from "./snippets.ts";
+import { countWords, guardOutput, guardTranslation, isUnstyled, lowercaseSentenceStarts, tidyOutput } from "./text.ts";
 import { type CleanupRequest, writesWithModel } from "./types.ts";
 
 /** OpenAI's flagship; override with the CLEANUP_MODEL secret without shipping an app update. */
@@ -340,7 +340,9 @@ export function countedWords(outcome: Pick<CleanupOutcome, "status" | "text">, r
 
 /**
  * Either provider's reply text through the output guards: one that fails them keeps the
- * transcript. A snippet the model missed in its reply is marked first (`repairSnippets`).
+ * transcript. A snippet the model missed in its reply is marked first (`repairSnippets`), and a
+ * Casual reply it left as the transcript around a snippet gets Casual's lowercase here. A reply
+ * that marks a snippet nobody named is refused: the app would type that snippet's text.
  */
 function judged(
   request: CleanupRequest,
@@ -348,12 +350,19 @@ function judged(
   base: Omit<CleanupOutcome, "text" | "status" | "reason">,
   reply: string,
 ): CleanupOutcome {
-  const text = repairSnippets(tidyOutput(reply), request.snippets ?? []);
+  const snippets = request.snippets ?? [];
+  let text = repairSnippets(tidyOutput(reply), snippets);
+  if (request.style === "chat" && !request.targetLanguage && isUnstyled(request.transcript, text)) {
+    text = lowercaseSentenceStarts(text);
+  }
   const guard = request.targetLanguage
     ? guardTranslation(request.transcript, text, { source: language.tag, target: request.targetLanguage })
     : guardOutput(request.transcript, text, language.tag ?? "en");
   if (!guard.ok) {
     return { ...base, text: request.transcript, status: "raw", reason: guard.reason };
+  }
+  if (inventedSnippets(request.transcript, text, snippets).length > 0) {
+    return { ...base, text: request.transcript, status: "raw", reason: "snippet_added" };
   }
   return { ...base, text, status: "cleaned" };
 }

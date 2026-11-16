@@ -58,3 +58,35 @@ export function repairSnippets(reply: string, snippets: SnippetRef[]): string {
   }
   return markSnippets(output, snippets);
 }
+
+/** Lowercased words, with «ё» as «е» and a hyphen or apostrophe inside a word dropped ("e-mail" is "email"). */
+function wordsOf(text: string): string[] {
+  return text.replace(new RegExp(PLACEHOLDER, "g"), " ").toLowerCase().replaceAll("ё", "е")
+    .replace(/(?<=\p{L})[-'’](?=\p{L})/gu, "").split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 0);
+}
+
+/** How a word starts, whatever its ending: «моя» and «мою», "address" and "addresses". */
+function stem(word: string): string {
+  return word.length <= 3 ? word.slice(0, Math.max(1, word.length - 1)) : word.slice(0, 4);
+}
+
+/**
+ * The snippets a reply marks that the speaker never named: their placeholder is not in the
+ * transcript (which has every trigger said word for word marked already), and the transcript has
+ * no other form of the trigger either («мою почту» for «моя почта» is one, and the model may mark
+ * it). In a live check the model wrote «вот ⟦мой адрес⟧: ⟦моя почта⟧» for «вот моя почта»: the app
+ * would have typed the user's home address into the message.
+ *
+ * Another form of a trigger: each of its longer words (over three letters; all of them when it
+ * has none) starts a word of the transcript. The short ones ("my", «моя») come and go.
+ */
+export function inventedSnippets(transcript: string, reply: string, snippets: SnippetRef[]): SnippetRef[] {
+  const heard = wordsOf(transcript);
+  return snippets.filter((snippet) => {
+    if (!reply.includes(snippet.token) || transcript.includes(snippet.token)) return false;
+    const trigger = wordsOf(snippet.trigger);
+    const longer = trigger.filter((word) => word.length > 3);
+    const named = longer.length > 0 ? longer : trigger;
+    return named.length === 0 || !named.every((word) => heard.some((said) => said.startsWith(stem(word))));
+  });
+}

@@ -746,8 +746,13 @@ Deno.test("Professional, Casual and Concise say what they change and what they m
   assertStringIncludes(genericLanguageRules("tr-TR").styles.grammar, "«Ben yarın okula gideceğim.»");
   assertFalse(genericLanguageRules("de-DE").styles.grammar.includes("For example"));
   assertFalse(genericLanguageRules(null).styles.grammar.includes("For example"));
-  // A bare hour is never given a part of the day.
+  // A bare hour is never given a part of the day. Professional says so itself: without the line it
+  // wrote "at 4 PM" for "at 4" in about half the live runs of November 2026, and never with it.
   assertStringIncludes(CLEANUP_RULES, 'Never add a part of the day the speaker did not say: "at 4" stays "at 4"');
+  assertStringIncludes(
+    LANGUAGE_RULES.en.styles.professional,
+    '(5) Write times as the speaker gave them: "at 4" stays "at 4", never "at 4 PM" or "at 16:00"',
+  );
   assertStringIncludes(LANGUAGE_RULES.ru.rules, "a bare hour («в четыре») stays as it was said");
   assertStringIncludes(CLEANUP_RULES, "Unless the writing style in the context says otherwise");
   assertStringIncludes(TRANSLATION_RULES, "Unless the writing style in the context says otherwise");

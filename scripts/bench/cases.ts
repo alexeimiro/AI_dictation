@@ -272,6 +272,14 @@ export const CASES: BenchCase[] = [
     mustNot: [/Paris/i, /^hey\b/i],
   },
   {
+    id: "professional.en.bare-hour",
+    style: "professional",
+    language: "en-US",
+    transcript: "so yeah me and the team was thinking we could do the review on tuesday at 3 if nobody minds",
+    must: [/\bTuesday at 3\b/],
+    mustNot: [/\b[ap]\.?m\b/i, /15:00/, /\byeah\b/i],
+  },
+  {
     id: "professional.ru.slang",
     style: "professional",
     language: "ru-RU",

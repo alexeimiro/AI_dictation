@@ -267,3 +267,34 @@ export function tidyOutput(output: string): string {
   }
   return text;
 }
+
+/** The first word of the text, of each line and of each sentence, when it starts with a capital. */
+const SENTENCE_START = /(^|[.!?…]\s+|\n\s*)(["'“‘«„(\[¡¿]?)(\p{Lu}[\p{L}\p{M}'’]*)/gu;
+
+/**
+ * Casual's sentence starts in lowercase, as the app writes them when no model does (`StyleFormatter`
+ * in MurmurCore): "I" ("I'm", "I'll") and words with a capital inside ("NASA", "McDonald's") keep
+ * theirs. It can't tell a name from another word, so it is for a text the model left unstyled.
+ */
+export function lowercaseSentenceStarts(text: string): string {
+  return text.replace(SENTENCE_START, (_match: string, before: string, quote: string, word: string) => {
+    const keeps = word === "I" || word.startsWith("I'") || word.startsWith("I’") || /\p{Lu}/u.test(word.slice(1));
+    return before + quote + (keeps ? word : word[0].toLowerCase() + word.slice(1));
+  });
+}
+
+/** `text` without the full stop that ends it (an ellipsis stays). */
+function withoutFinalStop(text: string): string {
+  const trimmed = text.trim();
+  return trimmed.endsWith(".") && !trimmed.endsWith("..") ? trimmed.slice(0, -1) : trimmed;
+}
+
+/**
+ * A Casual reply that is the transcript as it went in (give or take the last full stop), around
+ * a snippet's placeholder: the model kept the placeholder and restyled nothing, which it did in
+ * most live checks of a punctuated sentence with a snippet in it.
+ */
+export function isUnstyled(transcript: string, reply: string): boolean {
+  // `search`, not `test`: PLACEHOLDER is global, and `test` would remember where it stopped.
+  return reply.search(PLACEHOLDER) >= 0 && withoutFinalStop(reply) === withoutFinalStop(transcript);
+}
