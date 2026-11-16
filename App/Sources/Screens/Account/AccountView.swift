@@ -140,7 +140,7 @@ struct AccountView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Your account and everything stored with it are deleted, here and on our servers. This can't be undone. An App Store subscription isn't cancelled: manage it in Settings › Apple Account › Subscriptions.")
+            Text("Your account and everything stored with it are deleted, here and on our servers. This can't be undone. Signing up again doesn't reset this week's words or the free trial. An App Store subscription isn't cancelled: manage it in Settings › Apple Account › Subscriptions.")
         }
     }
 

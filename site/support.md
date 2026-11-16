@@ -27,7 +27,7 @@ record or send what you type.
 
 ## Murmur Pro
 
-Murmur is free with 1,000 words a week, after a 14-day trial of Pro (one per iPhone). Murmur Pro has no weekly limit.
+Murmur is free with 1,000 words a week, after a 14-day trial of Pro (one per iPhone). Murmur Pro has no weekly limit. The free words are per account and per iPhone: a second account on the same iPhone shares them.
 
 - **Subscribe:** Menu › Upgrade to Pro.
 - **New iPhone:** sign in, then tap Restore purchase on the same screen.

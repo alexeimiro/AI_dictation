@@ -327,7 +327,7 @@ struct AccountSettings: View {
         .confirmationDialog("Delete your Murmur account?", isPresented: $confirmDelete) {
             Button("Delete account", role: .destructive) { delete() }
         } message: {
-            Text("Your dictionary, snippets, notes and style are deleted from every device. This can’t be undone.")
+            Text("Your dictionary, snippets, notes and style are deleted from every device. This can’t be undone. Signing up again doesn’t reset this week’s words or the free trial.")
         }
     }
 

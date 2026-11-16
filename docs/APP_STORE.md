@@ -116,6 +116,7 @@ These match `App/Resources/PrivacyInfo.xcprivacy`. Murmur doesn't track, show ad
 | Contact Info › Name | Yes | Yes | App Functionality | The name Apple or Google passes on at sign-in |
 | Contact Info › Email Address | Yes | Yes | App Functionality | Signing in (email, Google, Apple) |
 | Identifiers › User ID | Yes | Yes | App Functionality | The account |
+| Identifiers › Device ID | Yes | Yes | App Functionality | A random number kept in the iPhone's keychain and sent with each dictation, so the free plan's weekly limit counts per iPhone as well as per account. Not the advertising identifier; not used for tracking |
 | Purchases › Purchase History | Yes | Yes | App Functionality | Granting Pro |
 | User Content › Audio Data | Yes | No | App Functionality | Transcription by OpenAI; not kept by Murmur's server |
 | User Content › Other User Content | Yes | Yes | App Functionality, Analytics | Dictionary, snippets and notes synced to the account; a dictation's text sent to Anthropic to be tidied or translated; feedback text when the user turns on "Improve Murmur for everyone" |

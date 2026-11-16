@@ -136,6 +136,8 @@ final class EdgeFunctionClient {
         let timeout: TimeInterval
         let token: String
         let tokenMs: Int
+        /// This iPhone's id (`DeviceIdentity`); nil when there's none to send.
+        let device: String?
         let started: ContinuousClock.Instant
     }
 
@@ -154,28 +156,34 @@ final class EdgeFunctionClient {
     private let headers: [String: String]
     private let session: URLSession
     private let accessToken: @MainActor () async throws -> String
+    private let device: @MainActor () -> String?
     private let patience: @Sendable (TimeInterval) -> Duration
     /// While set and not yet passed, calls skip the dictation server.
     private(set) var edgePause = EdgePause()
 
     /// `headers` go out with every request except an Authorization, which carries the token
     /// from `accessToken` instead. `edgeURL`: the dictation server, under which the functions it
-    /// serves have the same path; nil without one. `patience`: tests pass short ones.
+    /// serves have the same path; nil without one. `patience`: tests pass short ones. `device`:
+    /// this iPhone's id, sent as `x-murmur-device` so the free plan's week is counted per iPhone as
+    /// well as per account; asked for at each call, since it can't be read before the first unlock.
     init(baseURL: URL, edgeURL: URL? = nil, headers: [String: String], session: URLSession = .shared,
          patience: @escaping @Sendable (TimeInterval) -> Duration = EdgeFunctionClient.defaultPatience,
+         device: @escaping @MainActor () -> String? = { nil },
          accessToken: @escaping @MainActor () async throws -> String) {
         functionsURL = baseURL.appendingPathComponent("/functions/v1")
         self.edgeURL = edgeURL?.appendingPathComponent("/functions/v1")
         self.headers = headers.filter { $0.key.caseInsensitiveCompare("Authorization") != .orderedSame }
         self.session = session
         self.patience = patience
+        self.device = device
         self.accessToken = accessToken
     }
 
-    /// The project's `apikey` and `X-Client-Info`, and the user's session as `invoke` had it. The
-    /// client's own Authorization holds the API key, not the user.
-    convenience init(backend: Backend) {
-        self.init(baseURL: backend.url, edgeURL: backend.edgeURL, headers: backend.client.headers) {
+    /// The project's `apikey` and `X-Client-Info`, the user's session as `invoke` had it, and this
+    /// iPhone's id. The client's own Authorization holds the API key, not the user.
+    convenience init(backend: Backend, identity: DeviceIdentity = .shared) {
+        self.init(baseURL: backend.url, edgeURL: backend.edgeURL, headers: backend.client.headers,
+                  device: { identity.id }) {
             try await backend.ensureSession()
             return try await backend.client.auth.session.accessToken
         }
@@ -206,7 +214,8 @@ final class EdgeFunctionClient {
             throw .transport(error)
         }
         let call = Call(function: function, payload: payload, contentType: contentType, extraHeaders: extraHeaders,
-                        timeout: timeout, token: token, tokenMs: started.elapsedMilliseconds, started: started)
+                        timeout: timeout, token: token, tokenMs: started.elapsedMilliseconds, device: device(),
+                        started: started)
         let result: Result<Reply, EdgeFunctionError>
         if let edgeURL, Self.edgeFunctions.contains(function), !edgePause.isPaused(at: .now) {
             result = await viaEdge(call, edgeURL: edgeURL)
@@ -257,6 +266,7 @@ final class EdgeFunctionClient {
             request.setValue(value, forHTTPHeaderField: name)
         }
         if let contentType = call.contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
+        if let device = call.device { request.setValue(device, forHTTPHeaderField: DeviceIdentity.header) }
         request.setValue("Bearer \(call.token)", forHTTPHeaderField: "Authorization")
 
         let metrics = TaskMetricsCollector()
