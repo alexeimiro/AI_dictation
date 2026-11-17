@@ -59,6 +59,7 @@ footer.site a { color: var(--second); }
 /* Home */
 .lede { font-size: 19px; color: var(--second); }
 .note { display: inline-block; border: 1.5px solid var(--ink); border-radius: 999px; padding: 4px 12px; font-weight: 600; font-size: 14px; }
+.button.store { display: inline-flex; padding: 8px 28px; margin: 6px 0 4px; }
 .features { list-style: none; padding: 0; }
 .features li { margin: 0; padding: 14px 0; border-top: 1px solid var(--line); }
 .features li:last-child { border-bottom: 1px solid var(--line); }

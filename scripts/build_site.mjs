@@ -16,6 +16,7 @@ const PAGES = [
   {
     file: "index.html", source: "site/home.html", title: "Murmur: talk instead of typing",
     description: "Murmur is a keyboard for iPhone that writes what you say, in any text field.",
+    appStoreBanner: true,
   },
   {
     file: "privacy/index.html", source: "docs/legal/privacy-policy.md", title: "Privacy Policy · Murmur",
@@ -111,7 +112,10 @@ function markdown(text) {
   return html.join("\n");
 }
 
-function page({ file, title, description }, body) {
+// Safari on iPhone shows its App Store banner (Open or Get) for this app ID.
+const APP_STORE_ID = "6829429992";
+
+function page({ file, title, description, appStoreBanner }, body) {
   const depth = file.split("/").length - 1;
   const up = depth ? "../".repeat(depth) : "./";
   return `<!doctype html>
@@ -122,7 +126,7 @@ function page({ file, title, description }, body) {
 <meta name="color-scheme" content="light dark">
 <title>${escape(title)}</title>
 <meta name="description" content="${escape(description)}">
-<link rel="stylesheet" href="${up}style.css">
+${appStoreBanner ? `<meta name="apple-itunes-app" content="app-id=${APP_STORE_ID}">\n` : ""}<link rel="stylesheet" href="${up}style.css">
 </head>
 <body>
 <header class="site"><a class="brand" href="${up}" aria-label="Murmur">${MARK}<span>murmur</span></a></header>
