@@ -65,6 +65,23 @@ public enum StylePreset: String, Sendable, CaseIterable, Identifiable {
         case .concise: "Fewer words"
         }
     }
+
+    /// The SF Symbol in the style's icon tile on the keyboard's style page and the app's style
+    /// cards, so each style can be told apart before its name is read. One ink glyph, no colour.
+    public var symbolName: String {
+        switch self {
+        // Your words, as you said them.
+        case .verbatim: "quote.opening"
+        // The same text, corrected.
+        case .grammar: "text.badge.checkmark"
+        // For work.
+        case .professional: "briefcase"
+        // Like a text to a friend.
+        case .casual: "bubble.left"
+        // The same message, made smaller. Not the three shrinking lines: that's the system's Filter.
+        case .concise: "arrow.down.right.and.arrow.up.left"
+        }
+    }
 }
 
 extension StylePreset: Codable {

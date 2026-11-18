@@ -19,6 +19,8 @@ struct BrandContrastTests {
     static let graphics: [(mark: BrandToken, on: BrandToken)] = [
         (.graphic, .canvas), (.graphic, .fill),
         (.live, .canvas), (.live, .fill), (.live, .keyboardPanel),
+        // The outline and glyph of a style that isn't chosen, on the keyboard's style page.
+        (.second, .keyboardCard),
     ]
 
     @Test(arguments: [false, true], [false, true])

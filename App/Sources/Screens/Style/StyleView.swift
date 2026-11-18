@@ -66,16 +66,26 @@ struct StyleView: View {
     }
 }
 
-/// A style with its example: what Murmur writes from `StyleView.spoken`. Onboarding's style page
+/// A style with its icon and its example: what Murmur writes from `StyleView.spoken`. The icon is
+/// the one on the keyboard's style page, solid ink on the chosen style. Onboarding's style page
 /// shows the same cards.
 struct StyleCard: View {
     let style: StylePreset
     let isSelected: Bool
     let select: () -> Void
 
+    /// The icon's tile grows with the title, up to 48 pt (the XXXL size, where onboarding stops).
+    @ScaledMetric(relativeTo: .body) private var tile: CGFloat = 36
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
         Button(action: select) {
             HStack(alignment: .top, spacing: 12) {
+                // At the accessibility sizes the words need the width; the outline and the mark
+                // still show the choice.
+                if !dynamicTypeSize.isAccessibilitySize {
+                    icon
+                }
                 VStack(alignment: .leading, spacing: 3) {
                     Text(style.title)
                         .font(.murmur(.headline))
@@ -105,6 +115,24 @@ struct StyleCard: View {
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+    }
+
+    /// The style's icon in a rounded tile: solid ink when chosen, an outline in the empty mark's
+    /// grey when not.
+    private var icon: some View {
+        let side = min(tile, 48)
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return Image(systemName: style.symbolName)
+            .font(.system(size: side * 0.44, weight: .medium))
+            .foregroundStyle(isSelected ? Theme.onInk : Theme.second)
+            .frame(width: side, height: side)
+            .background(isSelected ? Theme.ink : .clear, in: shape)
+            .overlay {
+                if !isSelected {
+                    shape.strokeBorder(Theme.graphic, lineWidth: 1.5)
+                }
+            }
+            .accessibilityHidden(true)
     }
 
     /// What the deployed model wrote from `StyleView.spoken` in each style (live check, 2026-11-13).

@@ -210,7 +210,7 @@ Every `-route` name still opens its screen; `menu` opens the menu.
 - **Snippets:**
   - Fields: Snippet (under 60 characters) and Expansion.
   - Errors: "Please enter a snippet", "Snippet too long", "Snippet already exists".
-- **Style:** "How Murmur writes": Word for word (exact words, literal translation; the default), then four the model writes: Improve my grammar (the same words and tone, grammatically correct), Professional (clear and polite, for work), Casual (lowercase, like texting) and Concise (fewer words). Each is shown on one spoken sentence, with a pill on the keyboard that sets it. Four earlier styles (formal, casual, very casual, excited) were removed in November 2026; today's Casual is stored as `chat`. Since iOS 26.4 there's no per-app context.
+- **Style:** "How Murmur writes": Word for word (exact words, literal translation; the default), then four the model writes: Improve my grammar (the same words and tone, grammatically correct), Professional (clear and polite, for work), Casual (lowercase, like texting) and Concise (fewer words). Each is shown on one spoken sentence, with a pill on the keyboard that sets it. Each has its own icon (`StylePreset.symbolName`, one ink SF Symbol) in a tile on the Style screen's cards and on the keyboard's style page, solid ink on the chosen style; on the keyboard the tile takes the place of the ring mark. Four earlier styles (formal, casual, very casual, excited) were removed in November 2026; today's Casual is stored as `chat`. Since iOS 26.4 there's no per-app context.
 
 **Menu and Account:**
 - **Account:**

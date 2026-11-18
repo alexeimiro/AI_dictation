@@ -486,6 +486,14 @@ struct StylePresetTests {
         }
     }
 
+    /// The style page tells the styles apart by their icons, so no two share one. That each one
+    /// exists is checked against the system in `StyleSymbolTests`.
+    @Test func everyStyleHasItsOwnIcon() {
+        let names = StylePreset.allCases.map(\.symbolName)
+        #expect(!names.contains(""))
+        #expect(Set(names).count == names.count)
+    }
+
     /// An IPC file or record written by an older build must not fail to decode over its style.
     @Test func decodesARemovedStyleAsWordForWord() throws {
         let decoded = try JSONDecoder().decode([StylePreset].self, from: Data(#"["excited","grammar"]"#.utf8))
