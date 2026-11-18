@@ -341,6 +341,81 @@ struct KeyboardSessionClientTests {
         #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
     }
 
+    /// The week's free words are used up: the mic shows the way to Pro, every time it's tapped,
+    /// and nothing is sent to the app or opens it.
+    @Test func withTheWordsUsedUpTheMicShowsTheLimitInsteadOfRecording() async {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        var usedUp = true
+        let client = KeyboardSessionClient(transport: transport, wordsUsedUp: { usedUp })
+        client.host = host
+        app.publish(.ready)
+        client.activate()
+
+        // An earlier dictation waiting as "Insert last dictation" would hide the card: the tap puts it away.
+        try? app.finish(UUID(), text: "An earlier dictation.", document: UUID())
+        #expect(await waitUntil { client.pendingResult != nil })
+        client.micTapped()
+        #expect(client.phase == .notice(Brand.limitReachedMessage))
+        #expect(client.pendingResult == nil)
+        client.dismissNotice()
+        #expect(client.phase == .idle)
+        client.micTapped()
+        #expect(client.phase == .notice(Brand.limitReachedMessage))
+        #expect(transport.payloads.readCommand() == nil)
+        #expect(host.openedURLs.isEmpty)
+
+        // A new week, or Pro: the next tap records.
+        usedUp = false
+        client.micTapped()
+        guard case .starting = client.phase else {
+            Issue.record("expected .starting, got \(client.phase)")
+            return
+        }
+        #expect(transport.payloads.readCommand()?.kind == .start)
+    }
+
+    /// The server refused the dictation for the week's words: nothing goes in, the notice says why.
+    @Test func aDictationRefusedAtTheLimitInsertsNothing() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport)
+        client.host = host
+        app.publish(.ready)
+        client.activate()
+        client.micTapped()
+        #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
+        guard case .listening(let id, _) = client.phase else { return }
+        client.stopTapped()
+        try app.finish(id, text: "words heard on the iPhone", document: host.currentDocumentIdentifier,
+                       status: .limitReached, message: Brand.limitReachedMessage)
+        #expect(await waitUntil { client.phase == .notice(Brand.limitReachedMessage) })
+        #expect(host.inserted.isEmpty)
+        #expect(client.pendingResult == nil)
+        #expect(host.outcomes == [.problem])
+    }
+
+    /// The last dictation the server wrote before the words ran out goes in, then says so.
+    @Test func theDictationThatUsedTheLastWordsGoesInWithTheNotice() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport)
+        client.host = host
+        app.publish(.ready)
+        client.activate()
+        client.micTapped()
+        #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
+        guard case .listening(let id, _) = client.phase else { return }
+        client.stopTapped()
+        try app.finish(id, text: "The last words this week.", document: host.currentDocumentIdentifier,
+                       status: .raw, message: Brand.limitReachedMessage)
+        #expect(await waitUntil { host.inserted.count == 1 })
+        #expect(client.phase == .notice(Brand.limitReachedMessage))
+    }
+
     @Test func withoutFullAccessAsksForIt() {
         let transport = InMemoryIPCTransport()
         let host = FakeHost()

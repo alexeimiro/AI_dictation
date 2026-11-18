@@ -329,7 +329,8 @@ final class SessionController {
         if TranscriberEngine.current == .stub { return StubTranscriber() }
         guard usesCloud, let transcription else { return AppleSpeechTranscriber() }
         return OpenAITranscriber(client: transcription, dictation: dictate, fallback: AppleSpeechTranscriber(),
-                                 fallbackLanguages: onDeviceFallbacks)
+                                 fallbackLanguages: onDeviceFallbacks,
+                                 wordsUsedUpUntil: { [settings] in settings.wordsUsedUpUntil })
     }
 
     /// Resolves the primary language and makes its model ready, reporting the first-run
@@ -626,6 +627,9 @@ final class SessionController {
         return true
     }
 
+    /// The week's free words are used up (`SharedSettings.wordsUsedUp`): no dictation begins.
+    var wordsUsedUp: Bool { settings.wordsUsedUp() }
+
     /// The Murmur keyboard is on screen in some app (its heartbeat is recent and it hasn't left).
     var keyboardIsOnScreen: Bool {
         transport.payloads.readKeyboardStatus().map { $0.inactiveSince > Date() } ?? false
@@ -638,6 +642,17 @@ final class SessionController {
                                 source: ActiveDictation.Source, timing: StartTiming? = nil) -> Bool {
         guard phase == .ready, let transcriber else {
             logger.notice("Start ignored in phase \(String(describing: self.phase), privacy: .public)")
+            return false
+        }
+        // The week's free words are used up: nothing is recorded for the server to refuse. The
+        // keyboard hears why, and its card leads to Pro; a note checks before it asks.
+        if settings.wordsUsedUp() {
+            logger.notice("Start refused: this week's free words are used up")
+            if source == .keyboard {
+                rejectDictation(requestId: requestId, documentIdentifier: documentIdentifier,
+                                language: languageOverride ?? primaryTag, message: Brand.limitReachedMessage,
+                                status: .limitReached)
+            }
             return false
         }
         let language: ResolvedLanguage
@@ -712,7 +727,8 @@ final class SessionController {
 
     /// Acknowledges a start the keyboard asked for (so it doesn't bounce to the app), then ends
     /// it with a reason instead of recording.
-    private func rejectDictation(requestId: UUID, documentIdentifier: UUID?, language: String, message: String) {
+    private func rejectDictation(requestId: UUID, documentIdentifier: UUID?, language: String, message: String,
+                                 status: ResultStatus = .failed) {
         phase = .recording(requestId)
         publisher.set(.recording, requestTag: requestId.tag16)
         transport.post(.stateChanged)
@@ -720,7 +736,7 @@ final class SessionController {
             try? await Task.sleep(for: .milliseconds(700))
             guard let self, case .recording(requestId) = self.phase, self.active == nil else { return }
             self.deliver(DictationResult(
-                requestId: requestId, documentIdentifier: documentIdentifier, text: "", status: .failed,
+                requestId: requestId, documentIdentifier: documentIdentifier, text: "", status: status,
                 message: message, createdAt: Date(), language: language))
             self.becomeReady()
         }
@@ -784,8 +800,9 @@ final class SessionController {
             }
             if signedIn() {
                 becomeReady()
-                // Not while a dictation the keyboard asked for in the meantime has just begun.
-                if settings.disableAfter == .immediately, active == nil {
+                // Not while a dictation the keyboard asked for in the meantime has just begun, or
+                // is being turned down (its reason still on the way to the keyboard).
+                if settings.disableAfter == .immediately, active == nil, phase == .ready {
                     stop()
                 }
             } else {

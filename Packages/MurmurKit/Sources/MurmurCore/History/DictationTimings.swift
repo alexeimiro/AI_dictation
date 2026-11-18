@@ -204,8 +204,9 @@ public struct DictationTimings: Codable, Sendable, Hashable {
     public var cleanupModel: String?
     /// The result's `ResultStatus`.
     public var status: String?
-    /// The result had text to insert (`DictationResult.isInsertable`). A `limitReached` result
-    /// may or may not, and the keyboard claims one without text too, only to dismiss its notice.
+    /// The result had text to insert (`DictationResult.isInsertable`). A `limitReached` result has
+    /// none now, but older builds' logs hold ones that kept the iPhone's text; the keyboard claims
+    /// one without text too, only to dismiss its notice.
     public var insertable: Bool?
     /// The transcript came from the cloud (`transcribe`). False when the on-device transcriber
     /// made it (the fallback after a failed or paused request, or the on-device engine) or there

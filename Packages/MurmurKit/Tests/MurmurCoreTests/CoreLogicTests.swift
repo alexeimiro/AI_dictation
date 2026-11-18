@@ -699,6 +699,82 @@ struct SharedSettingsTests {
         #expect(SharedSettings(defaults: defaults).keyboardAppearance == .automatic)
     }
 
+    /// The free words are used up until the next reset, and only until then.
+    @Test func wordsUsedUpLastUntilTheWeekResets() throws {
+        let suite = "test.murmur.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SharedSettings(defaults: defaults)
+        let saturday = try Date("2026-11-21T10:00:00Z", strategy: .iso8601)
+        #expect(settings.wordsUsedUpUntil == nil && !settings.wordsUsedUp(at: saturday))
+
+        settings.noteWordsUsedUp(at: saturday)
+        #expect(settings.wordsUsedUpUntil == (try Date("2026-11-22T08:00:00Z", strategy: .iso8601)))
+        #expect(settings.wordsUsedUp(at: saturday))
+        #expect(settings.wordsUsedUp(at: try Date("2026-11-22T07:59:59Z", strategy: .iso8601)))
+        #expect(!settings.wordsUsedUp(at: try Date("2026-11-22T08:00:00Z", strategy: .iso8601)))
+
+        // Past the reset the mic records again, but only the server lifts the mark itself.
+        #expect(settings.wordsAwaitServer)
+
+        // Another process (the keyboard) reads what the app wrote.
+        #expect(SharedSettings(defaults: defaults).wordsUsedUp(at: saturday))
+        settings.wordsUsedUpUntil = nil
+        #expect(!SharedSettings(defaults: defaults).wordsUsedUp(at: saturday))
+        #expect(!settings.wordsAwaitServer)
+    }
+
+    /// A refusal that reaches the iPhone just after the reset belongs to the week before: it
+    /// doesn't hold the new week's words back.
+    @Test func aRefusalJustAfterTheResetDoesNotHoldTheNewWeek() throws {
+        let suite = "test.murmur.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SharedSettings(defaults: defaults)
+        let justAfter = try Date("2026-11-22T08:05:00Z", strategy: .iso8601)
+        settings.noteWordsUsedUp(at: justAfter)
+        #expect(!settings.wordsUsedUp(at: justAfter))
+        let wellAfter = try Date("2026-11-22T08:15:00Z", strategy: .iso8601)
+        settings.noteWordsUsedUp(at: wellAfter)
+        #expect(settings.wordsUsedUpUntil == (try Date("2026-11-29T08:00:00Z", strategy: .iso8601)))
+    }
+
+    /// What the server says is left: none marks the words used up (keeping an earlier reset), any lifts it.
+    @Test func wordsLeftMarkOrLiftTheLimit() throws {
+        let suite = "test.murmur.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SharedSettings(defaults: defaults)
+        let friday = try Date("2026-11-20T12:00:00Z", strategy: .iso8601)
+        settings.noteWordsLeft(0, at: friday)
+        let reset = try #require(settings.wordsUsedUpUntil)
+        #expect(reset == (try Date("2026-11-22T08:00:00Z", strategy: .iso8601)))
+        settings.noteWordsLeft(0, at: friday.addingTimeInterval(3_600))
+        #expect(settings.wordsUsedUpUntil == reset)
+        settings.noteWordsLeft(12, at: friday)
+        #expect(settings.wordsUsedUpUntil == nil)
+    }
+
+    /// The server's `week_start()`: Sunday 00:00 in Los Angeles, in summer and in winter time.
+    @Test func theWeekResetsAtSundayMidnightInLosAngeles() throws {
+        func reset(after iso: String) throws -> String {
+            WeeklyWords.nextReset(after: try Date(iso, strategy: .iso8601)).formatted(.iso8601)
+        }
+        // Winter time (PST, UTC-8).
+        #expect(try reset(after: "2026-11-18T12:00:00Z") == "2026-11-22T08:00:00Z")
+        // Summer time (PDT, UTC-7).
+        #expect(try reset(after: "2026-07-01T12:00:00Z") == "2026-07-05T07:00:00Z")
+        // The week the clocks go back (Sunday 1 November 2026, 2:00 PDT): that Sunday's midnight is still PDT.
+        #expect(try reset(after: "2026-10-30T12:00:00Z") == "2026-11-01T07:00:00Z")
+        // The week they go forward (Sunday 8 March 2026): midnight is still PST.
+        #expect(try reset(after: "2026-03-05T12:00:00Z") == "2026-03-08T08:00:00Z")
+        // At the reset itself, the next one is a week on; a second before, it is that one.
+        #expect(try reset(after: "2026-11-22T08:00:00Z") == "2026-11-29T08:00:00Z")
+        #expect(try reset(after: "2026-11-22T07:59:59Z") == "2026-11-22T08:00:00Z")
+        // Saturday evening in Los Angeles is already Sunday in UTC: still that Sunday's midnight PT.
+        #expect(try reset(after: "2026-11-22T03:00:00Z") == "2026-11-22T08:00:00Z")
+    }
+
     /// The keyboard shows a notice as a title and a line.
     @Test func keyboardNoticeSplitsIntoATitleAndALine() {
         let heard = KeyboardNotice.parts(of: "We didn't catch anything. Try again a little closer.")

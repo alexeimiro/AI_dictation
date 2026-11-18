@@ -94,10 +94,11 @@ public struct DictationResult: Codable, Sendable, Equatable {
         self.language = language
     }
 
-    /// `limitReached` still carries the locally formatted text, so the dictation isn't lost; the
-    /// keyboard inserts it and then shows the message.
+    /// `limitReached` never is: the server refused the dictation for the week's free words, and
+    /// nothing recognized on the iPhone stands in for it. A dictation the server did write before
+    /// the words ran out goes in as `raw`, with `Brand.limitReachedMessage` shown after it.
     public var isInsertable: Bool {
-        (status == .cleaned || status == .raw || status == .limitReached) && !text.isEmpty
+        (status == .cleaned || status == .raw) && !text.isEmpty
     }
 }
 

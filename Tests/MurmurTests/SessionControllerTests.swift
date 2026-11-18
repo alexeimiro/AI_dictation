@@ -482,6 +482,53 @@ struct SessionControllerTests {
         #expect(entry.startPath == nil && entry.tapToStartMs == nil && entry.jump == nil)
     }
 
+    /// The week's free words are used up: the Action Button records nothing, and the keyboard
+    /// hears why (its card leads to Pro). Nothing goes into the history.
+    @Test func withTheWordsUsedUpAShortcutRecordsNothing() async throws {
+        let harness = makeHarness { settings in settings.noteWordsUsedUp() }
+        #expect(harness.session.beginDictationForKeyboard())
+        let pending = try #require(harness.transport.payloads.readPendingStart())
+        #expect(await waitUntil { harness.transport.payloads.readResult(pending.requestId) != nil })
+        let result = try #require(harness.transport.payloads.readResult(pending.requestId))
+        #expect(result.status == .limitReached && result.text.isEmpty)
+        #expect(result.message == Brand.limitReachedMessage)
+        #expect(await waitUntil { harness.session.phase == .ready })
+        #expect(harness.history.checks.isEmpty)
+    }
+
+    /// With "Turn off after: Immediately", a start that waited for the dictation which used the
+    /// last words is still told why it was turned down, before the session turns off.
+    @Test func aQueuedStartTurnedDownAtTheLimitIsToldWhy() async throws {
+        let transcriber = GatedTranscriber()
+        transcriber.holds = true
+        var settings: SharedSettings?
+        let harness = makeHarness(transcriber: transcriber) { shared in
+            shared.disableAfter = .immediately
+            settings = shared
+        }
+        let first = UUID(), queued = UUID()
+        try harness.send(.start, first)
+        #expect(await waitUntil { harness.session.phase == .recording(first) })
+        try harness.send(.stop, first)
+        #expect(await waitUntil { transcriber.finishes == 1 })
+        try harness.send(.start, queued)
+        #expect(await waitUntil { harness.transport.currentState().requestTag == queued.tag16 })
+        settings?.noteWordsUsedUp()
+        transcriber.release()
+
+        #expect(await waitUntil { harness.transport.payloads.readResult(queued) != nil })
+        let result = try #require(harness.transport.payloads.readResult(queued))
+        #expect(result.status == .limitReached && result.message == Brand.limitReachedMessage)
+    }
+
+    /// A note's mic doesn't start a dictation either.
+    @Test func withTheWordsUsedUpANoteRecordsNothing() {
+        let harness = makeHarness { settings in settings.noteWordsUsedUp() }
+        #expect(harness.session.wordsUsedUp)
+        #expect(harness.session.beginInAppDictation() == nil)
+        #expect(harness.session.phase == .ready)
+    }
+
     /// The mic in a note: the result goes to the note, not to the keyboard's files.
     @Test func anInAppDictationGoesToItsHandler() async throws {
         let harness = makeHarness()

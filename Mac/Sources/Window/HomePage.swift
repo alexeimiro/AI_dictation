@@ -62,7 +62,7 @@ struct HomePage: View {
         _ = model.engine.historyRevision
         let all = model.history.recent(limit: 500)
         guard !search.isEmpty else { return all }
-        return all.filter { ($0.cleanedText ?? $0.rawText).localizedCaseInsensitiveContains(search) }
+        return all.filter { $0.displayText.localizedCaseInsensitiveContains(search) }
     }
 
     private var groups: [DayGroup] { DayBucketing.group(transcripts) }
@@ -157,7 +157,7 @@ struct DictationRow: View {
     }
 
     private var text: String {
-        let written = transcript.cleanedText ?? transcript.rawText
+        let written = transcript.displayText
         return written.isEmpty ? (transcript.errorReason ?? "Nothing was heard") : written
     }
 
@@ -170,7 +170,7 @@ struct DictationRow: View {
 
     private func copy() {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(transcript.cleanedText ?? transcript.rawText, forType: .string)
+        NSPasteboard.general.setString(transcript.displayText, forType: .string)
         copied = true
         Task {
             try? await Task.sleep(for: .seconds(1.2))

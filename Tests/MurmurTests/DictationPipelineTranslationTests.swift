@@ -84,11 +84,17 @@ enum TranslationAnswer: CaseIterable, Sendable {
     }
 }
 
+/// Settings of the test's own: a translation refused at the limit marks the words used up, which
+/// must not reach the App Group that other tests and the simulator's Murmur read.
+private func isolatedSettings() -> SharedSettings {
+    SharedSettings(defaults: UserDefaults(suiteName: "test.murmur.translation.\(UUID().uuidString)"))
+}
+
 @MainActor
 struct DictationPipelineTranslationTests {
     @Test func translationUsesTargetForInsertionAndSourceForHistory() async {
         let cleanup = TranslationCleanup()
-        let pipeline = DictationPipeline(cleanup: cleanup)
+        let pipeline = DictationPipeline(cleanup: cleanup, settings: isolatedSettings())
         let requestID = UUID()
         let dictation = ActiveDictation(
             requestId: requestID, documentIdentifier: nil, style: .grammar, language: "ru-RU",
@@ -109,7 +115,7 @@ struct DictationPipelineTranslationTests {
     @Test func translationNeverInsertsUntranslatedFallbackText() async {
         let cleanup = TranslationCleanup()
         cleanup.failure = .unavailable("offline")
-        let pipeline = DictationPipeline(cleanup: cleanup)
+        let pipeline = DictationPipeline(cleanup: cleanup, settings: isolatedSettings())
         let dictation = ActiveDictation(
             requestId: UUID(), documentIdentifier: nil, style: .verbatim, language: "ru-RU",
             translationTargetLanguage: "tr-TR", source: .keyboard, startedAt: Date())
@@ -158,7 +164,7 @@ struct DictationPipelineTranslationTests {
         let cleanup = TranslationCleanup()
         cleanup.echoesTarget = false
         cleanup.text = "Можешь скинуть отчёт до пятницы?"
-        let pipeline = DictationPipeline(cleanup: cleanup)
+        let pipeline = DictationPipeline(cleanup: cleanup, settings: isolatedSettings())
         let stored = Transcript(language: "ru-RU", rawText: "можешь скинуть отчёт до пятницы", status: .raw)
 
         let updated = try await pipeline.recleanup(stored)
@@ -197,7 +203,7 @@ struct DictationPipelineTranslationTests {
     @Test func oneRequestCarriesTheDictationsTranslation() async {
         let transcriber = FinishedTranscriber()
         transcriber.translation = TranslationCleanup().reply(to: "tr-TR")
-        let pipeline = DictationPipeline(cleanup: TranslationCleanup())
+        let pipeline = DictationPipeline(cleanup: TranslationCleanup(), settings: isolatedSettings())
         let requestID = UUID()
         let dictation = ActiveDictation(
             requestId: requestID, documentIdentifier: nil, style: .grammar, language: "ru-RU",
@@ -248,7 +254,7 @@ struct DictationPipelineTranslationTests {
             requestId: UUID(), documentIdentifier: nil, style: .verbatim, language: "ru-RU",
             translationTargetLanguage: "tr-TR", source: .keyboard, startedAt: Date())
 
-        let outcome = await DictationPipeline(cleanup: TranslationCleanup()).complete(
+        let outcome = await DictationPipeline(cleanup: TranslationCleanup(), settings: isolatedSettings()).complete(
             dictation, transcriber: transcriber, audioSeconds: 2, stoppedAt: ContinuousClock.now)
 
         #expect(outcome.transcript.metrics.cleanupMs == 700)
@@ -264,7 +270,7 @@ struct DictationPipelineTranslationTests {
     /// both the pipeline's outcome and MurmurCore's keyboard enum here.
     private func translate(with cleanup: TranslationCleanup,
                            transcriber: FinishedTranscriber = FinishedTranscriber()) async -> (DictationResult, Transcript) {
-        let pipeline = DictationPipeline(cleanup: cleanup)
+        let pipeline = DictationPipeline(cleanup: cleanup, settings: isolatedSettings())
         let dictation = ActiveDictation(
             requestId: UUID(), documentIdentifier: nil, style: .verbatim, language: "ru-RU",
             translationTargetLanguage: "tr-TR", source: .keyboard, startedAt: Date())

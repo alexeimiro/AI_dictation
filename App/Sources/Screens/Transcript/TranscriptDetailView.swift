@@ -66,8 +66,8 @@ struct TranscriptDetailView: View {
                         .padding(.top, 18)
                 }
 
-                if transcript.cleanedText != nil, !transcript.rawText.isEmpty {
-                    raw(transcript.rawText)
+                if let rawText = transcript.shownRawText {
+                    raw(rawText)
                         .padding(.top, 10)
                 }
 

@@ -185,8 +185,8 @@ struct TimingsSummaryTests {
         #expect(summary.tapToInsert == MetricsSummary(count: 1, median: 18_200, p95: 18_200))
     }
 
-    /// The free plan's limit keeps a dictation's local text, which the keyboard inserts, but a
-    /// transcription or translation it stopped has none: that claim only dismisses the notice.
+    /// Older builds kept a dictation's local text at the free plan's limit, and the keyboard
+    /// inserted it; one with no text was claimed only to dismiss the notice. Their logs still read so.
     @Test func aLimitReachedResultIsAnInsertOnlyWithText() {
         let kept = entry(.dictation, status: "limitReached", claimedAfter: 0.3)
         let stopped = entry(.dictation, status: "limitReached", insertable: false, claimedAfter: 0.1)

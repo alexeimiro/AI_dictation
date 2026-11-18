@@ -131,7 +131,9 @@ struct HistoryStoreTests {
 
     @Test func regenerateUpdatesOnlyOnSuccess() async throws {
         let cleanup = FakeCleanup()
-        let pipeline = DictationPipeline(cleanup: cleanup)
+        // Its own settings: the limit below marks the words used up.
+        let settings = SharedSettings(defaults: UserDefaults(suiteName: "test.murmur.regenerate.\(UUID().uuidString)"))
+        let pipeline = DictationPipeline(cleanup: cleanup, settings: settings)
         let transcript = Transcript(id: UUID(), language: "en-US", style: .grammar, rawText: "hello there friend",
                                     status: .raw)
 
@@ -141,10 +143,12 @@ struct HistoryStoreTests {
         #expect(updated.cleanupModel == "test")
         #expect(updated.regeneratedAt != nil)
 
+        // At the weekly limit nothing changes: the stored text stays as it was.
         cleanup.result = .failure(.limitReached)
-        updated = try await pipeline.recleanup(transcript)
-        #expect(updated.status == .limitReached)
-        #expect(updated.cleanedText == "Hello there friend")
+        await #expect(throws: CleanupClient.Failure.self) {
+            _ = try await pipeline.recleanup(transcript)
+        }
+        #expect(settings.wordsUsedUp())
 
         cleanup.result = .failure(.unavailable("offline"))
         await #expect(throws: CleanupClient.Failure.self) {

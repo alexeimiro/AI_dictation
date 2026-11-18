@@ -72,6 +72,11 @@ final class NoteDictation {
         failure = nil
         noteID = note
         requestID = nil
+        // The week's free words are used up: nothing to record until the reset or Pro.
+        guard !session.wordsUsedUp else {
+            failure = Brand.limitReachedMessage
+            return
+        }
         starting = true
         defer { starting = false }
         if !session.isLive { await session.start() }
@@ -81,7 +86,9 @@ final class NoteDictation {
             return
         }
         guard let id = session.beginInAppDictation() else {
-            failure = "\(Brand.name) is finishing another dictation. Try again in a moment."
+            // The words may have run out while Murmur was turning on (the plan was read meanwhile).
+            failure = session.wordsUsedUp ? Brand.limitReachedMessage
+                : "\(Brand.name) is finishing another dictation. Try again in a moment."
             return
         }
         requestID = id
@@ -118,7 +125,8 @@ final class NoteDictation {
             if inserters[noteID] == nil { library.discardIfEmpty(noteID) }
             return
         }
-        if result.status == .limitReached { failure = result.message }
+        // The last dictation before the words ran out goes in, and says so.
+        if result.message == Brand.limitReachedMessage { failure = result.message }
         if let inserter = inserters[noteID] {
             inserter(result)
         } else if var note = library.note(noteID) {

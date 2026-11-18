@@ -107,6 +107,8 @@ final class DictationPipeline {
             // What the user said stays playable even when no text came of it.
             let recording = (transcriber as? RecordingProviding)?.takeRecording()
             let limited = (error as? CloudTranscriptionError) == .limitReached
+            // Until the week resets: the keyboard's mic shows the way to Pro instead of recording.
+            if limited { settings.noteWordsUsedUp() }
             // The on-device fallback failed after the cloud refused a signed-out account: trying
             // again won't help, signing in will.
             let message = utterance?.cloudFailure == .signedOut
@@ -168,7 +170,7 @@ final class DictationPipeline {
                 dictationId: dictation.requestId, raw: trimmed, language: spoken,
                 targetLanguage: targetLanguage, style: style, localText: localText)
         }
-        let metrics = TranscriptMetrics(
+        var metrics = TranscriptMetrics(
             audioSeconds: audioSeconds,
             words: WordCounter.count(cleaned.text),
             asrMs: transcriptMs,
@@ -176,10 +178,27 @@ final class DictationPipeline {
             ttftMs: cleaned.ttftMs,
             totalMs: Self.milliseconds(since: stoppedAt))
         logger.info("Dictation done: \(metrics.words) words, ASR \(transcriptMs) ms, cleanup \(cleaned.cleanupMs ?? -1) ms")
-        if targetLanguage != nil, cleaned.status != .cleaned {
-            let status: ResultStatus = cleaned.status == .limitReached ? .limitReached : .failed
+        if cleaned.status == .limitReached {
+            settings.noteWordsUsedUp()
+            // The words ran out at the cleanup. A transcript the cloud wrote went through the
+            // server's check of the words before it was transcribed: it goes in as the iPhone
+            // formatted it, with the notice after it. One the iPhone recognized while the cloud
+            // was out of reach never did, and a translation has nothing of its own to give, so
+            // neither keeps any text, here or in the history.
+            let served = targetLanguage == nil && output.heardInCloud
+            if !served { metrics.words = 0 }
             return outcome(
-                dictation, spoken: spoken, raw: trimmed, text: "", status: status,
+                dictation, spoken: spoken, raw: served ? trimmed : "", text: served ? cleaned.text : "",
+                status: served ? .raw : .limitReached, message: Brand.limitReachedMessage,
+                errorReason: cleaned.errorReason, style: style, cleanupModel: cleaned.model, metrics: metrics,
+                utterance: utterance, cleanupRequest: cleaned.request, recording: recording)
+        }
+        // What the replies say is left of the week's words: none, and the next tap shows the way to
+        // Pro instead of recording; some (a new week), and the iPhone may stand in offline again.
+        if let wordsLeft = cleaned.wordsLeft ?? output.wordsLeft { settings.noteWordsLeft(wordsLeft) }
+        if targetLanguage != nil, cleaned.status != .cleaned {
+            return outcome(
+                dictation, spoken: spoken, raw: trimmed, text: "", status: .failed,
                 message: cleaned.message ?? "Couldn't translate that. Check your connection and try again.",
                 errorReason: cleaned.errorReason, style: style, cleanupModel: cleaned.model, metrics: metrics,
                 utterance: utterance, cleanupRequest: cleaned.request, recording: recording)
@@ -204,6 +223,7 @@ final class DictationPipeline {
         let cleaned = await runCleanup(
             dictationId: transcript.id, raw: transcript.rawText, language: transcript.language,
             targetLanguage: nil, style: transcript.style, localText: localText, force: true)
+        if case .limitReached? = cleaned.failure { settings.noteWordsUsedUp() }
         if let failure = cleaned.failure { throw failure }
         var updated = transcript
         updated.cleanedText = cleaned.text
@@ -240,6 +260,8 @@ final class DictationPipeline {
         var failure: CleanupClient.Failure?
         /// The cleanup request's timing, when it got a reply.
         var request: RequestTiming?
+        /// The free words the reply says are left; nil on Pro, unsaid, or without a reply.
+        var wordsLeft: Int?
     }
 
     /// The cleanup step shared by live dictations and Retry / Regenerate. Dictations of three
@@ -290,6 +312,7 @@ final class DictationPipeline {
             outcome.ttftMs = response.ttftMs
             outcome.model = response.model
             outcome.request = response.request
+            outcome.wordsLeft = response.remaining
             if let targetLanguage, !Self.isTranslation(response, into: targetLanguage) {
                 // A cleanup in the spoken language must never be inserted as the translation.
                 outcome.errorReason = "The cleanup service didn't translate. Deploy the latest cleanup function."
@@ -314,6 +337,8 @@ final class DictationPipeline {
             outcome.status = .limitReached
             outcome.message = Brand.limitReachedMessage
             outcome.errorReason = "Dictation limit reached."
+            // Retry and Regenerate leave the stored text as it was.
+            outcome.failure = .limitReached
         case .failure(let error):
             outcome.failure = error
             outcome.errorReason = Self.describe(error)

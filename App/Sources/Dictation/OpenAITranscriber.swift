@@ -9,8 +9,10 @@ import os
 ///
 /// The dictation's audio is kept as 16 kHz mono samples and sent in one request when it ends,
 /// compressed to AAC. If the language's on-device model is already on the iPhone, an on-device
-/// transcriber listens alongside and is used when the request fails (offline, a server error,
-/// the free plan's weekly limit), so a dictation isn't lost.
+/// transcriber listens alongside and is used when the request fails (offline, a server error, a
+/// signed-out account), so a dictation isn't lost. Never when the server refused the account (the
+/// free plan's weekly words are used up, or too many dictations a minute), nor while the week's
+/// words are known to be used up: the iPhone's own recognition would make the limit mean nothing.
 final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingProviding, @unchecked Sendable {
     static let sampleRate: Double = 16_000
     /// Shorter recordings are treated as silence instead of being sent.
@@ -25,6 +27,9 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
     private let fallback: (any Transcriber)?
     /// Low data mode: the audio uploads at `EncodedAudio.lowDataBitRate`.
     private let savesData: @Sendable () -> Bool
+    /// When the free words were last said to be used up until, while the server hasn't said they
+    /// are back (`SharedSettings.wordsUsedUpUntil`): the fallback stays out of it meanwhile.
+    private let wordsUsedUpUntil: @Sendable () -> Date?
     private let lock = NSLock()
     private let logger = Logger(subsystem: "Murmur", category: "CloudASR")
     private let targetFormat = AVAudioFormat(
@@ -56,15 +61,19 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
 
     /// `dictation`: transcribes, and translates or writes in a style, in one request; without it
     /// every dictation goes to `client` for its transcript. `fallbackLanguages`: languages whose
-    /// on-device model is installed and verified.
+    /// on-device model is installed and verified. `wordsUsedUpUntil`: the account's free words were
+    /// said to be used up and the server hasn't said otherwise since, so a dictation the cloud can't
+    /// take isn't recognized on the iPhone either.
     init(client: any CloudTranscribing, dictation: (any Dictating)? = nil, fallback: (any Transcriber)? = nil,
          fallbackLanguages: [String: ResolvedLanguage] = [:],
-         savesData: @escaping @Sendable () -> Bool = { NetworkConditions.shared.savesData() }) {
+         savesData: @escaping @Sendable () -> Bool = { NetworkConditions.shared.savesData() },
+         wordsUsedUpUntil: @escaping @Sendable () -> Date? = { nil }) {
         self.client = client
         self.dictation = dictation
         self.fallback = fallback
         self.fallbackLanguages = fallbackLanguages
         self.savesData = savesData
+        self.wordsUsedUpUntil = wordsUsedUpUntil
     }
 
     var displayName: String {
@@ -204,6 +213,12 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
             return UtteranceOutput(transcript: "")
         }
         if paused, claimFallback(of: utterance), let fallback {
+            // Offline with the week's words used up: nothing stands in for the cloud.
+            if let refusal = refusalWhileWordsAwaitServer(
+                otherwise: CloudTranscriptionError.unavailable("The cloud is paused after a failure.")) {
+                fallback.abandonUtterance()
+                throw refusal
+            }
             return UtteranceOutput(transcript: try await fallback.finishUtterance(), detectedLanguage: fallbackDetected)
         }
         do {
@@ -223,8 +238,9 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
             if let request,
                let reply = try await dictated(audio, language: spoken, hints: hints, keywords: keywords,
                                               request: request) {
+                // The words left come with the model's part of the reply (`modelReply`).
                 output = UtteranceOutput(transcript: reply.transcript, modelReply: reply.modelReply,
-                                         detectedLanguage: detected(reply.languages))
+                                         detectedLanguage: detected(reply.languages), heardInCloud: true)
                 timing = reply.timing
             } else {
                 // Word for word asks `dictate` for the transcript alone. A dictation the model was
@@ -239,7 +255,8 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
                         audio: audio.data, format: audio.format, language: spoken, languageHints: hints,
                         keywords: keywords, dictationId: dictationId)
                 }
-                output = UtteranceOutput(transcript: transcript.text, detectedLanguage: detected(transcript.languages))
+                output = UtteranceOutput(transcript: transcript.text, detectedLanguage: detected(transcript.languages),
+                                         heardInCloud: true, wordsLeft: transcript.remaining)
                 timing = transcript.timing
             }
             measured.requests = timing.map { [$0] } ?? []
@@ -259,6 +276,16 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
             }
             recordFailure(error, for: utterance)
             guard claimFallback(of: utterance), let fallback else { throw error }
+            // The server refused the account, or the week's words were used up and it hasn't said
+            // they're back: the iPhone's own recognition doesn't stand in, or the limit would mean nothing.
+            if (error as? CloudTranscriptionError)?.refusesAccount == true {
+                fallback.abandonUtterance()
+                throw error
+            }
+            if let refusal = refusalWhileWordsAwaitServer(otherwise: error) {
+                fallback.abandonUtterance()
+                throw refusal
+            }
             logger.notice("Cloud transcription failed, using on-device: \(error.localizedDescription, privacy: .public)")
             return UtteranceOutput(transcript: try await fallback.finishUtterance(), detectedLanguage: fallbackDetected)
         }
@@ -327,6 +354,14 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
 
     func shutdown() async {
         await fallback?.shutdown()
+    }
+
+    /// Why the fallback may not answer, while the words were said to be used up and the server
+    /// hasn't said they're back: the limit until the reset; past it (by the iPhone's clock), the
+    /// cloud's own failure, since only the server can say the words are back. Nil: it may.
+    private func refusalWhileWordsAwaitServer(otherwise failure: any Error) -> (any Error)? {
+        guard let until = wordsUsedUpUntil() else { return nil }
+        return until > Date() ? CloudTranscriptionError.limitReached : failure
     }
 
     /// Whether the fallback still listens to `utterance`, handing it to the caller to end if so.

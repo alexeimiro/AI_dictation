@@ -83,7 +83,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         let transport: IPCTransport = SharedContainer.appGroup()
             .map { DarwinIPCTransport(container: $0) } ?? InMemoryIPCTransport()
         self.transport = transport
-        let client = KeyboardSessionClient(transport: transport)
+        let client = KeyboardSessionClient(transport: transport, wordsUsedUp: { SharedSettings.shared.wordsUsedUp() })
         client.host = self
         self.client = client
 

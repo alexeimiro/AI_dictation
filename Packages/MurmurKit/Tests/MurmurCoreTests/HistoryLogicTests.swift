@@ -228,14 +228,14 @@ struct InsertStateTests {
     }
 
     @Test func everyInsertableStatusIsOffered() {
-        for status in [TranscriptStatus.cleaned, .raw, .limitReached] {
+        for status in [TranscriptStatus.cleaned, .raw] {
             let item = transcript(at: createdAt, status: status)
             #expect(item.insertState(now: createdAt.addingTimeInterval(1), claimed: false) == .pending)
         }
     }
 
     @Test func nonInsertableTranscriptsHaveNoInsertState() {
-        for status in [TranscriptStatus.failed, .empty, .processing] {
+        for status in [TranscriptStatus.failed, .empty, .processing, .limitReached] {
             let item = transcript(at: createdAt, status: status)
             #expect(item.insertState(now: createdAt.addingTimeInterval(5), claimed: false) == .none)
             // The keyboard claims failed/empty results too, only to acknowledge the notice.
@@ -259,12 +259,26 @@ struct TranscriptTests {
     @Test func displayTextPrefersCleanedText() {
         #expect(transcript(at: .now, text: "raw words").displayText == "raw words")
         #expect(transcript(at: .now, text: "raw words", cleaned: "Raw words.").displayText == "Raw words.")
+        #expect(transcript(at: .now, text: "raw words", cleaned: "Raw words.").shownRawText == "raw words")
+        #expect(transcript(at: .now, text: "raw words").shownRawText == nil)
+    }
+
+    /// Older builds kept the iPhone's own transcript of a dictation refused at the weekly limit:
+    /// none of it is shown, copied, inserted or cleaned up again.
+    @Test func aDictationRefusedAtTheLimitHandsOutNoText() {
+        let refused = transcript(at: .now, text: "words heard on the iPhone", status: .limitReached,
+                                 cleaned: "Words heard on the iPhone.")
+        #expect(refused.displayText.isEmpty)
+        #expect(refused.shownRawText == nil)
+        #expect(!refused.isInsertable)
+        #expect(!refused.canRegenerate)
+        #expect(refused.insertState(now: .now, claimed: false) == .none)
     }
 
     @Test func canRegenerateNeedsRawTextAndAFinishedStatus() {
         #expect(transcript(at: .now, status: .cleaned).canRegenerate)
         #expect(transcript(at: .now, status: .raw).canRegenerate)
-        #expect(transcript(at: .now, status: .limitReached).canRegenerate)
+        #expect(!transcript(at: .now, status: .limitReached).canRegenerate)
         #expect(!transcript(at: .now, status: .failed).canRegenerate)
         #expect(!transcript(at: .now, status: .empty).canRegenerate)
         #expect(!transcript(at: .now, status: .processing).canRegenerate)

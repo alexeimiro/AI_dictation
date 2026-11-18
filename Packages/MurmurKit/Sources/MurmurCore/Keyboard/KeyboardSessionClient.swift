@@ -74,6 +74,9 @@ public final class KeyboardSessionClient {
     private let busyTimeout: Duration
     private let resultTimeout: Duration
     private let staleAfter: TimeInterval
+    /// The free words are used up (`SharedSettings.wordsUsedUp`): the mic shows the way to Pro
+    /// instead of recording.
+    private let wordsUsedUp: () -> Bool
     private var observations: [IPCObservation] = []
     private var ackTask: Task<Void, Never>?
     private var listenTask: Task<Void, Never>?
@@ -99,8 +102,10 @@ public final class KeyboardSessionClient {
         ackTimeout: Duration = .milliseconds(500),
         busyTimeout: Duration = .seconds(15),
         resultTimeout: Duration = .seconds(20),
-        staleAfter: TimeInterval = 2.5
+        staleAfter: TimeInterval = 2.5,
+        wordsUsedUp: @escaping () -> Bool = { false }
     ) {
+        self.wordsUsedUp = wordsUsedUp
         self.transport = transport
         self.clock = clock
         self.ackTimeout = ackTimeout
@@ -173,6 +178,14 @@ public final class KeyboardSessionClient {
         }
         guard let host, host.hasFullAccess else {
             setPhase(.needsFullAccess)
+            return
+        }
+        // Closing the card doesn't bring the words back: every tap shows it again, until the
+        // week resets or Pro (the app clears it when it hears either).
+        guard !wordsUsedUp() else {
+            // As a dictation would, the tap puts away "Insert last dictation", which would hide the card.
+            pendingResult = nil
+            setPhase(.notice(Brand.limitReachedMessage))
             return
         }
         resumedRequestId = nil

@@ -98,6 +98,7 @@ final class DictateClient: Dictating {
     private struct Transcription: Decodable {
         let transcript: String?
         let languages: [String]?
+        let remaining: Int?
     }
 
     /// A warm-up's reply names its worker beside `timings`, not in them.
@@ -188,7 +189,7 @@ final class DictateClient: Dictating {
             lastReplyAt = .now
             let transcription = try JSONDecoder().decode(Transcription.self, from: reply.data)
             return CloudTranscript(text: transcription.transcript ?? "", languages: transcription.languages ?? [],
-                                   timing: reply.timing)
+                                   timing: reply.timing, remaining: transcription.remaining)
         } catch EdgeFunctionError.httpError(code: 404) {
             deployed = false
             throw .notDeployed

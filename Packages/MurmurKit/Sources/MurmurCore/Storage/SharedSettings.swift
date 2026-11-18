@@ -99,7 +99,7 @@ public final class SharedSettings: @unchecked Sendable {
         case defaultStyle
         case useBuiltInMic, transcriberEngine, liveActivities, transcriptRetention, autoReturn, keepScreenAwake
         case translateInOneRequest, lowDataMode, smartFormatting, keepRecordings, autoOpenNote, aiConsentVersion
-        case signedOut
+        case signedOut, wordsUsedUpUntil
         case primaryLanguage, secondaryLanguage, dictationLanguages, verifiedEngines
         case translationEnabled, translationSourceLanguage, translationTargetLanguage, recentTranslationLanguages
         case lastDetectedLanguage, autoDetectDefaultApplied, keyboardAppearance
@@ -232,6 +232,50 @@ public final class SharedSettings: @unchecked Sendable {
     public var signedOut: Bool {
         get { bool(.signedOut, default: false) }
         set { defaults.set(newValue, forKey: Key.signedOut.rawValue) }
+    }
+
+    /// The signed-in account's free words are used up until then (`WeeklyWords.nextReset`), as the
+    /// server last said: a dictation it refused or that spent the last word, or the plan the app
+    /// read. Nil once the server says there are words (a reply, the plan: a new week, Pro, an
+    /// invite) and when another account signs in. Written by the app; the keyboard reads it on
+    /// each mic tap, and the app's session before it records.
+    public var wordsUsedUpUntil: Date? {
+        get { defaults.object(forKey: Key.wordsUsedUpUntil.rawValue) as? Date }
+        set {
+            if let newValue {
+                defaults.set(newValue, forKey: Key.wordsUsedUpUntil.rawValue)
+            } else {
+                defaults.removeObject(forKey: Key.wordsUsedUpUntil.rawValue)
+            }
+        }
+    }
+
+    /// The free words are used up now: no dictation is recorded until the week resets or the plan
+    /// changes. The keyboard's mic and the session go by this, so a new week dictates at once.
+    public func wordsUsedUp(at now: Date = Date()) -> Bool {
+        wordsUsedUpUntil.map { $0 > now } ?? false
+    }
+
+    /// The server hasn't said the words are back since it last said they were used up. The
+    /// iPhone's own recognition stands in for an unreachable cloud only without this: past the
+    /// reset as well, since the clock is the user's to change and only the server knows.
+    public var wordsAwaitServer: Bool { wordsUsedUpUntil != nil }
+
+    /// The server refused a dictation for the week's words: none is recorded until the next reset.
+    /// A refusal that reaches the iPhone just after the reset (latency, a clock a little ahead)
+    /// still belongs to the week before, so it doesn't hold the new week's words back.
+    public func noteWordsUsedUp(at now: Date = Date()) {
+        wordsUsedUpUntil = WeeklyWords.nextReset(after: now.addingTimeInterval(-WeeklyWords.clockMargin))
+    }
+
+    /// What the server said is left of the week's free words, from the plan or a dictation's reply:
+    /// none marks them used up (an earlier mark's reset is kept), any lifts the mark.
+    public func noteWordsLeft(_ remaining: Int, at now: Date = Date()) {
+        if remaining <= 0 {
+            if !wordsUsedUp(at: now) { noteWordsUsedUp(at: now) }
+        } else if wordsUsedUpUntil != nil {
+            wordsUsedUpUntil = nil
+        }
     }
 
     /// Auto-delete transcripts older than this. App-only; applied by the history store.

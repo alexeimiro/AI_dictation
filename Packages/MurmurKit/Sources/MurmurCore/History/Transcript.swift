@@ -129,16 +129,23 @@ public struct Transcript: Identifiable, Codable, Sendable, Hashable {
         self.source = source
     }
 
-    /// What the list, Copy and Insert use.
+    /// What the list, Copy and Insert use. Empty for a dictation refused at the weekly limit:
+    /// older builds kept the iPhone's own transcript of one, and that is never handed out.
     public var displayText: String {
-        cleanedText ?? rawText
+        status == .limitReached ? "" : (cleanedText ?? rawText)
     }
 
-    /// Statuses whose text is final: `processing` is still changing, `failed`/`empty` have none.
+    /// The transcript as heard, under the text, when there is one to show beside it.
+    public var shownRawText: String? {
+        status == .limitReached || cleanedText == nil || rawText.isEmpty ? nil : rawText
+    }
+
+    /// Statuses whose text is final: `processing` is still changing, `failed`/`empty` have none,
+    /// and a `limitReached` dictation has none to give.
     private var hasFinalText: Bool {
         switch status {
-        case .cleaned, .raw, .limitReached: true
-        case .failed, .empty, .processing: false
+        case .cleaned, .raw: true
+        case .limitReached, .failed, .empty, .processing: false
         }
     }
 

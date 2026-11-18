@@ -12,6 +12,8 @@ private final class FakeCloud: CloudTranscribing {
     var languages: [String] = []
     /// What the request reports with a transcript.
     var timing: RequestTiming?
+    /// The free words the reply says are left.
+    var remaining: Int?
     /// Requests wait for `releaseRequests()`, like a slow network.
     var holdsRequests = false
     private(set) var calls: [(audio: Data, format: EncodedAudio.Format, language: String?, keywords: [String])] = []
@@ -30,7 +32,7 @@ private final class FakeCloud: CloudTranscribing {
         dictationIds.append(dictationId)
         if holdsRequests { await withCheckedContinuation { held.append($0) } }
         answeredAt = .now
-        return CloudTranscript(text: try result.get(), languages: languages, timing: timing)
+        return CloudTranscript(text: try result.get(), languages: languages, timing: timing, remaining: remaining)
     }
 
     func releaseRequests() {
@@ -96,6 +98,20 @@ private final class TimedCleanup: Cleaning {
             text: "Hi from the cloud.", status: "cleaned", words: 4, model: "gpt-test", ttftMs: nil, totalMs: 300,
             remaining: nil, targetLanguage: targetLanguage,
             request: RequestTiming(function: "cleanup", status: 200, tokenMs: 1, totalMs: 310))
+    }
+}
+
+/// The cleanup at the free plan's limit: refuses every request (`402 limit_reached`).
+@MainActor
+private final class RefusingCleanup: Cleaning {
+    var isConfigured = true
+    private(set) var calls = 0
+    func clean(
+        dictationId: UUID, transcript: String, language: String?, targetLanguage: String?, style: StylePreset,
+        dictionary: [DictionaryTerm], snippets: [SnippetDefinition]
+    ) async throws(CleanupClient.Failure) -> CleanupClient.Response {
+        calls += 1
+        throw .limitReached
     }
 }
 
@@ -987,5 +1003,258 @@ struct OpenAITranscriberTests {
         #expect(TranscriberEngine.openAI.usesCloud(cloudAvailable: false))
         #expect(!TranscriberEngine.onDevice.usesCloud(cloudAvailable: true))
         #expect(!TranscriberEngine.stub.usesCloud(cloudAvailable: true))
+    }
+
+    // MARK: The free plan's weekly limit
+
+    /// Its own settings, so a test's "words used up" stays its own.
+    private func limitSettings() -> SharedSettings {
+        SharedSettings(defaults: UserDefaults(suiteName: "test.murmur.limit.\(UUID().uuidString)"))
+    }
+
+    private func dictation(style: StylePreset, target: String? = nil) -> ActiveDictation {
+        ActiveDictation(requestId: UUID(), documentIdentifier: nil, style: style, language: "ru-RU",
+                        translationTargetLanguage: target, source: .keyboard, startedAt: Date())
+    }
+
+    /// The server refused the dictation for the week's words: the iPhone's own recognition, ready
+    /// and listening, doesn't stand in for it.
+    @Test func aDictationOverTheLimitIsNeverRecognizedOnTheIPhone() async throws {
+        let cloud = FakeCloud()
+        cloud.result = .failure(.limitReached)
+        let onDevice = FakeOnDevice()
+        let transcriber = OpenAITranscriber(client: cloud, fallback: onDevice, fallbackLanguages: ["ru-RU": russian])
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        await transcriber.prepareFallback()
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        #expect(onDevice.appended > 0)
+        await #expect(throws: CloudTranscriptionError.limitReached) { try await transcriber.finishUtterance() }
+        #expect(onDevice.finished == 0 && onDevice.abandoned == 1)
+        // The refusal says nothing about the connection: the next dictation asks the cloud again.
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        await #expect(throws: CloudTranscriptionError.limitReached) { try await transcriber.finishUtterance() }
+        #expect(cloud.calls.count == 2 && onDevice.finished == 0)
+    }
+
+    /// The same through `dictate`, for a style the model writes and for Word for word, and for too
+    /// many dictations a minute.
+    @Test(arguments: [CloudTranscriptionError.limitReached, .rateLimited])
+    func aRefusedDictateIsNeverRecognizedOnTheIPhone(refusal: CloudTranscriptionError) async throws {
+        for wordForWord in [false, true] {
+            let cloud = FakeCloud()
+            let dictate = FakeDictate()
+            dictate.failure = refusal
+            dictate.plainFailure = refusal
+            let onDevice = FakeOnDevice()
+            let transcriber = OpenAITranscriber(client: cloud, dictation: dictate, fallback: onDevice,
+                                                fallbackLanguages: ["ru-RU": russian])
+            try await transcriber.prepare(micFormat: micFormat, language: russian)
+            await transcriber.prepareFallback()
+            transcriber.beginUtterance()
+            feed(transcriber, seconds: 1)
+            let request = wordForWord ? nil : ModelRequest(dictationId: UUID(), targetLanguage: nil, style: .grammar,
+                                                           dictionary: [], snippets: [])
+            await #expect(throws: refusal) {
+                try await transcriber.finishUtterance(model: request, dictationId: UUID())
+            }
+            #expect(onDevice.finished == 0 && cloud.calls.isEmpty)
+        }
+    }
+
+    /// Offline, or with the cloud paused after a failure, while the week's words are known to be
+    /// used up: the iPhone doesn't recognize the dictation, and the user hears why.
+    @Test func offlineWithTheWordsUsedUpNothingIsRecognized() async throws {
+        let cloud = FakeCloud()
+        cloud.result = .failure(.unavailable("offline"))
+        let onDevice = FakeOnDevice()
+        let settings = limitSettings()
+        settings.noteWordsUsedUp()
+        let transcriber = OpenAITranscriber(client: cloud, fallback: onDevice, fallbackLanguages: ["ru-RU": russian],
+                                            wordsUsedUpUntil: { settings.wordsUsedUpUntil })
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        await transcriber.prepareFallback()
+        for _ in 0..<2 {
+            transcriber.beginUtterance()
+            feed(transcriber, seconds: 1)
+            await #expect(throws: CloudTranscriptionError.limitReached) { try await transcriber.finishUtterance() }
+        }
+        // The second one met the pause, which skips the cloud: still nothing on the iPhone.
+        #expect(cloud.calls.count == 1)
+        #expect(onDevice.finished == 0 && onDevice.abandoned == 2)
+
+        // Past the reset by the iPhone's clock (or a clock moved on), and the server hasn't said
+        // the words are back: still nothing on the iPhone, and the cloud's own failure is the reason.
+        settings.wordsUsedUpUntil = Date().addingTimeInterval(-60)
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        await #expect(throws: CloudTranscriptionError.unavailable("The cloud is paused after a failure.")) {
+            try await transcriber.finishUtterance()
+        }
+        #expect(onDevice.finished == 0)
+
+        // The server said there are words (a new week, Pro): offline dictations are recognized
+        // on the iPhone again.
+        settings.wordsUsedUpUntil = nil
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        #expect(try await transcriber.finishUtterance() == "Recognized on the iPhone.")
+    }
+
+    /// The dictation that spends the last words answers 200 with none left: the next tap shows the
+    /// way to Pro. A reply with words left (a new week) lifts that.
+    @Test func theWordsLeftInAReplyAreKept() async throws {
+        let cloud = FakeCloud()
+        cloud.result = .success("see you at five")
+        cloud.remaining = 0
+        let transcriber = OpenAITranscriber(client: cloud)
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        let settings = limitSettings()
+        let pipeline = DictationPipeline(cleanup: TimedCleanup(), settings: settings)
+
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        let spent = await pipeline.complete(dictation(style: .verbatim), transcriber: transcriber, audioSeconds: 1,
+                                            stoppedAt: ContinuousClock.now)
+        #expect(spent.result.isInsertable)
+        #expect(settings.wordsUsedUp())
+
+        cloud.remaining = 1_000
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        _ = await pipeline.complete(dictation(style: .verbatim), transcriber: transcriber, audioSeconds: 1,
+                                    stoppedAt: ContinuousClock.now)
+        #expect(settings.wordsUsedUpUntil == nil)
+
+        // Pro answers no count: nothing changes.
+        settings.noteWordsUsedUp()
+        cloud.remaining = nil
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        _ = await pipeline.complete(dictation(style: .verbatim), transcriber: transcriber, audioSeconds: 1,
+                                    stoppedAt: ContinuousClock.now)
+        #expect(settings.wordsUsedUp())
+    }
+
+    /// Word for word at the limit, with the iPhone's model ready: nothing for the keyboard or the
+    /// history, the limit's notice, and no dictation until the week resets.
+    @Test func pastTheLimitTheKeyboardAndTheHistoryGetNoText() async throws {
+        let cloud = FakeCloud()
+        cloud.result = .failure(.limitReached)
+        let onDevice = FakeOnDevice()
+        let transcriber = OpenAITranscriber(client: cloud, fallback: onDevice, fallbackLanguages: ["ru-RU": russian])
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        await transcriber.prepareFallback()
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        let settings = limitSettings()
+
+        let outcome = await DictationPipeline(cleanup: TimedCleanup(), settings: settings).complete(
+            dictation(style: .verbatim), transcriber: transcriber, audioSeconds: 1, stoppedAt: ContinuousClock.now)
+
+        #expect(outcome.result.status == .limitReached && outcome.result.text.isEmpty)
+        #expect(!outcome.result.isInsertable)
+        #expect(outcome.result.message == Brand.limitReachedMessage)
+        #expect(outcome.transcript.rawText.isEmpty && outcome.transcript.cleanedText == nil)
+        #expect(outcome.transcript.displayText.isEmpty && !outcome.transcript.isInsertable)
+        #expect(settings.wordsUsedUp())
+        let reset = try #require(settings.wordsUsedUpUntil)
+        #expect(reset == WeeklyWords.nextReset(after: Date()))
+    }
+
+    /// The cloud transcribed it (the server checked the words first), and the words ran out at the
+    /// cleanup: it goes in as the iPhone formatted it, and the notice follows.
+    @Test func theDictationThatUsedTheLastWordsGoesInWithTheNotice() async throws {
+        let cloud = FakeCloud()
+        cloud.result = .success("see you at the station at five")
+        let transcriber = OpenAITranscriber(client: cloud)
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        let settings = limitSettings()
+        let cleanup = RefusingCleanup()
+
+        let outcome = await DictationPipeline(cleanup: cleanup, settings: settings).complete(
+            dictation(style: .grammar), transcriber: transcriber, audioSeconds: 1, stoppedAt: ContinuousClock.now)
+
+        #expect(cleanup.calls == 1)
+        #expect(outcome.result.status == .raw && outcome.result.isInsertable)
+        #expect(outcome.result.text.localizedCaseInsensitiveContains("see you at the station"))
+        #expect(outcome.result.message == Brand.limitReachedMessage)
+        #expect(outcome.transcript.status == .raw && outcome.transcript.rawText == "see you at the station at five")
+        #expect(outcome.transcript.errorReason == "Dictation limit reached.")
+        #expect(settings.wordsUsedUp())
+    }
+
+    /// The iPhone recognized it while the cloud was out of reach, then the cleanup found the words
+    /// gone: nothing the server never took goes in, or into the history.
+    @Test func anIPhoneTranscriptRefusedAtTheCleanupDoesNotGoIn() async throws {
+        let cloud = FakeCloud()
+        cloud.result = .failure(.unavailable("offline"))
+        let onDevice = FakeOnDevice()
+        let transcriber = OpenAITranscriber(client: cloud, fallback: onDevice, fallbackLanguages: ["ru-RU": russian])
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        await transcriber.prepareFallback()
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        let settings = limitSettings()
+        let cleanup = RefusingCleanup()
+
+        let outcome = await DictationPipeline(cleanup: cleanup, settings: settings).complete(
+            dictation(style: .grammar), transcriber: transcriber, audioSeconds: 1, stoppedAt: ContinuousClock.now)
+
+        #expect(onDevice.finished == 1 && cleanup.calls == 1)
+        #expect(outcome.result.status == .limitReached && outcome.result.text.isEmpty)
+        #expect(outcome.result.message == Brand.limitReachedMessage)
+        #expect(outcome.transcript.rawText.isEmpty && outcome.transcript.displayText.isEmpty)
+        #expect(outcome.transcript.metrics.words == 0)
+        #expect(settings.wordsUsedUp())
+    }
+
+    /// A translation refused at the limit keeps nothing, not even the transcript it was heard as.
+    @Test func aTranslationRefusedAtTheLimitKeepsNoTranscript() async throws {
+        let cloud = FakeCloud()
+        cloud.result = .success("see you at the station at five")
+        let transcriber = OpenAITranscriber(client: cloud)
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        let settings = limitSettings()
+
+        let outcome = await DictationPipeline(cleanup: RefusingCleanup(), settings: settings).complete(
+            dictation(style: .verbatim, target: "en-US"), transcriber: transcriber, audioSeconds: 1,
+            stoppedAt: ContinuousClock.now)
+
+        #expect(outcome.result.status == .limitReached && outcome.result.text.isEmpty)
+        #expect(outcome.transcript.rawText.isEmpty && outcome.transcript.displayText.isEmpty)
+        #expect(settings.wordsUsedUp())
+    }
+
+    /// Retry and Regenerate at the limit change nothing: the stored text stays, and the user is
+    /// told why.
+    @Test func regenerateAtTheLimitLeavesTheTranscriptAsItWas() async throws {
+        let settings = limitSettings()
+        let stored = Transcript(rawText: "see you at the station at five", cleanedText: "See you at the station at five.",
+                                status: .cleaned)
+        do {
+            _ = try await DictationPipeline(cleanup: RefusingCleanup(), settings: settings).recleanup(stored)
+            Issue.record("Regenerate at the limit gave a transcript to store")
+        } catch {
+            guard case .limitReached = error else {
+                Issue.record("expected limitReached, got \(error)")
+                return
+            }
+        }
+        #expect(settings.wordsUsedUp())
+    }
+
+    /// Release builds never take the Debug screen's recognizer, which would skip the server.
+    @Test func theRecognizerSettingIsOnlyADebugChoice() {
+        #expect(TranscriberEngine.resolve(stored: "onDevice", debug: false) == .auto)
+        #expect(TranscriberEngine.resolve(stored: "stub", debug: false) == .auto)
+        #expect(TranscriberEngine.resolve(stored: "onDevice", debug: true) == .onDevice)
+        #expect(TranscriberEngine.resolve(stored: nil, debug: true) == .auto)
+        #expect(TranscriberEngine.resolve(stored: "nonsense", debug: true) == .auto)
     }
 }

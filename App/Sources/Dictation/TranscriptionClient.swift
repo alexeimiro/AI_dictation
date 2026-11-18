@@ -17,6 +17,13 @@ enum CloudTranscriptionError: LocalizedError, Equatable {
     /// goes to `transcribe` instead, so the user never sees it.
     case notDeployed
 
+    /// The server answered for this account and said no: its weekly words are used up, or it sent
+    /// too many dictations a minute. Recognizing the dictation on the iPhone instead would get
+    /// around the refusal.
+    var refusesAccount: Bool {
+        self == .limitReached || self == .rateLimited
+    }
+
     var errorDescription: String? {
         switch self {
         case .notConfigured: "Transcription isn't configured in this build."
@@ -58,11 +65,14 @@ struct CloudTranscript: Sendable {
     /// The languages OpenAI heard, first the main one (ISO 639-1: "tr"); empty when it couldn't tell.
     let languages: [String]
     let timing: RequestTiming?
+    /// The free words the server says are left after this dictation; nil on Pro, or unsaid.
+    var remaining: Int?
 
-    init(text: String, languages: [String] = [], timing: RequestTiming?) {
+    init(text: String, languages: [String] = [], timing: RequestTiming?, remaining: Int? = nil) {
         self.text = text
         self.languages = languages
         self.timing = timing
+        self.remaining = remaining
     }
 }
 
@@ -85,6 +95,7 @@ final class TranscriptionClient: CloudTranscribing {
     private struct Response: Decodable, Sendable {
         let text: String
         let languages: [String]?
+        let remaining: Int?
     }
 
     private struct RequestBody: Encodable {
@@ -118,7 +129,8 @@ final class TranscriptionClient: CloudTranscribing {
             let reply = try await functions.post(
                 "transcribe", body: body, extraHeaders: Self.headers(naming: dictationId), timeout: timeout)
             let response = try JSONDecoder().decode(Response.self, from: reply.data)
-            return CloudTranscript(text: response.text, languages: response.languages ?? [], timing: reply.timing)
+            return CloudTranscript(text: response.text, languages: response.languages ?? [], timing: reply.timing,
+                                   remaining: response.remaining)
         } catch {
             throw CloudTranscriptionError(error)
         }

@@ -406,6 +406,9 @@ final class DictationEngine {
                            detail: "Hold fn while you speak, then let go."))
             case .cancelled:
                 break
+            case .limitReached:
+                show(.init(kind: .limitReached, title: "You've used this week's free words",
+                           detail: "Upgrade to Pro for unlimited words."))
             default:
                 show(.init(kind: .failed, title: "Couldn't write that",
                            detail: result.message ?? "Check your connection and try again."))
@@ -426,9 +429,10 @@ final class DictationEngine {
             show(.init(kind: .copied, title: "Copied. Press ⌘V to paste.",
                        detail: "There was no text box to type into."))
         }
-        if result.status == .limitReached {
+        // The last dictation before the words ran out went in; the next one won't.
+        if result.message == Brand.limitReachedMessage {
             show(.init(kind: .limitReached, title: "You've used this week's free words",
-                       detail: result.message ?? "Upgrade to Pro for unlimited words."))
+                       detail: "Upgrade to Pro for unlimited words."))
         }
         return outcome
     }

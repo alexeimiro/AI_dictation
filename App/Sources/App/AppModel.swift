@@ -239,6 +239,8 @@ final class AppModel {
         }
         // `Backend.init` has already taken a stored session; Auth's own events come after this.
         account?.onChange = { [weak self] in self?.accountDidChange() }
+        // Also at launch: an account signed in before this build hasn't had its id noted yet.
+        keepWordsMark()
         publishSignIn()
         if !launchOptions.useFixtures && !launchOptions.usesOnboardingFixtures { pro.start() }
         if launchOptions.route == .paywall { showsPaywall = true }
@@ -493,10 +495,46 @@ final class AppModel {
         guard !launchOptions.useFixtures, launchOptions.accountState == nil, onboarding.isComplete else { return }
         Task {
             do {
-                if let quota = try await accountService.quota() { self.quota = quota }
+                if let quota = try await accountService.quota() {
+                    self.quota = quota
+                    Self.recordWordsLeft(quota, in: SharedSettings.shared)
+                }
             } catch {
                 // Offline or signed out: the menu keeps the last answer.
             }
+        }
+    }
+
+    /// What the plan says about the free words, for the keyboard's mic and the session
+    /// (`SharedSettings.wordsUsedUpUntil`): used up until the next reset on Basic with none left,
+    /// otherwise not (Pro, a trial, a new week, words from an invite).
+    nonisolated static func recordWordsLeft(_ quota: AccountService.Quota, in settings: SharedSettings,
+                                            now: Date = Date()) {
+        if quota.isPro {
+            settings.wordsUsedUpUntil = nil
+        } else if let remaining = quota.remaining {
+            settings.noteWordsLeft(remaining, at: now)
+        }
+    }
+
+    private func keepWordsMark() {
+        guard !launchOptions.useFixtures, launchOptions.accountState == nil else { return }
+        let signedIn: UUID? = if case .signedIn(let account) = account?.state { account.userID } else { nil }
+        Self.keepWordsMark(for: signedIn, in: SharedSettings.shared, defaults: .standard)
+    }
+
+    /// The account whose words `SharedSettings.wordsUsedUpUntil` is about: the last one signed in.
+    private nonisolated static let wordsAccountKey = "weeklyWords.account"
+
+    /// The used-up mark belongs to the account it was said of. Signing out keeps it, so signing the
+    /// same account in again (offline, before the plan is read) doesn't bring the words back;
+    /// another account starts without it.
+    nonisolated static func keepWordsMark(for signedIn: UUID?, in settings: SharedSettings, defaults: UserDefaults) {
+        guard let signedIn else { return }
+        let last = defaults.string(forKey: wordsAccountKey).flatMap(UUID.init(uuidString:))
+        if last != signedIn {
+            settings.wordsUsedUpUntil = nil
+            defaults.set(signedIn.uuidString, forKey: wordsAccountKey)
         }
     }
 
@@ -617,6 +655,7 @@ final class AppModel {
     /// itself after it. Signed in again, a start refused while signed out stops showing its
     /// reason on Home.
     private func accountDidChange() {
+        keepWordsMark()
         publishSignIn()
         if maySignedInDictate {
             if case .failed(let message) = session.phase,

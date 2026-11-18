@@ -70,12 +70,19 @@ struct UtteranceOutput: Sendable {
     /// as the cloud heard it or as the fallback recognized it. Nil for a dictation in a chosen
     /// language, or when the cloud couldn't tell.
     var detectedLanguage: String?
+    /// The cloud heard it, so the server checked the account's words first. False for the
+    /// on-device fallback's transcript and for an on-device transcriber.
+    var heardInCloud = false
+    /// The free words the transcription's reply says are left; nil on Pro, or unsaid.
+    var wordsLeft: Int?
 
     init(transcript: String, modelReply: Result<CleanupClient.Response, CleanupClient.Failure>? = nil,
-         detectedLanguage: String? = nil) {
+         detectedLanguage: String? = nil, heardInCloud: Bool = false, wordsLeft: Int? = nil) {
         self.transcript = transcript
         self.modelReply = modelReply
         self.detectedLanguage = detectedLanguage
+        self.heardInCloud = heardInCloud
+        self.wordsLeft = wordsLeft
     }
 }
 
@@ -137,8 +144,21 @@ enum TranscriberEngine: String, CaseIterable, Identifiable {
         }
     }
 
+    /// The Debug screen's choice. A Release build always takes `auto`: a value a Debug build left in
+    /// the App Group must never have it recognize every dictation on the iPhone, which the server
+    /// neither sees nor counts.
     static var current: TranscriberEngine {
-        SharedSettings.shared.transcriberEngine.flatMap(TranscriberEngine.init(rawValue:)) ?? .auto
+        #if DEBUG
+        resolve(stored: SharedSettings.shared.transcriberEngine, debug: true)
+        #else
+        resolve(stored: SharedSettings.shared.transcriberEngine, debug: false)
+        #endif
+    }
+
+    /// `stored`: the Debug screen's choice, which only a Debug build takes.
+    static func resolve(stored: String?, debug: Bool) -> TranscriberEngine {
+        guard debug else { return .auto }
+        return stored.flatMap(TranscriberEngine.init(rawValue:)) ?? .auto
     }
 
     /// Debug: the on-device engine forced for every language, or nil for automatic selection.
