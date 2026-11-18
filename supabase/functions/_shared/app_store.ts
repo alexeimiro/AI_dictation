@@ -1,16 +1,9 @@
 // App Store subscriptions: StoreKit 2's signed transactions and Apple's server notifications are
-// verified with Apple's own library against the pinned root certificates, and each one decides
-// the account's entitlement: Pro until the subscription expires, Basic once it's expired, refunded
-// or revoked. The handlers take their dependencies (`PurchaseDeps`, `NotificationDeps`) so the
-// tests drive them offline.
-import { Buffer } from "node:buffer";
-import {
-  Environment,
-  type JWSRenewalInfoDecodedPayload,
-  type JWSTransactionDecodedPayload,
-  type ResponseBodyV2DecodedPayload,
-  SignedDataVerifier,
-} from "npm:@apple/app-store-server-library@3.1.0";
+// verified against Apple's pinned root certificates (apple_jws.ts), and each one decides the
+// account's entitlement: Pro until the subscription expires, Basic once it's expired, refunded or
+// revoked. The handlers take their dependencies (`PurchaseDeps`, `NotificationDeps`) so the tests
+// drive them offline.
+import { appleJwsVerifier, VerificationError } from "./apple_jws.ts";
 import { APPLE_ROOT_CERTIFICATES } from "./apple_roots.ts";
 import { type Caller, corsHeaders, json } from "./http.ts";
 
@@ -80,60 +73,142 @@ export function decide(transaction: TransactionInfo, now: number, graceUntil?: n
 
 // MARK: - Verification
 
+/** Apple's renewal info (its JWSRenewalInfoDecodedPayload): the part used here. */
+export interface RenewalInfo {
+  /** Milliseconds since 1970: the end of a billing grace period. */
+  gracePeriodExpiresDate?: number;
+  environment?: string;
+}
+
+/** Whose app a notification is about: in its `data`, or in the `summary` of a bulk one. */
+interface NotificationApp {
+  bundleId?: unknown;
+  appAppleId?: unknown;
+  environment?: unknown;
+}
+
+/** An App Store Server Notification V2 (Apple's ResponseBodyV2DecodedPayload): the parts used here. */
+export interface NotificationPayload {
+  notificationType?: string;
+  subtype?: string;
+  notificationUUID?: string;
+  data?: NotificationApp & { signedTransactionInfo?: string; signedRenewalInfo?: string };
+  summary?: NotificationApp;
+  /** RESCIND_CONSENT's app. */
+  appData?: NotificationApp;
+  externalPurchaseToken?: { bundleId?: unknown; appAppleId?: unknown; externalPurchaseId?: unknown };
+}
+
 export interface Verifier {
   transaction(jws: string): Promise<TransactionInfo>;
-  renewal(jws: string): Promise<JWSRenewalInfoDecodedPayload>;
-  notification(signedPayload: string): Promise<ResponseBodyV2DecodedPayload>;
+  renewal(jws: string): Promise<RenewalInfo>;
+  notification(signedPayload: string): Promise<NotificationPayload>;
 }
 
 /**
- * Apple's verifiers for Production and, unless `allowSandbox` is false, Sandbox (TestFlight and
- * development purchases, which the same backend serves). The JWS names its environment; the
- * matching verifier then checks the signature, the chain to Apple's roots (online, with
- * `onlineChecks`), the bundle ID and that environment.
+ * Apple's signed data for this app, Production and, unless `allowSandbox` is false, Sandbox
+ * (TestFlight and development purchases, which the same backend serves). The signature and the
+ * chain to Apple's roots are apple_jws.ts's; then what Apple's SignedDataVerifier checks after
+ * them: a transaction's bundle ID and environment, a renewal's environment, and a notification's
+ * bundle ID, environment and, in Production, the app's Apple ID. There's no online revocation
+ * check: Apple's can't run on the edge runtime, and it never did. `roots` and `now` are for tests.
  */
-export function appleVerifier(options: { allowSandbox: boolean; onlineChecks: boolean }): Verifier {
-  const roots = APPLE_ROOT_CERTIFICATES.map((certificate) => Buffer.from(certificate, "base64"));
-  const production = new SignedDataVerifier(
-    roots, options.onlineChecks, Environment.PRODUCTION, APP_STORE.bundleId, APP_STORE.appAppleId);
-  const sandbox = new SignedDataVerifier(roots, options.onlineChecks, Environment.SANDBOX, APP_STORE.bundleId);
-  const pick = (environment: unknown) => {
-    if (environment !== "Sandbox") return production;
-    if (!options.allowSandbox) throw new Error("sandbox purchases are not accepted");
-    return sandbox;
+export function appleVerifier(options: {
+  allowSandbox: boolean;
+  roots?: readonly string[];
+  now?: () => number;
+}): Verifier {
+  const verify = appleJwsVerifier(options.roots ?? APPLE_ROOT_CERTIFICATES, options.now);
+  const environment = (value: unknown): "Production" | "Sandbox" => {
+    if (value === "Production") return value;
+    if (value !== "Sandbox") throw new VerificationError("environment");
+    if (!options.allowSandbox) throw new VerificationError("sandbox purchases are not accepted");
+    return value;
   };
   return {
     async transaction(jws) {
-      const payload: JWSTransactionDecodedPayload = await pick(peek(jws)?.environment).verifyAndDecodeTransaction(jws);
+      const payload = await verify(jws);
+      const signedFor = environment(payload.environment);
+      if (payload.bundleId !== APP_STORE.bundleId) throw new VerificationError("bundle_id");
       return {
-        originalTransactionId: payload.originalTransactionId,
-        transactionId: payload.transactionId,
-        productId: payload.productId,
-        bundleId: payload.bundleId,
-        expiresDate: payload.expiresDate,
-        revocationDate: payload.revocationDate,
-        appAccountToken: payload.appAccountToken,
-        environment: payload.environment,
+        originalTransactionId: text(payload.originalTransactionId),
+        transactionId: text(payload.transactionId),
+        productId: text(payload.productId),
+        bundleId: text(payload.bundleId),
+        expiresDate: number(payload.expiresDate),
+        revocationDate: number(payload.revocationDate),
+        appAccountToken: text(payload.appAccountToken),
+        environment: signedFor,
       };
     },
-    renewal: (jws) => pick(peek(jws)?.environment).verifyAndDecodeRenewalInfo(jws),
-    notification: (signedPayload) => {
-      const data = peek(signedPayload)?.data as Record<string, unknown> | undefined;
-      return pick(data?.environment).verifyAndDecodeNotification(signedPayload);
+    async renewal(jws) {
+      const payload = await verify(jws);
+      return {
+        environment: environment(payload.environment),
+        gracePeriodExpiresDate: number(payload.gracePeriodExpiresDate),
+      };
+    },
+    async notification(signedPayload) {
+      const payload = await verify(signedPayload);
+      // Where Apple's library looks, in its order; an external purchase token's environment is in its ID.
+      const token = record(payload.externalPurchaseToken);
+      const app = record(payload.data) ?? record(payload.summary) ??
+        (token && {
+          ...token,
+          environment: String(token.externalPurchaseId ?? "").startsWith("SANDBOX") ? "Sandbox" : "Production",
+        }) ??
+        record(payload.appData);
+      const signedFor = environment(app?.environment);
+      if (app?.bundleId !== APP_STORE.bundleId) throw new VerificationError("bundle_id");
+      if (signedFor === "Production" && app?.appAppleId !== APP_STORE.appAppleId) {
+        throw new VerificationError("app_apple_id");
+      }
+      return payload as NotificationPayload;
     },
   };
 }
 
-/** A JWS payload read without verifying it, only to pick the verifier that then checks it. */
-function peek(jws: string): Record<string, unknown> | null {
-  const part = jws.split(".")[1];
-  if (!part) return null;
+function text(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function number(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/** The request's JSON body, or null when it isn't JSON or is longer than `limit` bytes (not read further). */
+async function readJson(request: Request, limit: number): Promise<unknown> {
+  if (Number(request.headers.get("content-length") ?? 0) > limit || !request.body) return null;
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
   try {
-    const base64 = part.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(part.length / 4) * 4, "=");
-    return JSON.parse(atob(base64)) as Record<string, unknown>;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > limit) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+    const bytes = new Uint8Array(size);
+    let at = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, at);
+      at += chunk.length;
+    }
+    return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     return null;
   }
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
 }
 
 // MARK: - The app's purchases
@@ -182,7 +257,7 @@ export function createPurchaseHandler(deps: PurchaseDeps): (request: Request) =>
     if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
     const caller = await deps.authenticate(request);
     if (!caller) return json({ error: "unauthorized" }, 401);
-    const body = await request.json().catch(() => null) as { transaction?: unknown } | null;
+    const body = await readJson(request, 64 * 1024) as { transaction?: unknown } | null;
     if (typeof body?.transaction !== "string" || body.transaction.length > 20_000) {
       return json({ error: "bad_request" }, 400);
     }
@@ -244,9 +319,10 @@ function isMissingAccount(error: unknown): boolean {
 export function createNotificationHandler(deps: NotificationDeps): (request: Request) => Promise<Response> {
   return async (request) => {
     if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-    const body = await request.json().catch(() => null) as { signedPayload?: unknown } | null;
+    // Anyone can post here: Apple's own notification is about 20 KB.
+    const body = await readJson(request, 256 * 1024) as { signedPayload?: unknown } | null;
     if (typeof body?.signedPayload !== "string") return json({ error: "bad_request" }, 400);
-    let notification: ResponseBodyV2DecodedPayload;
+    let notification: NotificationPayload;
     let transaction: TransactionInfo | null = null;
     let graceUntil: number | undefined;
     try {

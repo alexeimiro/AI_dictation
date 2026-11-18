@@ -13,7 +13,7 @@ import { adminClient } from "../_shared/http.ts";
 const admin = adminClient();
 
 Deno.serve(createNotificationHandler({
-  verifier: appleVerifier({ allowSandbox: Deno.env.get("APP_STORE_SANDBOX") !== "0", onlineChecks: true }),
+  verifier: appleVerifier({ allowSandbox: Deno.env.get("APP_STORE_SANDBOX") !== "0" }),
   ownerOf: (originalTransactionId) => subscriptionOwner(admin, originalTransactionId),
   apply: (userId, update) => applyEntitlement(admin, userId, update),
 }));

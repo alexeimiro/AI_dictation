@@ -240,10 +240,10 @@ Deno.test("a test notification is fine and an unverifiable one is refused", asyn
   assertEquals(applied.length, 0);
 });
 
+// The real verifier's checks, and Apple's own signed data, are in _shared/apple_jws_test.ts.
 Deno.test("Apple's verifier rejects a forged transaction without going online", async () => {
-  const verifier = appleVerifier({ allowSandbox: true, onlineChecks: false });
   const forged = [btoa(JSON.stringify({ alg: "ES256", x5c: ["AA=="] })), btoa(JSON.stringify(monthly)), "sig"].join(".");
-  await assertRejects(() => verifier.transaction(forged));
-  const sandboxOff = appleVerifier({ allowSandbox: false, onlineChecks: false });
-  await assertRejects(() => sandboxOff.transaction(forged), Error, "sandbox");
+  for (const allowSandbox of [true, false]) {
+    await assertRejects(() => appleVerifier({ allowSandbox }).transaction(forged), Error, "chain_length");
+  }
 });
