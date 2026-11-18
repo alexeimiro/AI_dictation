@@ -109,7 +109,7 @@ struct StylePage: View {
     private func icon(_ style: StylePreset, selected: Bool) -> some View {
         let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
         return Image(systemName: style.symbolName)
-            .font(.system(size: 14, weight: .semibold))
+            .font(.system(size: 14, weight: .medium))
             .foregroundStyle(selected ? KeyboardChrome.primaryGlyph : KeyboardChrome.muted)
             .frame(width: 30, height: 30)
             .background(selected ? KeyboardChrome.primary : .clear, in: shape)
