@@ -115,14 +115,19 @@ private final class RefusingCleanup: Cleaning {
     }
 }
 
-/// Stands in for the on-device transcriber.
-private final class FakeOnDevice: Transcriber, @unchecked Sendable {
+/// Stands in for the on-device transcriber. It has words for a dictation begun with live words,
+/// which the test speaks (`say`).
+private final class FakeOnDevice: Transcriber, LiveWordsProviding, @unchecked Sendable {
     let displayName = "On-device"
     /// How long ending a dictation takes; an analyzer can take a while to finish.
     private let teardownDelay: Duration
     private let lock = NSLock()
     private var _preparedTag: String?
     private var _begun = 0
+    private var _liveBegun = 0
+    /// The handler the dictation was begun with, kept after it ended, as a recognizer still at
+    /// work could; a dictation begun without live words has none.
+    private var handler: LiveWordsHandler?
     private var _appended = 0
     private var _finished = 0
     private var _cancelled = 0
@@ -134,7 +139,10 @@ private final class FakeOnDevice: Transcriber, @unchecked Sendable {
 
     var currentLanguage: ResolvedLanguage? { nil }
     var preparedTag: String? { lock.withLock { _preparedTag } }
+    /// The dictations begun without live words.
     var begun: Int { lock.withLock { _begun } }
+    /// The dictations begun with live words.
+    var liveBegun: Int { lock.withLock { _liveBegun } }
     var appended: Int { lock.withLock { _appended } }
     var finished: Int { lock.withLock { _finished } }
     var cancelled: Int { lock.withLock { _cancelled } }
@@ -144,7 +152,23 @@ private final class FakeOnDevice: Transcriber, @unchecked Sendable {
         lock.withLock { _preparedTag = language.tag }
     }
     func setLanguage(_ language: ResolvedLanguage) {}
-    func beginUtterance() { lock.withLock { _begun += 1 } }
+    func beginUtterance() {
+        lock.withLock {
+            _begun += 1
+            handler = nil
+        }
+    }
+    func beginUtterance(liveWords handler: @escaping LiveWordsHandler) -> Bool {
+        lock.withLock {
+            _liveBegun += 1
+            self.handler = handler
+        }
+        return true
+    }
+    /// The words recognized so far, to whoever began the dictation with live words.
+    func say(_ settled: String, _ unsettled: String = "") {
+        lock.withLock { handler }?(settled, unsettled)
+    }
     func append(_ buffer: AVAudioPCMBuffer) { lock.withLock { _appended += 1 } }
     func finishUtterance() async throws -> String {
         lock.withLock { _finished += 1 }
@@ -162,6 +186,18 @@ private final class FakeOnDevice: Transcriber, @unchecked Sendable {
         Task { [teardownDelay] in try? await Task.sleep(for: teardownDelay) }
     }
     func shutdown() async {}
+}
+
+/// The live words a transcriber reported, in order.
+private final class HeardWords: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _all: [String] = []
+
+    /// Each report as it reads: `settled + unsettled`.
+    var all: [String] { lock.withLock { _all } }
+    var handler: LiveWordsHandler {
+        { [self] settled, unsettled in lock.withLock { _all.append(settled + unsettled) } }
+    }
 }
 
 @MainActor
@@ -1005,6 +1041,109 @@ struct OpenAITranscriberTests {
         #expect(!TranscriberEngine.stub.usesCloud(cloudAvailable: true))
     }
 
+    // MARK: Live words
+
+    /// The on-device model that listens beside the cloud is also what the keyboard's live words
+    /// come from: begun with them, it reports to the handler the dictation was begun with.
+    @Test func theFallbacksWordsAreHeardWhileItListens() async throws {
+        let onDevice = FakeOnDevice()
+        let transcriber = OpenAITranscriber(client: FakeCloud(), fallback: onDevice,
+                                            fallbackLanguages: ["ru-RU": russian])
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        await transcriber.prepareFallback()
+        let heard = HeardWords()
+
+        #expect(transcriber.beginUtterance(liveWords: heard.handler))
+
+        #expect(onDevice.liveBegun == 1 && onDevice.begun == 0)
+        onDevice.say("Привет,", " как")
+        onDevice.say("Привет, как дела")
+        #expect(heard.all == ["Привет, как", "Привет, как дела"])
+        // It is still the fallback: fed the same audio.
+        feed(transcriber, seconds: 1)
+        #expect(onDevice.appended > 0)
+
+        // A dictation begun without live words shows none.
+        transcriber.abandonUtterance()
+        transcriber.beginUtterance()
+        #expect(onDevice.liveBegun == 1 && onDevice.begun == 1)
+        onDevice.say("ещё слова")
+        #expect(heard.all.count == 2)
+    }
+
+    /// No on-device model listens to the dictation (the fallback isn't prepared yet, there is
+    /// none, or it doesn't know the language): there are no live words, the fallback isn't begun,
+    /// and the dictation has begun all the same.
+    @Test func withoutAPreparedFallbackThereAreNoLiveWords() async throws {
+        let cloud = FakeCloud()
+        let onDevice = FakeOnDevice()
+        let heard = HeardWords()
+        let unprepared = OpenAITranscriber(client: cloud, fallback: onDevice, fallbackLanguages: ["ru-RU": russian])
+        try await unprepared.prepare(micFormat: micFormat, language: russian)
+        #expect(!unprepared.beginUtterance(liveWords: heard.handler))
+        #expect(onDevice.begun == 0 && onDevice.liveBegun == 0)
+        feed(unprepared, seconds: 1)
+        #expect(try await unprepared.finishUtterance() == "Hello from OpenAI.")
+
+        let alone = OpenAITranscriber(client: cloud)
+        try await alone.prepare(micFormat: micFormat, language: russian)
+        #expect(!alone.beginUtterance(liveWords: heard.handler))
+        feed(alone, seconds: 1)
+        #expect(try await alone.finishUtterance() == "Hello from OpenAI.")
+
+        // Only English is installed on the device; this dictation is in Russian.
+        let english = ResolvedLanguage(tag: "en-US", locale: Locale(identifier: "en-US"), engine: .speech)
+        let other = OpenAITranscriber(client: cloud, fallback: onDevice, fallbackLanguages: ["en-US": english])
+        try await other.prepare(micFormat: micFormat, language: russian)
+        await other.prepareFallback()
+        #expect(!other.beginUtterance(liveWords: heard.handler))
+        #expect(onDevice.begun == 0 && onDevice.liveBegun == 0)
+        #expect(heard.all.isEmpty)
+    }
+
+    /// Under Auto-detect the words come in the installed language the session guesses; without a
+    /// guess there are none.
+    @Test func underAutoDetectTheLiveWordsAreInTheGuessedLanguage() async throws {
+        let onDevice = FakeOnDevice()
+        let transcriber = OpenAITranscriber(client: FakeCloud(), fallback: onDevice,
+                                            fallbackLanguages: ["ru-RU": russian])
+        try await transcriber.prepare(micFormat: micFormat, language: automatic)
+        await transcriber.prepareFallback()
+        let heard = HeardWords()
+        #expect(!transcriber.beginUtterance(liveWords: heard.handler))
+        #expect(onDevice.begun == 0 && onDevice.liveBegun == 0)
+        transcriber.abandonUtterance()
+
+        transcriber.setAutomaticFallback(russian)
+        await transcriber.prepareFallback()
+        #expect(onDevice.preparedTag == "ru-RU")
+        #expect(transcriber.beginUtterance(liveWords: heard.handler))
+        #expect(onDevice.liveBegun == 1)
+        onDevice.say("Привет")
+        #expect(heard.all == ["Привет"])
+    }
+
+    /// The words on the keyboard are only a preview: the cloud's transcript is the dictation's
+    /// text, and the fallback that said them is dropped without being asked for its own.
+    @Test func theCloudsTranscriptIsTheResultWhateverTheLiveWordsSaid() async throws {
+        let onDevice = FakeOnDevice()
+        let transcriber = OpenAITranscriber(client: FakeCloud(), fallback: onDevice,
+                                            fallbackLanguages: ["ru-RU": russian])
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        await transcriber.prepareFallback()
+        let heard = HeardWords()
+        #expect(transcriber.beginUtterance(liveWords: heard.handler))
+        feed(transcriber, seconds: 1)
+        onDevice.say("something else", " entirely")
+
+        let output = try await transcriber.finishUtterance(model: nil)
+
+        #expect(heard.all == ["something else entirely"])
+        #expect(output.transcript == "Hello from OpenAI.")
+        #expect(output.heardInCloud)
+        #expect(onDevice.finished == 0 && onDevice.abandoned == 1)
+    }
+
     // MARK: The free plan's weekly limit
 
     /// Its own settings, so a test's "words used up" stays its own.
@@ -1100,6 +1239,74 @@ struct OpenAITranscriberTests {
         transcriber.beginUtterance()
         feed(transcriber, seconds: 1)
         #expect(try await transcriber.finishUtterance() == "Recognized on the iPhone.")
+    }
+
+    /// While the week's words were said to be used up and the server hasn't said they are back
+    /// (until the reset, and past it by the iPhone's clock), nothing the fallback hears is shown.
+    /// It listens and is fed as before, begun without live words. Once the server says there are
+    /// words, the next dictation shows them again.
+    @Test(arguments: [3_600.0, -60.0])
+    func noLiveWordsWhileTheWeeksWordsWaitForTheServer(resetIn: TimeInterval) async throws {
+        let onDevice = FakeOnDevice()
+        let settings = limitSettings()
+        settings.wordsUsedUpUntil = Date().addingTimeInterval(resetIn)
+        let transcriber = OpenAITranscriber(client: FakeCloud(), fallback: onDevice,
+                                            fallbackLanguages: ["ru-RU": russian],
+                                            wordsUsedUpUntil: { settings.wordsUsedUpUntil })
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        await transcriber.prepareFallback()
+        let heard = HeardWords()
+
+        #expect(!transcriber.beginUtterance(liveWords: heard.handler))
+
+        #expect(onDevice.liveBegun == 0 && onDevice.begun == 1)
+        feed(transcriber, seconds: 1)
+        #expect(onDevice.appended > 0)
+        onDevice.say("Привет", " как дела")
+        #expect(heard.all.isEmpty)
+        #expect(try await transcriber.finishUtterance() == "Hello from OpenAI.")
+
+        settings.wordsUsedUpUntil = nil
+        #expect(transcriber.beginUtterance(liveWords: heard.handler))
+        #expect(onDevice.liveBegun == 1 && onDevice.begun == 1)
+        onDevice.say("Привет", " как дела")
+        #expect(heard.all == ["Привет как дела"])
+    }
+
+    /// The server refused the dictation for the week's words, and its words were on the keyboard
+    /// while it was spoken: the iPhone's own recognition still doesn't stand in for it, and nothing
+    /// of what was shown reaches the keyboard's field or the history.
+    @Test func aRefusedDictationIsStillNeverRecognizedWithLiveWordsOn() async throws {
+        let cloud = FakeCloud()
+        cloud.result = .failure(.limitReached)
+        let onDevice = FakeOnDevice()
+        let transcriber = OpenAITranscriber(client: cloud, fallback: onDevice, fallbackLanguages: ["ru-RU": russian])
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        await transcriber.prepareFallback()
+        let heard = HeardWords()
+        #expect(transcriber.beginUtterance(liveWords: heard.handler))
+        feed(transcriber, seconds: 1)
+        onDevice.say("увидимся на вокзале", " в пять")
+        #expect(heard.all == ["увидимся на вокзале в пять"])
+        #expect(onDevice.appended > 0)
+
+        await #expect(throws: CloudTranscriptionError.limitReached) { try await transcriber.finishUtterance() }
+
+        #expect(onDevice.finished == 0 && onDevice.abandoned == 1)
+
+        // The same through the pipeline: the keyboard and the history get no text.
+        #expect(transcriber.beginUtterance(liveWords: heard.handler))
+        feed(transcriber, seconds: 1)
+        onDevice.say("увидимся на вокзале", " в пять")
+        let settings = limitSettings()
+        let outcome = await DictationPipeline(cleanup: TimedCleanup(), settings: settings).complete(
+            dictation(style: .verbatim), transcriber: transcriber, audioSeconds: 1, stoppedAt: ContinuousClock.now)
+        #expect(outcome.result.status == .limitReached && outcome.result.text.isEmpty)
+        #expect(!outcome.result.isInsertable)
+        #expect(outcome.transcript.rawText.isEmpty && outcome.transcript.displayText.isEmpty)
+        #expect(onDevice.finished == 0 && onDevice.abandoned == 2)
+        // The mark, not the clock: for ten minutes after the weekly reset nothing counts as used up.
+        #expect(settings.wordsAwaitServer)
     }
 
     /// The dictation that spends the last words answers 200 with none left: the next tap shows the

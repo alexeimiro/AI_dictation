@@ -9,11 +9,24 @@ private final class FakeHost: KeyboardSessionHost {
     var openedURLs: [URL] = []
     var inserted: [DictationResult] = []
     var outcomes: [DictationOutcome] = []
+    /// `livePreview` as the host first heard that each dictation is being listened to.
+    var heardListening: [(id: UUID, preview: LivePreview?)] = []
+    /// Times the host was told of a change while the client held a preview that wasn't the
+    /// listening dictation's.
+    var strayPreviews = 0
 
     func openContainingApp(_ url: URL) { openedURLs.append(url) }
     func insertDictation(_ result: DictationResult) { inserted.append(result) }
     func dictationDidFinish(_ outcome: DictationOutcome) { outcomes.append(outcome) }
-    func sessionClientDidChange(_ client: KeyboardSessionClient) {}
+
+    func sessionClientDidChange(_ client: KeyboardSessionClient) {
+        if case .listening(let id, _) = client.phase, heardListening.last?.id != id {
+            heardListening.append((id, client.livePreview))
+        }
+        if let preview = client.livePreview {
+            if case .listening(preview.requestId, _) = client.phase {} else { strayPreviews += 1 }
+        }
+    }
 }
 
 /// Plays the app's side of the protocol.
@@ -24,6 +37,8 @@ private final class FakeApp {
     var acknowledges = true
     /// Finishing a previous dictation: a start is queued and acknowledged as `starting`.
     var busy = false
+    /// An on-device model hears the dictations: each gets a preview, empty until the first word.
+    var previews = false
     private(set) var queued: UUID?
     private var observation: IPCObservation?
 
@@ -66,13 +81,29 @@ private final class FakeApp {
         if let queued { publish(.recording, tag: queued.tag16) }
     }
 
+    /// The words so far: the app writes the preview, then says so (`posts: false` is an event
+    /// that never reached the keyboard).
+    func say(_ id: UUID, _ settled: String, _ unsettled: String = "", posts: Bool = true) throws {
+        try transport.payloads.write(livePreview: LivePreview(requestId: id, settled: settled, unsettled: unsettled))
+        if posts { transport.post(.livePreview) }
+    }
+
+    /// The app removes the preview, as it does when the dictation ends.
+    func takeWordsAway() {
+        transport.payloads.clearLivePreview()
+        transport.post(.livePreview)
+    }
+
     private func handleCommand() {
         guard acknowledges, let command = transport.payloads.readCommand() else { return }
         switch command.kind {
         case .start where busy:
             queued = command.requestId
             publish(.starting, tag: command.requestId.tag16)
-        case .start: publish(.recording, tag: command.requestId.tag16)
+        case .start:
+            // Before it reports `recording`, as the app does.
+            if previews { try? transport.payloads.write(livePreview: LivePreview(requestId: command.requestId)) }
+            publish(.recording, tag: command.requestId.tag16)
         case .stop: publish(.processing, tag: command.requestId.tag16)
         case .cancel: publish(.ready)
         }
@@ -88,6 +119,36 @@ private func waitUntil(timeout: Duration = .seconds(2), _ condition: () -> Bool)
         try? await Task.sleep(for: .milliseconds(10))
     }
     return condition()
+}
+
+/// A keyboard that listens to a dictation the fake app records.
+@MainActor
+private struct Listening {
+    let transport: InMemoryIPCTransport
+    let app: FakeApp
+    let host: FakeHost
+    let client: KeyboardSessionClient
+    let id: UUID
+}
+
+/// Taps the mic on a live session and waits until the keyboard listens. With `previews`, the app
+/// publishes the dictation's (empty) preview before it reports `recording`.
+@MainActor
+private func listen(
+    previews: Bool, on transport: InMemoryIPCTransport = InMemoryIPCTransport(), staleAfter: TimeInterval = 2.5,
+    wordsUsedUp: @escaping () -> Bool = { false }
+) async throws -> Listening {
+    let app = FakeApp(transport: transport)
+    app.previews = previews
+    let host = FakeHost()
+    let client = KeyboardSessionClient(transport: transport, staleAfter: staleAfter, wordsUsedUp: wordsUsedUp)
+    client.host = host
+    app.publish(.ready)
+    client.activate()
+    client.micTapped()
+    #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
+    let id: UUID? = if case .listening(let id, _) = client.phase { id } else { nil }
+    return Listening(transport: transport, app: app, host: host, client: client, id: try #require(id))
 }
 
 @MainActor
@@ -736,5 +797,375 @@ struct KeyboardSessionClientTests {
         #expect(hidden.inactiveSince == hidden.hiddenAt)
         #expect(hidden.listeningRequestId == nil)
         #expect(transport.postedEvents.filter { $0 == .keyboardStatus }.count == 3)
+    }
+
+    // MARK: Live words
+
+    /// The app publishes an empty preview before it reports `recording`, and the keyboard reads
+    /// it before its host hears that it listens: the listening screen is laid out for words once,
+    /// and then the words come.
+    @Test func aDictationWithAPreviewShowsItsWords() async throws {
+        let listening = try await listen(previews: true)
+        let (app, host, client, id) = (listening.app, listening.host, listening.client, listening.id)
+        #expect(client.livePreview == LivePreview(requestId: id))
+        let heard = try #require(host.heardListening.first)
+        #expect(heard.id == id)
+        #expect(heard.preview == LivePreview(requestId: id), "the host heard of listening before the preview was read")
+
+        try app.say(id, "So I was thinking", " we could")
+        // On the app's event: sooner than the once-a-second read would bring them.
+        #expect(await waitUntil(timeout: .milliseconds(500)) {
+            client.livePreview == LivePreview(requestId: id, settled: "So I was thinking", unsettled: " we could")
+        })
+        try app.say(id, "So I was thinking we could meet", " on Thursday")
+        #expect(await waitUntil { client.livePreview?.text == "So I was thinking we could meet on Thursday" })
+        if case .listening(id, _) = client.phase {} else { Issue.record("expected .listening, got \(client.phase)") }
+        #expect(host.strayPreviews == 0)
+        #expect(host.inserted.isEmpty)
+    }
+
+    /// Whether a dictation has a preview is settled as listening begins. One that began without
+    /// (no on-device model heard its start) keeps the plain listening screen to its end, whatever
+    /// is published later.
+    @Test func aDictationThatBeganWithoutAPreviewNeverGetsOne() async throws {
+        let listening = try await listen(previews: false)
+        let (app, host, client, id) = (listening.app, listening.host, listening.client, listening.id)
+        #expect(client.livePreview == nil)
+        #expect(try #require(host.heardListening.first).preview == nil)
+
+        try app.say(id, "Words that came too late")
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(client.livePreview == nil)
+
+        // Nor when the keyboard leaves the screen and comes back to the dictation.
+        client.deactivate()
+        client.activate()
+        if case .listening(id, _) = client.phase {} else { Issue.record("expected .listening, got \(client.phase)") }
+        #expect(client.livePreview == nil)
+    }
+
+    /// A preview is shown only for the dictation it names: one that another dictation left
+    /// behind (the app was killed while it recorded) is not this one's.
+    @Test func aPreviewLeftByAnotherDictationIsNotShown() async throws {
+        let transport = InMemoryIPCTransport()
+        let left = LivePreview(requestId: UUID(), settled: "Words of a dictation that is over")
+        try transport.payloads.write(livePreview: left)
+
+        let listening = try await listen(previews: false, on: transport)
+        let client = listening.client
+        #expect(client.livePreview == nil)
+        transport.post(.livePreview)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(client.livePreview == nil)
+        // Removing it is the app's business.
+        #expect(transport.payloads.readLivePreview() == left)
+    }
+
+    /// Should the file come to hold another dictation's words, none of them are shown: this
+    /// dictation's own words go, and its layout stays.
+    @Test func wordsOfAnotherDictationEmptyThisOnes() async throws {
+        let listening = try await listen(previews: true)
+        let (app, host, client, id) = (listening.app, listening.host, listening.client, listening.id)
+        try app.say(id, "My own words")
+        #expect(await waitUntil { client.livePreview?.settled == "My own words" })
+
+        try app.say(UUID(), "Somebody else's words")
+        #expect(await waitUntil { client.livePreview == LivePreview(requestId: id) })
+        #expect(host.strayPreviews == 0)
+    }
+
+    /// The app removes the preview the moment the dictation ends, which the keyboard can hear
+    /// of before it hears that the phase moved on. The words go at once; the screen keeps its
+    /// layout (an empty preview, not none) for as long as it listens.
+    @Test func theWordsGoWhenTheAppTakesThemAwayAndTheLayoutStays() async throws {
+        let listening = try await listen(previews: true)
+        let (app, client, id) = (listening.app, listening.client, listening.id)
+        try app.say(id, "Words that are", " about to go")
+        #expect(await waitUntil { client.livePreview?.text == "Words that are about to go" })
+
+        app.takeWordsAway()
+        #expect(await waitUntil { client.livePreview == LivePreview(requestId: id) })
+        if case .listening(id, _) = client.phase {} else { Issue.record("expected .listening, got \(client.phase)") }
+
+        // And what the app writes after that is shown again.
+        try app.say(id, "And back")
+        #expect(await waitUntil { client.livePreview?.settled == "And back" })
+    }
+
+    /// The words belong to the listening screen. However listening ends (✓, ✕, or the app ending
+    /// the dictation itself), they are gone in the same change, whatever is still in the file.
+    @Test func theWordsGoWhenListeningEnds() async throws {
+        let stopped = try await listen(previews: true)
+        try stopped.app.say(stopped.id, "Said before the check")
+        #expect(await waitUntil { stopped.client.livePreview?.settled == "Said before the check" })
+        stopped.client.stopTapped()
+        #expect(stopped.client.livePreview == nil)
+        #expect(stopped.client.phase == .processing(stopped.id))
+        // A last write of the app's crossed the check: it brings nothing back.
+        try stopped.app.say(stopped.id, "Said before the check", " and just after")
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(stopped.client.livePreview == nil)
+        #expect(stopped.host.strayPreviews == 0)
+
+        let cancelled = try await listen(previews: true)
+        try cancelled.app.say(cancelled.id, "Said before the cross")
+        #expect(await waitUntil { cancelled.client.livePreview?.settled == "Said before the cross" })
+        cancelled.client.cancelTapped()
+        #expect(cancelled.client.livePreview == nil)
+        #expect(cancelled.client.phase == .idle)
+        #expect(cancelled.host.strayPreviews == 0)
+
+        // The 5-minute cap, an interruption: the app ends it without the keyboard asking.
+        let ended = try await listen(previews: true)
+        try ended.app.say(ended.id, "Said before the cap")
+        #expect(await waitUntil { ended.client.livePreview?.settled == "Said before the cap" })
+        ended.app.publish(.processing, tag: ended.id.tag16)
+        #expect(await waitUntil { ended.client.phase == .processing(ended.id) })
+        #expect(ended.client.livePreview == nil)
+        #expect(ended.host.strayPreviews == 0)
+    }
+
+    /// An app that was killed mid-dictation can't remove its preview. The keyboard that listens
+    /// to that dictation does, when it notices that the app stopped answering, and only its own
+    /// dictation's.
+    @Test func aPreviewTheAppLeftBehindIsRemovedWhenItStopsAnswering() async throws {
+        let notice = KeyboardSessionClient.Phase.notice("Murmur stopped listening. Tap the mic to start again.")
+
+        let listening = try await listen(previews: true, staleAfter: 0.2)
+        let (transport, app, client, id) = (listening.transport, listening.app, listening.client, listening.id)
+        try app.say(id, "The last words it heard")
+        #expect(await waitUntil {
+            // Still answering until the words are on screen.
+            app.publish(.recording, tag: id.tag16)
+            return client.livePreview?.settled == "The last words it heard"
+        })
+        // From here the app publishes nothing more.
+        #expect(await waitUntil { client.phase == notice })
+        #expect(client.livePreview == nil)
+        #expect(transport.payloads.readLivePreview() == nil)
+        #expect(listening.host.strayPreviews == 0)
+
+        // The file has become another dictation's: that one is not the keyboard's to remove.
+        let other = try await listen(previews: true, staleAfter: 0.2)
+        let foreign = LivePreview(requestId: UUID(), settled: "Not this dictation's")
+        try other.transport.payloads.write(livePreview: foreign)
+        #expect(await waitUntil { other.client.phase == notice })
+        #expect(other.client.livePreview == nil)
+        #expect(other.transport.payloads.readLivePreview() == foreign)
+    }
+
+    /// Darwin notifications can be lost, so the listening loop reads the preview once a second
+    /// whether it was told or not.
+    @Test func aMissedEventIsCaughtWithinASecond() async throws {
+        // The read comes after twenty real ticks, which a busy machine stretches: the wait is long,
+        // and the app, silent meanwhile, is not taken for gone.
+        let listening = try await listen(previews: true, staleAfter: 60)
+        let (app, client, id) = (listening.app, listening.client, listening.id)
+        try app.say(id, "Said without a word to the keyboard", posts: false)
+        #expect(client.livePreview == LivePreview(requestId: id))
+        #expect(await waitUntil(timeout: .seconds(10)) {
+            client.livePreview?.settled == "Said without a word to the keyboard"
+        })
+    }
+
+    /// Off screen nothing shows the words, so the keyboard lets go of them and keeps only the
+    /// layout. Coming back to the dictation reads what the app has by then, as soon as the app
+    /// shows that it is still recording it.
+    @Test func comingBackToADictationReadsItsWordsAgain() async throws {
+        let listening = try await listen(previews: true)
+        let (app, host, client, id) = (listening.app, listening.host, listening.client, listening.id)
+        try app.say(id, "Before it left")
+        #expect(await waitUntil { client.livePreview?.settled == "Before it left" })
+
+        client.deactivate()
+        #expect(client.livePreview == LivePreview(requestId: id))
+        try app.say(id, "Before it left", " and while it was away")
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(client.livePreview == LivePreview(requestId: id), "nothing is read while the keyboard is away")
+
+        client.activate()
+        #expect(client.livePreview == LivePreview(requestId: id), "the words wait for a sign of the app")
+        app.publish(.recording, tag: id.tag16)
+        #expect(await waitUntil(timeout: .milliseconds(500)) {
+            client.livePreview?.text == "Before it left and while it was away"
+        })
+        #expect(host.strayPreviews == 0)
+    }
+
+    /// The app died while the keyboard was away: its state still says `recording` and its file
+    /// still holds the words. The keyboard that comes back shows none of them, and removes the
+    /// file when it notices that the app is gone.
+    @Test func comingBackToADictationWhoseAppIsGoneShowsNoWords() async throws {
+        let listening = try await listen(previews: true, staleAfter: 0.3)
+        let (transport, app, host, client, id) =
+            (listening.transport, listening.app, listening.host, listening.client, listening.id)
+        try app.say(id, "The last words", " it heard")
+        #expect(await waitUntil {
+            app.publish(.recording, tag: id.tag16)
+            return client.livePreview?.text == "The last words it heard"
+        })
+        client.deactivate()
+        // From here the app publishes nothing more.
+
+        var shown: Set<String> = []
+        client.activate()
+        if case .listening(id, _) = client.phase {} else { Issue.record("expected .listening, got \(client.phase)") }
+        #expect(await waitUntil {
+            if let text = client.livePreview?.text { shown.insert(text) }
+            return client.phase == .notice("Murmur stopped listening. Tap the mic to start again.")
+        })
+        #expect(shown == [""], "words of a dictation whose app is gone were shown")
+        #expect(transport.payloads.readLivePreview() == nil)
+        #expect(host.strayPreviews == 0)
+
+        // A keyboard that iOS relaunched meanwhile finds the same and shows as little.
+        let again = try await listen(previews: true, staleAfter: 0.3)
+        try again.app.say(again.id, "Words for a new keyboard")
+        #expect(await waitUntil {
+            again.app.publish(.recording, tag: again.id.tag16)
+            return again.client.livePreview?.settled == "Words for a new keyboard"
+        })
+        again.client.deactivate()
+        let relaunchedHost = FakeHost()
+        let relaunched = KeyboardSessionClient(transport: again.transport, staleAfter: 0.3)
+        relaunched.host = relaunchedHost
+        relaunched.activate()
+        if case .listening(again.id, _) = relaunched.phase {} else { Issue.record("expected .listening, got \(relaunched.phase)") }
+        #expect(try #require(relaunchedHost.heardListening.first).preview == LivePreview(requestId: again.id))
+        #expect(relaunched.livePreview == LivePreview(requestId: again.id))
+        // The app is there after all: its words come with its next sign of life.
+        again.app.publish(.recording, tag: again.id.tag16)
+        #expect(await waitUntil(timeout: .milliseconds(500)) {
+            relaunched.livePreview?.settled == "Words for a new keyboard"
+        })
+    }
+
+    /// Whatever the keyboard's own copy holds when it comes back, none of it is shown until the
+    /// app shows that it is there. Here the copy was filled again while away, by an event already
+    /// on its way when the keyboard left (this transport still delivers it; libnotify drops one
+    /// whose registration was cancelled), and the app never shows.
+    @Test func wordsThatCameAsTheKeyboardLeftAreNotShownOnComingBack() async throws {
+        let listening = try await listen(previews: true, staleAfter: 0.3)
+        let (transport, app, host, client, id) =
+            (listening.transport, listening.app, listening.host, listening.client, listening.id)
+        try app.say(id, "The first words")
+        #expect(await waitUntil {
+            app.publish(.recording, tag: id.tag16)
+            return client.livePreview?.settled == "The first words"
+        })
+
+        // Written and announced; the keyboard leaves before the event is delivered.
+        try app.say(id, "The first words", " and the last it heard")
+        client.deactivate()
+        try? await Task.sleep(for: .milliseconds(60))
+        // From here the app publishes nothing more.
+
+        var shown: Set<String> = []
+        client.activate()
+        if case .listening(id, _) = client.phase {} else { Issue.record("expected .listening, got \(client.phase)") }
+        #expect(await waitUntil {
+            if let text = client.livePreview?.text { shown.insert(text) }
+            return client.phase == .notice("Murmur stopped listening. Tap the mic to start again.")
+        })
+        #expect(shown == [""], "words of a dictation whose app is gone were shown")
+        #expect(transport.payloads.readLivePreview() == nil)
+        #expect(host.strayPreviews == 0)
+    }
+
+    /// The app can die a moment before ✓ or ✕, sooner than the keyboard could notice: the
+    /// keyboard removes the preview of the dictation it stops following, and only that one's.
+    @Test func thePreviewGoesWithTheCheckAndTheCrossEvenIfTheAppIsGone() async throws {
+        let stopped = try await listen(previews: true)
+        try stopped.app.say(stopped.id, "Said before the check")
+        #expect(await waitUntil { stopped.client.livePreview?.settled == "Said before the check" })
+        stopped.app.acknowledges = false   // gone: it answers nothing from here
+        stopped.client.stopTapped()
+        #expect(stopped.transport.payloads.readLivePreview() == nil)
+
+        let cancelled = try await listen(previews: true)
+        try cancelled.app.say(cancelled.id, "Said before the cross")
+        #expect(await waitUntil { cancelled.client.livePreview?.settled == "Said before the cross" })
+        cancelled.app.acknowledges = false
+        cancelled.client.cancelTapped()
+        #expect(cancelled.transport.payloads.readLivePreview() == nil)
+
+        // Another dictation's file is not the keyboard's to remove.
+        let other = try await listen(previews: true)
+        let foreign = LivePreview(requestId: UUID(), settled: "Not this dictation's")
+        try other.transport.payloads.write(livePreview: foreign)
+        other.client.stopTapped()
+        #expect(other.transport.payloads.readLivePreview() == foreign)
+    }
+
+    /// The app learns that the week's words are used up while a dictation is still listened to:
+    /// from then on the keyboard shows none of its words.
+    @Test func noWordsAreShownWhileTheWeeksWordsAreUsedUp() async throws {
+        var usedUp = false
+        let listening = try await listen(previews: true, wordsUsedUp: { usedUp })
+        let (app, client, id) = (listening.app, listening.client, listening.id)
+        try app.say(id, "Words within the week's")
+        #expect(await waitUntil { client.livePreview?.settled == "Words within the week's" })
+
+        usedUp = true
+        try app.say(id, "Words within the week's", " and words past them")
+        #expect(await waitUntil { client.livePreview == LivePreview(requestId: id) })
+        try app.say(id, "Words within the week's and words past them", " and more")
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(client.livePreview == LivePreview(requestId: id))
+    }
+
+    /// The words on screen are only a picture of what was heard. When the server refuses the
+    /// dictation for the week's words, none of them is typed or offered, though the keyboard had
+    /// them and their file is still there.
+    @Test func thePreviewIsNeverInserted() async throws {
+        let listening = try await listen(previews: true)
+        let (transport, app, host, client, id) =
+            (listening.transport, listening.app, listening.host, listening.client, listening.id)
+        try app.say(id, "words heard on the iPhone", " and shown")
+        #expect(await waitUntil { client.livePreview?.text == "words heard on the iPhone and shown" })
+
+        client.stopTapped()
+        // The app's last write crossed the check, so the file is there again.
+        try app.say(id, "words heard on the iPhone", " and shown")
+        try app.finish(id, text: "words heard on the iPhone and shown", document: host.currentDocumentIdentifier,
+                       status: .limitReached, message: Brand.limitReachedMessage)
+        #expect(await waitUntil { client.phase == .notice(Brand.limitReachedMessage) })
+        #expect(host.inserted.isEmpty)
+        #expect(client.pendingResult == nil)
+        #expect(client.livePreview == nil)
+
+        // Nor later, when the events come again.
+        transport.post(.livePreview)
+        transport.post(.resultReady)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(transport.payloads.readLivePreview()?.requestId == id)
+        #expect(host.inserted.isEmpty)
+        #expect(client.pendingResult == nil)
+        #expect(client.livePreview == nil)
+    }
+
+    /// The keyboard opened the app for the dictation, and the app was recording it (words and all)
+    /// before the keyboard came back. `recording` may by then be what an app that died left behind,
+    /// so the keyboard that joins the dictation lays out for words and shows none until the app's
+    /// state moves on.
+    @Test func aDictationJoinedAfterTheBounceShowsItsWordsOnceTheAppShowsLife() async throws {
+        let transport = InMemoryIPCTransport()
+        let app = FakeApp(transport: transport)
+        let host = FakeHost()
+        let client = KeyboardSessionClient(transport: transport, staleAfter: 0.4)
+        client.host = host
+        client.activate()
+        client.micTapped()
+        guard case .openingApp(let requestId) = client.phase else { Issue.record("no openingApp"); return }
+        client.deactivate()
+        try transport.payloads.write(livePreview: LivePreview(requestId: requestId, settled: "said in the app"))
+        #expect(try #require(app.autoStart()) == requestId)
+
+        client.activate()
+        #expect(client.livePreview == LivePreview(requestId: requestId))
+        #expect(try #require(host.heardListening.first).preview == LivePreview(requestId: requestId))
+
+        app.publish(.recording, tag: requestId.tag16)
+        #expect(await waitUntil(timeout: .milliseconds(500)) { client.livePreview?.settled == "said in the app" })
     }
 }

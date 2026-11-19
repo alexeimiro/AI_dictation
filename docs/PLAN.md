@@ -59,13 +59,14 @@ Keyboard ext ── Darwin post + command file (one-time token) ──► Murmur
 
 ### Inter-process communication (`MurmurCore/IPC/`, behind an `IPCTransport` protocol with an in-memory test double)
 - **Hot state:** libnotify `notify_set_state`/`notify_get_state` on one name, packing status, `seq`, 8-bit level and a short request id into a UInt64. The keyboard polls it at 20 Hz while listening. This avoids cfprefsd load and stale `UserDefaults` reads.
-- **Events:** Darwin posts `cmd`, `stateChanged`, `resultReady`. Pings can be missed while the keyboard is suspended, so it also re-reads state in `viewWillAppear`.
+- **Events:** Darwin posts `cmd`, `stateChanged`, `resultReady`, `preview`. Pings can be missed while the keyboard is suspended, so it also re-reads state in `viewWillAppear`.
 - **Payloads:** small JSON files written atomically to the App Group container:
   - `command.json`
   - `results/<requestId>.json`
   - `keyboard-status.json`: the Full Access timestamp and last seen
   - `quota.json`
   - `dictionary-queue.json`
+  - `live/preview.json`: the last words of the dictation being recorded, which the keyboard shows while it listens. The app writes it and removes it when the dictation ends; the keyboard removes it too when it stops following the dictation (the check, the cross, or the app stopped answering), should the app be gone.
 - **Settings** for keyboard layout, haptics and default style live in App Group `UserDefaults`; they change rarely.
 - **Exactly-once, right-field insertion:**
   - The keyboard inserts only if `documentIdentifier` matches and the result is under 60 s old. Otherwise it shows an "Insert last dictation" chip.
@@ -246,11 +247,13 @@ Every `-route` name still opens its screen; `menu` opens the menu.
 - **The bar:**
   - The menu: translation, Add to dictionary, feedback and the appearance, with ABC and a link to
     Murmur's Settings.
-  - Outlined chips for translation and the style.
+  - An outlined chip for translation and a solid pill for the style.
   - Delete on the voice keyboard; the talk button, or "Start" while no session runs, on the key layouts.
 - **The talk button:** ink with a ring around it at rest. While it listens it is red with ✓
   (which finishes the dictation) and echo rings that follow the voice, with "Listening" and the
-  time under it and ✕ in the bar. Nothing else on the keyboard is red.
+  time under it and ✕ in the bar. Nothing else on the keyboard is red. The words of the dictation
+  show under it while it listens, when the language's on-device model is on the iPhone; "Listening"
+  and the time are then in the bar, beside ✕.
 - **Writing:** a spinner and "Writing…" or "Translating to English…"; ✕ cancels.
 - **States:** the weekly limit, no network, signed out, Reconnect, a dictation waiting to be inserted.
 - **Feedback:** haptics and key clicks, which need Full Access.

@@ -200,8 +200,14 @@ actor SpeechAssetManager {
         }
         let reserved = await AssetInventory.reservedLocales
         lines.append("Reserved: \(Self.tags(reserved)) (max \(AssetInventory.maximumReservedLocales))")
-        lines.append("DictationTranscriber long-dictation options: \(DictationTranscriber.Preset.progressiveLongDictation.transcriptionOptions)")
-        lines.append("SpeechTranscriber options: \(SpeechTranscriber.Preset.progressiveTranscription.transcriptionOptions)")
+        // The reporting options say whether results come before they are final, which the keyboard's
+        // live words are made of.
+        let dictationPreset = DictationTranscriber.Preset.progressiveLongDictation
+        lines.append("DictationTranscriber long-dictation options: \(dictationPreset.transcriptionOptions), "
+            + "reporting: \(dictationPreset.reportingOptions)")
+        let speechPreset = SpeechTranscriber.Preset.progressiveTranscription
+        lines.append("SpeechTranscriber options: \(speechPreset.transcriptionOptions), "
+            + "reporting: \(speechPreset.reportingOptions)")
         return lines.joined(separator: "\n")
     }
 

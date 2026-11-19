@@ -88,6 +88,132 @@ private final class GatedTranscriber: Transcriber, @unchecked Sendable {
     }
 }
 
+/// A transcriber with an on-device model's words for the keyboard, which the test speaks (`say`).
+/// It keeps every dictation's handler after the dictation ended, as a recognizer still at work
+/// could, so a test can report words late. With `holds`, a finished dictation waits for
+/// `release()`, like an upload still out.
+private final class PreviewingTranscriber: Transcriber, LiveWordsProviding, @unchecked Sendable {
+    static let transcript = "meet me at the station"
+
+    let displayName = "Test"
+    private let lock = NSLock()
+    private var language: ResolvedLanguage?
+    private var _previews = true
+    private var _holds = false
+    private var _plainBegins = 0
+    private var _liveBegins = 0
+    private var _finishes = 0
+    private var _abandoned = 0
+    /// One for each dictation begun with live words, in order.
+    private var handlers: [LiveWordsHandler] = []
+    private var _atFinish: (@Sendable () -> Bool)?
+    private var _finishChecks: [Bool] = []
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private var released = false
+
+    /// Whether an on-device model listens to the next dictation, and so has words for it.
+    var previews: Bool {
+        get { lock.withLock { _previews } }
+        set { lock.withLock { _previews = newValue } }
+    }
+    var holds: Bool {
+        get { lock.withLock { _holds } }
+        set { lock.withLock { _holds = newValue } }
+    }
+    /// Run as each dictation is finished, which is when its audio would be sent.
+    var atFinish: (@Sendable () -> Bool)? {
+        get { lock.withLock { _atFinish } }
+        set { lock.withLock { _atFinish = newValue } }
+    }
+    /// The dictations begun without live words.
+    var plainBegins: Int { lock.withLock { _plainBegins } }
+    /// The dictations begun with live words, whether or not it had any for them.
+    var liveBegins: Int { lock.withLock { _liveBegins } }
+    var finishes: Int { lock.withLock { _finishes } }
+    var abandoned: Int { lock.withLock { _abandoned } }
+    var finishChecks: [Bool] { lock.withLock { _finishChecks } }
+
+    var currentLanguage: ResolvedLanguage? { lock.withLock { language } }
+
+    func prepare(micFormat: AVAudioFormat, language: ResolvedLanguage) async throws {
+        lock.withLock { self.language = language }
+    }
+    func setLanguage(_ language: ResolvedLanguage) { lock.withLock { self.language = language } }
+    func beginUtterance() { lock.withLock { _plainBegins += 1 } }
+    func beginUtterance(liveWords handler: @escaping LiveWordsHandler) -> Bool {
+        lock.withLock {
+            _liveBegins += 1
+            handlers.append(handler)
+            return _previews
+        }
+    }
+    func append(_ buffer: AVAudioPCMBuffer) {}
+    func finishUtterance() async throws -> String { Self.transcript }
+    func finishUtterance(model request: ModelRequest?) async throws -> UtteranceOutput {
+        let (check, hold) = lock.withLock { () -> ((@Sendable () -> Bool)?, Bool) in
+            _finishes += 1
+            return (_atFinish, _holds && !released)
+        }
+        if let check {
+            let passed = check()
+            lock.withLock { _finishChecks.append(passed) }
+        }
+        if hold {
+            await withCheckedContinuation { continuation in
+                let free = lock.withLock { () -> Bool in
+                    if released { return true }
+                    waiting.append(continuation)
+                    return false
+                }
+                if free { continuation.resume() }
+            }
+        }
+        return UtteranceOutput(transcript: try await finishUtterance())
+    }
+    func cancelUtterance() async {}
+    func abandonUtterance() { lock.withLock { _abandoned += 1 } }
+    func shutdown() async {}
+
+    /// The words recognized so far, reported as the recognizer of the dictation begun `dictation`th
+    /// with live words would (the last one by default), whether or not that dictation has ended.
+    func say(_ settled: String, _ unsettled: String = "", dictation: Int? = nil) {
+        let handler = lock.withLock { dictation.map { handlers[$0] } ?? handlers.last }
+        handler?(settled, unsettled)
+    }
+
+    func release() {
+        let held = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            released = true
+            defer { waiting = [] }
+            return waiting
+        }
+        held.forEach { $0.resume() }
+    }
+}
+
+/// Forwards to an in-memory transport and notes what the hot state said each time the preview was
+/// announced: what a keyboard that polls the state could have read by then.
+private final class StateAtPreviewTransport: IPCTransport, @unchecked Sendable {
+    let inner = InMemoryIPCTransport()
+    private let lock = NSLock()
+    private var statuses: [SessionStatus] = []
+
+    var statusAtEachPreview: [SessionStatus] { lock.withLock { statuses } }
+    var payloads: IPCPayloadStore { inner.payloads }
+    func publish(_ state: HotState) { inner.publish(state) }
+    func currentState() -> HotState { inner.currentState() }
+    func post(_ event: IPCEvent) {
+        if event == .livePreview {
+            let status = inner.currentState().status
+            lock.withLock { statuses.append(status) }
+        }
+        inner.post(event)
+    }
+    func observe(_ event: IPCEvent, handler: @escaping @Sendable () -> Void) -> IPCObservation {
+        inner.observe(event, handler: handler)
+    }
+}
+
 /// Runs `check` as each transcript reaches history, to see what had happened by then.
 @MainActor
 private final class HistorySpy: TranscriptSink {
@@ -616,5 +742,396 @@ struct SessionControllerTests {
         #expect(await waitUntil { harness.history.checks.count == 1 })
         #expect(!transcriber.cancelledWhileOut)
         #expect(harness.transport.payloads.readResult(request)?.text.isEmpty == false)
+    }
+
+    // MARK: Live words: the keyboard's preview of the dictation being recorded
+
+    /// How often the session wrote or removed the preview.
+    private func previewPosts(_ harness: Harness) -> Int {
+        harness.transport.postedEvents.filter { $0 == .livePreview }.count
+    }
+
+    /// Long enough for words reported late to have reached the main queue and, had they been
+    /// taken, the file: more than the publisher's quarter of a second between writes.
+    private func waitForLateWords() async throws {
+        try await Task.sleep(for: .milliseconds(400))
+    }
+
+    /// A dictation the keyboard asked for, recording, with `words` on the keyboard.
+    private func record(_ requestId: UUID, saying words: String, with transcriber: PreviewingTranscriber,
+                        on harness: Harness) async throws {
+        try harness.send(.start, requestId)
+        #expect(await waitUntil { harness.session.phase == .recording(requestId) })
+        transcriber.say(words)
+        #expect(await waitUntil { harness.transport.payloads.readLivePreview()?.settled == words })
+    }
+
+    /// An on-device model hears the dictation: its preview is there, empty, before the keyboard
+    /// can read that the app is recording, so the keyboard lays its listening screen out once.
+    /// The keyboard reads that from the state it polls as well as from the event, so both come
+    /// after the preview.
+    @Test func aKeyboardDictationPublishesItsPreviewBeforeItReportsRecording() async throws {
+        let transcriber = PreviewingTranscriber()
+        let transport = StateAtPreviewTransport()
+        let settings = SharedSettings(defaults: UserDefaults(suiteName: "test.murmur.session.\(UUID().uuidString)"))
+        settings.interactionSounds = false
+        let session = SessionController(
+            transport: transport, pipeline: DictationPipeline(cleanup: NoCleanup()), assets: SpeechAssetManager(),
+            history: HistorySpy(), settings: settings)
+        session.startForTesting(with: transcriber, language: english)
+        let requestId = UUID()
+        try transport.payloads.write(command: KeyboardCommand(requestId: requestId, kind: .start, createdAt: Date()))
+        transport.post(.command)
+        #expect(await waitUntil { session.phase == .recording(requestId) })
+
+        #expect(transport.payloads.readLivePreview() == LivePreview(requestId: requestId))
+        #expect(transcriber.liveBegins == 1 && transcriber.plainBegins == 0)
+        // Announced once, while the state the keyboard polls did not say `recording` yet.
+        #expect(transport.statusAtEachPreview.count == 1)
+        #expect(transport.statusAtEachPreview.first != .recording)
+        let events = transport.inner.postedEvents
+        let preview = try #require(events.firstIndex(of: .livePreview))
+        let recording = try #require(events.lastIndex(of: .stateChanged))
+        #expect(preview < recording)
+        #expect(transport.currentState().status == .recording)
+        session.endDictation(commit: false)
+        #expect(transport.payloads.readLivePreview() == nil)
+    }
+
+    /// What the recognizer has heard so far reaches the keyboard's file while the dictation is
+    /// recorded, settled and unsettled words apart, and each change is announced.
+    @Test func theWordsReachTheKeyboardWhileRecording() async throws {
+        let transcriber = PreviewingTranscriber()
+        let harness = makeHarness(transcriber: transcriber)
+        let requestId = UUID()
+        try harness.send(.start, requestId)
+        #expect(await waitUntil { harness.session.phase == .recording(requestId) })
+
+        transcriber.say("see you", " at five")
+        let first = LivePreview(requestId: requestId, settled: "see you", unsettled: " at five")
+        #expect(await waitUntil { harness.transport.payloads.readLivePreview() == first })
+        #expect(previewPosts(harness) == 2)
+
+        transcriber.say("see you at five", " at the station")
+        let second = LivePreview(requestId: requestId, settled: "see you at five", unsettled: " at the station")
+        #expect(await waitUntil { harness.transport.payloads.readLivePreview() == second })
+        #expect(previewPosts(harness) == 3)
+        #expect(harness.session.phase == .recording(requestId))
+    }
+
+    /// The check: the preview is removed before the keyboard is told the dictation is being
+    /// written and before the transcriber is asked for it, which is when anything is sent. What is
+    /// typed is the transcriber's text, whatever the preview said.
+    @Test func thePreviewIsGoneOnTheCheckBeforeAnythingIsSent() async throws {
+        let transcriber = PreviewingTranscriber()
+        transcriber.holds = true
+        let harness = makeHarness(transcriber: transcriber)
+        transcriber.atFinish = { [payloads = harness.transport.payloads] in payloads.readLivePreview() == nil }
+        let requestId = UUID()
+        try await record(requestId, saying: "words only the preview had", with: transcriber, on: harness)
+
+        try harness.send(.stop, requestId)
+        #expect(await waitUntil { transcriber.finishes == 1 })
+
+        #expect(harness.session.phase == .processing(requestId))
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        #expect(transcriber.finishChecks == [true], "gone before the dictation was asked for")
+        let events = harness.transport.postedEvents
+        #expect(try #require(events.lastIndex(of: .livePreview)) < #require(events.lastIndex(of: .stateChanged)),
+                "gone before the keyboard hears of processing")
+        // Words still on their way from the recognizer are not written under the upload.
+        transcriber.say("words only the preview had", " and some more")
+        try await waitForLateWords()
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+
+        transcriber.release()
+        #expect(await waitUntil { harness.transport.payloads.readResult(requestId) != nil })
+        let result = try #require(harness.transport.payloads.readResult(requestId))
+        #expect(result.isInsertable)
+        #expect(result.text.localizedCaseInsensitiveContains(PreviewingTranscriber.transcript))
+        #expect(!result.text.localizedCaseInsensitiveContains("preview"))
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+    }
+
+    /// The keyboard's X: the preview goes with the dictation.
+    @Test func thePreviewIsGoneOnCancel() async throws {
+        let transcriber = PreviewingTranscriber()
+        let harness = makeHarness(transcriber: transcriber)
+        let requestId = UUID()
+        try await record(requestId, saying: "never mind", with: transcriber, on: harness)
+
+        try harness.send(.cancel, requestId)
+        #expect(await waitUntil { harness.session.phase == .ready })
+
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        #expect(transcriber.abandoned == 1 && transcriber.finishes == 0)
+        let posts = previewPosts(harness)
+        transcriber.say("never mind", " after all")
+        try await waitForLateWords()
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        #expect(previewPosts(harness) == posts)
+    }
+
+    /// The app ends the dictation itself (the five-minute cap, a lost heartbeat, the Lock Screen's
+    /// Stop, and what a session that stops does to the one it is recording): it is finished and
+    /// sent, and its preview is gone at once. `stop()` itself isn't called here: it takes the
+    /// microphone down, which ends the test host on a simulator whose audio doesn't answer.
+    @Test func thePreviewIsGoneWhenTheAppEndsTheDictation() async throws {
+        let transcriber = PreviewingTranscriber()
+        transcriber.holds = true
+        let harness = makeHarness(transcriber: transcriber)
+        let requestId = UUID()
+        try await record(requestId, saying: "the app ends this one", with: transcriber, on: harness)
+
+        harness.session.endDictation(commit: true)
+
+        #expect(harness.session.phase == .processing(requestId))
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        let posts = previewPosts(harness)
+        transcriber.say("the app ends this one", " now")
+        try await waitForLateWords()
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        #expect(previewPosts(harness) == posts)
+        transcriber.release()
+        #expect(await waitUntil { harness.transport.payloads.readResult(requestId) != nil })
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+    }
+
+    /// Sign-out, a deleted account, the OK to the AI services taken back: the dictation is dropped,
+    /// and its preview with it. (What `stop(discardingDictation: true)` does first; the stop itself
+    /// would take the microphone down, see above.)
+    @Test func thePreviewIsGoneWhenDictationsAreDiscarded() async throws {
+        let transcriber = PreviewingTranscriber()
+        let harness = makeHarness(transcriber: transcriber)
+        let requestId = UUID()
+        try await record(requestId, saying: "this is dropped", with: transcriber, on: harness)
+
+        harness.session.discardDictations()
+
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        #expect(transcriber.finishes == 0 && transcriber.abandoned == 1)
+        #expect(harness.transport.payloads.readResult(requestId)?.status == .cancelled)
+        let posts = previewPosts(harness)
+        transcriber.say("this is dropped", " for good")
+        try await waitForLateWords()
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        #expect(previewPosts(harness) == posts)
+    }
+
+    /// Murmur is swiped away while it records: iOS tells it first, and the preview goes with the
+    /// app. (The method is called here; posting the notification would reach every session in the
+    /// test process.)
+    @Test func thePreviewIsGoneWhenTheAppIsAboutToEnd() async throws {
+        let transcriber = PreviewingTranscriber()
+        let harness = makeHarness(transcriber: transcriber)
+        let requestId = UUID()
+        try await record(requestId, saying: "the app is going", with: transcriber, on: harness)
+
+        harness.session.appWillTerminate()
+
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        let posts = previewPosts(harness)
+        transcriber.say("the app is going", " away")
+        try await waitForLateWords()
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        #expect(previewPosts(harness) == posts)
+    }
+
+    /// A reconnect while a dictation uploads lets the next one begin, and the upload's completion
+    /// then reports the session ready under it. A preview is only published while the session
+    /// says it is recording, so the second dictation's goes at that moment.
+    @Test func aPreviewDoesNotOutliveItsRecording() async throws {
+        let transcriber = PreviewingTranscriber()
+        transcriber.holds = true
+        let harness = makeHarness(transcriber: transcriber)
+        let first = UUID(), second = UUID()
+        try harness.send(.start, first)
+        #expect(await waitUntil { harness.session.phase == .recording(first) })
+        try harness.send(.stop, first)
+        #expect(await waitUntil { transcriber.finishes == 1 })
+        #expect(harness.session.phase == .processing(first))
+
+        harness.session.reconnectedForTesting()
+        #expect(harness.session.phase == .ready)
+        try harness.send(.start, second)
+        #expect(await waitUntil { harness.session.phase == .recording(second) })
+        #expect(harness.transport.payloads.readLivePreview() == LivePreview(requestId: second))
+
+        transcriber.release()
+        #expect(await waitUntil { harness.session.phase == .ready })
+
+        #expect(harness.transport.payloads.readResult(first) != nil)
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        let posts = previewPosts(harness)
+        transcriber.say("still talking")
+        try await waitForLateWords()
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        #expect(previewPosts(harness) == posts)
+    }
+
+    /// A start that arrives while the dictation before it is still being written waits for it and
+    /// begins in the very step that reports the session ready again, which is also where a preview
+    /// is closed. The queued dictation's preview is opened after that, and stays.
+    @Test func aQueuedDictationHasItsPreview() async throws {
+        let transcriber = PreviewingTranscriber()
+        transcriber.holds = true
+        let harness = makeHarness(transcriber: transcriber)
+        let first = UUID(), queued = UUID()
+        try harness.send(.start, first)
+        #expect(await waitUntil { harness.session.phase == .recording(first) })
+        try harness.send(.stop, first)
+        #expect(await waitUntil { transcriber.finishes == 1 })
+        try harness.send(.start, queued)
+        #expect(await waitUntil { harness.transport.currentState().status == .starting })
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+
+        transcriber.release()
+        #expect(await waitUntil { harness.session.phase == .recording(queued) })
+
+        #expect(harness.transport.payloads.readLivePreview() == LivePreview(requestId: queued))
+        transcriber.say("the queued one")
+        #expect(await waitUntil { harness.transport.payloads.readLivePreview()?.settled == "the queued one" })
+        harness.session.endDictation(commit: false)
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+    }
+
+    /// A recognizer can still report after its dictation ended. Those words are written neither
+    /// after it, nor into the preview of the dictation that began since.
+    @Test func wordsReportedAfterTheDictationEndedAreNotWritten() async throws {
+        let transcriber = PreviewingTranscriber()
+        let harness = makeHarness(transcriber: transcriber)
+        let first = UUID(), second = UUID()
+        try await record(first, saying: "the first dictation", with: transcriber, on: harness)
+        try harness.send(.stop, first)
+        #expect(await waitUntil { harness.transport.payloads.readResult(first) != nil })
+        #expect(await waitUntil { harness.session.phase == .ready })
+
+        let posts = previewPosts(harness)
+        transcriber.say("the first dictation", " goes on")
+        try await waitForLateWords()
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        #expect(previewPosts(harness) == posts)
+
+        try harness.send(.start, second)
+        #expect(await waitUntil { harness.session.phase == .recording(second) })
+        transcriber.say("the first dictation", " goes on", dictation: 0)
+        try await waitForLateWords()
+        #expect(harness.transport.payloads.readLivePreview() == LivePreview(requestId: second))
+
+        transcriber.say("the second one")
+        let words = LivePreview(requestId: second, settled: "the second one")
+        #expect(await waitUntil { harness.transport.payloads.readLivePreview() == words })
+        // Not afterwards either, between two of the second one's reports.
+        transcriber.say("the first dictation", " once more", dictation: 0)
+        try await waitForLateWords()
+        #expect(harness.transport.payloads.readLivePreview() == words)
+    }
+
+    /// A start from a keyboard that doesn't know the dictation under way replaces it. The file is
+    /// the new dictation's from its first moment, empty: the keyboard never reads the words of the
+    /// one before under the new one.
+    @Test func aDictationThatReplacesAnotherStartsWithAnEmptyPreview() async throws {
+        let transcriber = PreviewingTranscriber()
+        let harness = makeHarness(transcriber: transcriber)
+        let unclaimed = UUID(), next = UUID()
+        try await record(unclaimed, saying: "words of the one nobody claimed", with: transcriber, on: harness)
+
+        try harness.send(.start, next)
+        #expect(await waitUntil { harness.session.phase == .recording(next) })
+
+        #expect(harness.transport.payloads.readLivePreview() == LivePreview(requestId: next))
+        #expect(harness.transport.payloads.readResult(unclaimed)?.status == .cancelled)
+        transcriber.say("words of the one nobody claimed", " still", dictation: 0)
+        try await waitForLateWords()
+        #expect(harness.transport.payloads.readLivePreview() == LivePreview(requestId: next))
+        harness.session.endDictation(commit: false)
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+    }
+
+    /// No on-device model listens to the dictation (not installed, not prepared yet): nothing is
+    /// written and nothing announced, so the keyboard shows the listening screen it always had.
+    @Test func aDictationWithoutAnOnDeviceModelPublishesNothing() async throws {
+        let transcriber = PreviewingTranscriber()
+        transcriber.previews = false
+        let harness = makeHarness(transcriber: transcriber)
+        let requestId = UUID()
+        try harness.send(.start, requestId)
+        #expect(await waitUntil { harness.session.phase == .recording(requestId) })
+
+        #expect(transcriber.liveBegins == 1 && transcriber.plainBegins == 0)
+        // Not even if the transcriber reported words after saying it has none.
+        transcriber.say("words nobody asked for")
+        try await waitForLateWords()
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        #expect(previewPosts(harness) == 0)
+
+        try harness.send(.stop, requestId)
+        #expect(await waitUntil { harness.transport.payloads.readResult(requestId) != nil })
+        #expect(previewPosts(harness) == 0)
+    }
+
+    /// The week's words were said to be used up and the server hasn't said they are back (here
+    /// past the reset by the iPhone's clock, so the dictation is recorded for the server to judge):
+    /// the dictation begins as it always did, with no words on screen to stand in for one the
+    /// server refuses. While they are known to be used up, nothing begins at all.
+    @Test func noPreviewWhileTheWeeksWordsWaitForTheServer() async throws {
+        let transcriber = PreviewingTranscriber()
+        var settings: SharedSettings?
+        let harness = makeHarness(transcriber: transcriber) { shared in
+            shared.wordsUsedUpUntil = Date().addingTimeInterval(-60)
+            settings = shared
+        }
+        let requestId = UUID()
+        try harness.send(.start, requestId)
+        #expect(await waitUntil { harness.session.phase == .recording(requestId) })
+
+        #expect(transcriber.liveBegins == 0 && transcriber.plainBegins == 1)
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        #expect(previewPosts(harness) == 0)
+        try harness.send(.cancel, requestId)
+        #expect(await waitUntil { harness.session.phase == .ready })
+
+        // Set directly: for ten minutes after the weekly reset `noteWordsUsedUp()` marks nothing as used up.
+        settings?.wordsUsedUpUntil = Date().addingTimeInterval(3_600)
+        let refused = UUID()
+        try harness.send(.start, refused)
+        #expect(await waitUntil { harness.transport.payloads.readResult(refused) != nil })
+        #expect(harness.transport.payloads.readResult(refused)?.status == .limitReached)
+        #expect(transcriber.liveBegins == 0 && transcriber.plainBegins == 1)
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        #expect(previewPosts(harness) == 0)
+    }
+
+    /// The mic in a note isn't the keyboard's dictation: no keyboard listens to it, so it has no
+    /// preview.
+    @Test func aNotesOwnDictationHasNoPreview() async throws {
+        let transcriber = PreviewingTranscriber()
+        let harness = makeHarness(transcriber: transcriber)
+        let requestId = try #require(harness.session.beginInAppDictation())
+
+        #expect(harness.session.phase == .recording(requestId))
+        #expect(transcriber.liveBegins == 0 && transcriber.plainBegins == 1)
+        #expect(harness.transport.payloads.readLivePreview() == nil)
+        #expect(previewPosts(harness) == 0)
+        harness.session.endDictation(commit: false)
+    }
+
+    /// Murmur crashed, or iOS ended it for memory, in the middle of a dictation: nothing told it,
+    /// so its preview is still in the shared container. The next start removes it.
+    @Test func aPreviewLeftByAKilledAppIsRemovedAtStart() throws {
+        let container = SharedContainer.temporary()
+        let left = LivePreview(requestId: UUID(), settled: "words the app left", unsettled: " behind")
+        try IPCPayloadStore(container: container).write(livePreview: left)
+        let transport = InMemoryIPCTransport(container: container)
+        #expect(transport.payloads.readLivePreview() == left)
+        let settings = SharedSettings(defaults: UserDefaults(suiteName: "test.murmur.session.\(UUID().uuidString)"))
+
+        let session = SessionController(
+            transport: transport, pipeline: DictationPipeline(cleanup: NoCleanup()), assets: SpeechAssetManager(),
+            history: HistorySpy(), settings: settings)
+
+        #expect(session.phase == .off)
+        #expect(transport.payloads.readLivePreview() == nil)
+        #expect(!FileManager.default.fileExists(atPath: container.directory("live").path))
     }
 }

@@ -115,6 +115,25 @@ protocol UtteranceTimingProviding: AnyObject {
     func takeTimings() -> UtteranceTimings?
 }
 
+/// A dictation's words while it is still being spoken, for the keyboard's preview. `settled` won't
+/// change any more; `unsettled` is the newest stretch, which the recognizer may still rewrite, with
+/// the space that separates it from `settled`. Both are text as it reads, and `settled + unsettled`
+/// is everything recognized so far. Called on the recognizer's own task: never the main thread,
+/// never the audio thread.
+typealias LiveWordsHandler = @Sendable (_ settled: String, _ unsettled: String) -> Void
+
+/// A transcriber that can say the words while the dictation is being spoken: `AppleSpeechTranscriber`,
+/// and `OpenAITranscriber` through the on-device model that listens beside the cloud.
+protocol LiveWordsProviding: AnyObject {
+    /// `beginUtterance()` for a dictation whose words are shown as they are recognized. True when
+    /// `handler` will hear them. False when this dictation has none (no on-device model is
+    /// listening to it, or the week's words wait for the server): `handler` is then never called.
+    /// Either way the dictation has begun exactly as `beginUtterance()` begins it. The handler is
+    /// dropped when the dictation ends (finish, cancel, abandon, shutdown); a call already on its
+    /// way can still arrive, so the receiver tells dictations apart itself.
+    func beginUtterance(liveWords handler: @escaping LiveWordsHandler) -> Bool
+}
+
 enum TranscriberEngine: String, CaseIterable, Identifiable {
     /// OpenAI when the backend is configured, otherwise on-device. Default.
     case auto

@@ -20,7 +20,7 @@ which only counts while the keyboard is off screen.
 
 ```
 Keyboard ext ──command file + Darwin notify──► App session (hot mic) ──► transcribe fn (OpenAI)
-     ▲ libnotify state (status, mic level)                                    │   └► cleanup fn (OpenAI or Claude)
+     ▲ libnotify state (status, mic level), live words file                   │   └► cleanup fn (OpenAI or Claude)
      └────────────── result file {requestId, documentIdentifier, text} ◄─────┘
 ```
 
@@ -106,7 +106,7 @@ translation target follow the iPhone's language (ЙЦУКЕН on a Russian iPhon
 
 ## Modes
 
-Five, in the keyboard's style chip and the menu's Style:
+Five, in the keyboard's style pill and the menu's Style:
 - **Word for word** (the default): your words as spoken, punctuated. The AI runs only when the
   transcript has no punctuation, a spoken command ("comma", "new line") or a spelled-out address,
   and then under rules of its own that keep every word (`VERBATIM_RULES`).
@@ -137,16 +137,18 @@ Cyrillic, brands in Latin).
 ## Keyboard
 
 The default is the voice keyboard:
-- a bar with the menu, outlined chips for translation and the style, and Delete;
+- a bar with the menu, an outlined chip for translation, a solid pill for the style, and Delete;
 - a big ink talk button with a ring around it, which turns red with ✓ and echo rings that follow
-  the voice while it listens (nothing else on the keyboard is red);
+  the voice while it listens (nothing else on the keyboard is red). The words of the dictation
+  show under it while it listens, when the language's on-device model is on the iPhone;
 - space and return.
 
 It is 278 pt tall (272 in landscape). It can't dictate without Allow Full Access, so until that is
 on the keyboard shows Numbers first, where typing works. Settings › Keyboard › Layout also offers
-Numbers first and QWERTY, with the same chips and a listening panel. The menu button opens the
-keyboard's own page: translation, Add to dictionary, haptics, the ready vibration, start and stop
-sounds, and Light / Dark / Auto, with ABC and a link to Murmur's Settings.
+Numbers first and QWERTY, with the same chip and pill and a listening panel, which shows the
+words too. The menu button opens the keyboard's own page: translation, Add to dictionary, haptics,
+the ready vibration, start and stop sounds, and Light / Dark / Auto, with ABC and a link to
+Murmur's Settings.
 
 Debug builds can pin any keyboard state for screenshots: launch the app with
 `-keyboard-demo <state>[@voice|@numbers|@qwerty]` (e.g. `listening@numbers`; the states are in

@@ -34,7 +34,8 @@ public enum BrandContrast {
 /// Murmur's colours: black, white and a few greys, plus one red that marks an open microphone
 /// and nothing else. Every token has a light and a dark value (the app is light only; the keyboard
 /// follows its host app), and a few have Increase Contrast values. `MurmurBrandTests` holds every
-/// text token to 4.5:1 on the backgrounds it is used on.
+/// text token to 4.5:1 on the backgrounds it is used on, except the label of a locked control on
+/// `disabled`, which is held to 3:1.
 public enum BrandToken: String, CaseIterable, Sendable {
     /// Screen background.
     case canvas

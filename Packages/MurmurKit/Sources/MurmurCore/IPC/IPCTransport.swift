@@ -11,7 +11,8 @@ public protocol IPCObservation: AnyObject, Sendable {
 ///
 /// - Hot state: one 64-bit value (status, mic level, request tag, sequence), polled cheaply.
 /// - Events: payload-less Darwin notifications.
-/// - Payloads: small JSON files in the App Group container (`payloads`).
+/// - Payloads: small JSON files in the App Group container (`payloads`), among them the words of
+///   the dictation being recorded (`LivePreview`), which the app removes when the dictation ends.
 public protocol IPCTransport: AnyObject, Sendable {
     var payloads: IPCPayloadStore { get }
 
@@ -40,6 +41,8 @@ public final class IPCPayloadStore: @unchecked Sendable {
     private var dictionaryAdditionsURL: URL { container.url("dictionary-additions.json") }
     private var resultsDirectory: URL { container.directory("results") }
     private var claimsDirectory: URL { container.directory("claimed") }
+    private var livePreviewDirectory: URL { container.directory("live") }
+    private var livePreviewURL: URL { livePreviewDirectory.appendingPathComponent("preview.json") }
 
     // MARK: Commands (keyboard → app)
 
@@ -146,6 +149,40 @@ public final class IPCPayloadStore: @unchecked Sendable {
 
     public func clearSessionFailure() {
         JSONFile.remove(sessionFailureURL)
+    }
+
+    // MARK: Live preview (app → keyboard)
+
+    /// The words of the dictation being recorded. Only the app writes it. Staged beside the file
+    /// and renamed over it, so a reader never sees half of it; its directory is kept out of backups.
+    public func write(livePreview: LivePreview) throws {
+        let data = try JSONEncoder().encode(livePreview)
+        let directory = livePreviewDirectory
+        if !FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            // The words are no part of a backup.
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            var marked = directory
+            try? marked.setResourceValues(values)
+        }
+        // Staged here, not by `.atomic`, whose temporary copy a sandboxed process keeps outside
+        // this folder: `clearLivePreview()` then takes a write that was cut short with it.
+        let staging = directory.appendingPathComponent("preview.tmp")
+        try data.write(to: staging)
+        guard rename(staging.path, livePreviewURL.path) == 0 else { throw CocoaError(.fileWriteUnknown) }
+    }
+
+    public func readLivePreview() -> LivePreview? {
+        JSONFile.read(LivePreview.self, from: livePreviewURL)
+    }
+
+    /// Removes the preview, and with it a write that was cut short: the file has a directory of
+    /// its own (`live/`), where writes are staged too, so that it can all go at once. The app calls
+    /// it when the dictation ends; the keyboard when it stops following a dictation (the check, the
+    /// cross, or the app stopped answering), should the app be gone.
+    public func clearLivePreview() {
+        JSONFile.remove(livePreviewDirectory)
     }
 
     // MARK: Dictionary additions (keyboard → app)

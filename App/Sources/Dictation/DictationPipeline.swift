@@ -37,7 +37,9 @@ struct ActiveDictation: Sendable {
 }
 
 /// What the session gets back: the IPC result for the keyboard, the history record, and the
-/// timings log's entry. The raw transcript stays out of the App Group files.
+/// timings log's entry. The raw transcript stays out of the App Group files, except the end of the
+/// dictation being recorded, which `LiveWordsPublisher` shows the keyboard and removes when the
+/// dictation ends.
 struct DictationOutcome: Sendable {
     let result: DictationResult
     let transcript: Transcript

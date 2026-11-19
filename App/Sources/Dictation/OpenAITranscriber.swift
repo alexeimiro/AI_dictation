@@ -13,7 +13,9 @@ import os
 /// signed-out account), so a dictation isn't lost. Never when the server refused the account (the
 /// free plan's weekly words are used up, or too many dictations a minute), nor while the week's
 /// words are known to be used up: the iPhone's own recognition would make the limit mean nothing.
-final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingProviding, @unchecked Sendable {
+/// The fallback's words are also what the keyboard shows while it listens (`LiveWordsProviding`).
+final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingProviding, LiveWordsProviding,
+                               @unchecked Sendable {
     static let sampleRate: Double = 16_000
     /// Shorter recordings are treated as silence instead of being sent.
     static let minimumSeconds: Double = 0.3
@@ -147,7 +149,14 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
         if let onDevice { fallback?.setLanguage(onDevice) }
     }
 
-    func beginUtterance() {
+    func beginUtterance() { _ = begin(liveWords: nil) }
+
+    /// The words come from the on-device model that listens beside the cloud, so there are none when
+    /// it isn't listening. Nor while the week's words were said to be used up and the server hasn't
+    /// said they are back: the fallback still listens as before, but nothing it hears is shown.
+    func beginUtterance(liveWords handler: @escaping LiveWordsHandler) -> Bool { begin(liveWords: handler) }
+
+    private func begin(liveWords handler: LiveWordsHandler?) -> Bool {
         let (unended, listen) = lock.withLock { () -> (Bool, Bool) in
             // The last dictation's part, when a reconnect let this one begin while that one was
             // still uploading: its finish can no longer claim it, so it's ended here.
@@ -163,7 +172,12 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
             return (unended, fallbackListening)
         }
         if unended { fallback?.abandonUtterance() }
-        if listen { fallback?.beginUtterance() }
+        guard listen, let fallback else { return false }
+        if let handler, wordsUsedUpUntil() == nil, let live = fallback as? LiveWordsProviding {
+            return live.beginUtterance(liveWords: handler)
+        }
+        fallback.beginUtterance()
+        return false
     }
 
     /// Audio thread.

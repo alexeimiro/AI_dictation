@@ -5,7 +5,8 @@ import SwiftUI
 /// The row above the keys: the menu on the left and the main controls on the right, 46 pt tall
 /// and 12 pt from the top, with no divider. The voice keyboard keeps Delete there; the key layouts
 /// have the mic, or Start while no session runs. While a dictation runs ✕ takes the menu's place
-/// and the style pill fades; while a page is open ✕ closes it.
+/// and the style pill turns grey; on the voice keyboard "Listening" and the time sit beside ✕
+/// while the dictation's words show under the talk button. While a page is open ✕ closes it.
 struct KeyboardToolbar: View {
     let model: KeyboardModel
 
@@ -13,12 +14,14 @@ struct KeyboardToolbar: View {
         let metrics = BarMetrics.of(model)
         HStack(spacing: 4) {
             leading(metrics)
-            // The spacer keeps the right-hand controls at the edge when the centre is empty.
+            // The spacer keeps the right-hand controls at the edge when the centre is empty. The
+            // Debug readout sits inside, after it, so a full centre squeezes the readout and not
+            // the controls.
             HStack(spacing: 0) {
                 centre(metrics)
                 Spacer(minLength: 0)
+                memoryReadout
             }
-            memoryReadout
             trailing(metrics)
         }
         .padding(.horizontal, 8)
@@ -47,8 +50,13 @@ struct KeyboardToolbar: View {
 
     @ViewBuilder
     private func centre(_ metrics: BarMetrics) -> some View {
-        if model.overlay != nil || model.isCapturing {
+        if model.overlay != nil {
             EmptyView()
+        } else if model.isCapturing {
+            // The voice pad's words take the caption's place under the disc, so it moves up here.
+            if model.showsVoicePad, model.showsLiveWords {
+                ListeningBarCaption(model: model)
+            }
         } else if model.showsVoicePad {
             // The voice pad shows its notices over the talk button.
             if model.translationEnabled {
@@ -135,6 +143,7 @@ struct KeyboardToolbar: View {
             Text(memory)
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundStyle(KeyboardChrome.muted)
+                .lineLimit(1)
         }
     }
 
@@ -263,7 +272,8 @@ private struct StartPill: View {
 }
 
 /// Replaces the key layouts' keys while a dictation runs: the red dot with its rings while it
-/// listens, and two lines. The toolbar holds ✕ and ✓.
+/// listens, and two lines. A dictation that has a preview shows its words under them, which moves
+/// neither the dot nor the lines. The toolbar holds ✕ and ✓.
 struct ListeningPanel: View {
     let model: KeyboardModel
 
@@ -277,6 +287,14 @@ struct ListeningPanel: View {
                     .accessibilityHidden(true)
             }
             ListeningCaption(model: model)
+                .frame(maxWidth: .infinity)
+                // An overlay has no size in the stack, so the dot and the caption stay where they are.
+                .overlay(alignment: .bottom) {
+                    if model.showsLiveWords {
+                        LiveWords(model: model, place: .panel)
+                            .offset(y: LiveWords.Place.panel.height + 9)
+                    }
+                }
         }
         .foregroundStyle(KeyboardChrome.primary)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

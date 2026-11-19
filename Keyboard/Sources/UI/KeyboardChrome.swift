@@ -31,11 +31,19 @@ enum KeyboardChrome {
     static let primaryGlyph = Color(uiColor: primaryGlyphUIColor)
     static let muted = Color(uiColor: mutedUIColor)
     static let border = Color(uiColor: borderUIColor)
+    /// The newest words of a dictation, which may still change. Greyer than `muted` on the dark
+    /// panel, where `muted` is too close to ink to tell the two apart; `muted` itself in light,
+    /// where the greyer tone would not read on the panel.
+    static let unsettled = Color(uiColor: UIColor { traits in
+        UIColor.brand(traits.userInterfaceStyle == .dark ? .third : .second).resolvedColor(with: traits)
+    })
     /// A switch that is off.
     static let track = Color(brand: .track)
     /// The microphone is open: the talk button while it listens, and its rings. Nothing else is red.
     static let live = Color(brand: .live)
     static let liveGlyph = Color(brand: .onLive)
+    /// The style pill while a dictation holds its options.
+    static let disabled = Color(brand: .disabled)
 }
 
 /// A small, tactile press treatment used by the mic, toolbar controls, and page rows.
@@ -73,8 +81,8 @@ struct KeyboardSurface<S: Shape>: View {
     }
 }
 
-/// An outlined capsule with a short label: the style pill, the translate chip, Undo, a recent
-/// language. `filled` turns it solid, for the one that is chosen or open.
+/// An outlined capsule with a short label: the translate chip, Undo, a recent language. `filled`
+/// turns it solid, for the one that is chosen.
 struct OutlineChip<Label: View>: View {
     var height: CGFloat = 32
     var filled = false

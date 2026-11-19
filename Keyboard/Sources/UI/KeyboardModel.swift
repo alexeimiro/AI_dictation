@@ -37,6 +37,13 @@ final class KeyboardModel {
     var overlay: KeyboardOverlay?
     /// Recent mic levels for the waveform, oldest first.
     var levels: [Double] = Array(repeating: 0.06, count: 30)
+    /// The dictation's words so far, while it listens (`KeyboardSessionClient.livePreview`). Read
+    /// only by `LiveWords`, so new words redraw nothing else.
+    var livePreview: LivePreview?
+    /// This dictation has a preview: decided as it begins and the same until it stops listening, so
+    /// the listening screens pick their layout from it once. Kept apart from `livePreview`, which
+    /// changes four times a second.
+    var showsLiveWords = false
     /// Debug builds: the extension's memory, shown in the toolbar.
     var debugMemory: String?
     /// The voice keyboard is up: its toolbar has Delete where the key layouts have the mic.
@@ -165,6 +172,10 @@ final class KeyboardModel {
         } else if levels.contains(where: { $0 > 0.06 }) {
             levels = Array(repeating: 0.06, count: levels.count)
         }
+        // Guarded: this runs twenty times a second.
+        let preview = client.livePreview
+        if livePreview != preview { livePreview = preview }
+        if showsLiveWords != (preview != nil) { showsLiveWords = preview != nil }
     }
 }
 

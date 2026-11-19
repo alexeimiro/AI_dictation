@@ -12,7 +12,7 @@ import Speech
 /// `AVAudioConverter` on the audio thread and fed through an `AsyncStream`. The engine
 /// (SpeechTranscriber or DictationTranscriber) is chosen per language by `SpeechAssetManager`;
 /// switching languages prepares a new analyzer in the background while audio is buffered.
-final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
+final class AppleSpeechTranscriber: Transcriber, LiveWordsProviding, @unchecked Sendable {
     enum Kind: String, Sendable, CaseIterable {
         /// `SpeechTranscriber`: the iOS 26 model, punctuates automatically.
         case speech
@@ -43,17 +43,36 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
     /// Set by `shutdown`, so a teardown or preparation that ends after it leaves no analyzer
     /// running for the rest of the process. A later `prepare` clears it.
     private var isShutDown = false
+    /// The live-words handler of a dictation that began before its analyzer was ready; `adopt` hands it over.
+    private var waitingHandler: LiveWordsHandler?
 
     private final class Utterance: @unchecked Sendable {
         let analyzer: SpeechAnalyzer
         let continuation: AsyncStream<AnalyzerInput>.Continuation
         let results: Task<String, Error>
+        let live: LiveWordsSink
 
         init(analyzer: SpeechAnalyzer, continuation: AsyncStream<AnalyzerInput>.Continuation,
-             results: Task<String, Error>) {
+             results: Task<String, Error>, live: LiveWordsSink) {
             self.analyzer = analyzer
             self.continuation = continuation
             self.results = results
+            self.live = live
+        }
+    }
+
+    /// Where an analyzer's results task reports the words so far. The task starts with the analyzer,
+    /// before any dictation exists; the dictation that takes the analyzer sets its handler, and
+    /// ending the dictation takes it away.
+    private final class LiveWordsSink: @unchecked Sendable {
+        private let lock = NSLock()
+        private var handler: LiveWordsHandler?
+        func set(_ handler: LiveWordsHandler?) { lock.withLock { self.handler = handler } }
+        /// The results task. The newest words are formatted only when somebody listens (the fold keeps
+        /// the settled ones up to date either way); the handler runs outside the lock.
+        func report(_ fold: LiveWordsFold) {
+            guard let handler = lock.withLock({ handler }) else { return }
+            handler(fold.settled, fold.unsettled)
         }
     }
 
@@ -103,16 +122,31 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
     }
 
     func beginUtterance() {
+        begin(liveWords: nil)
+    }
+
+    /// The iPhone's own recognizer has words for every dictation; late, when its analyzer is still
+    /// being prepared.
+    func beginUtterance(liveWords handler: @escaping LiveWordsHandler) -> Bool {
+        begin(liveWords: handler)
+        return true
+    }
+
+    private func begin(liveWords handler: LiveWordsHandler?) {
         let needsAnalyzer = lock.withLock { () -> Bool in
             backlog.removeAll()
+            current?.live.set(nil)          // one the caller never ended keeps no handler
             if let prepared {
+                prepared.live.set(handler)
                 current = prepared
                 self.prepared = nil
                 waitingForAnalyzer = false
+                waitingHandler = nil
                 return false
             }
             current = nil
             waitingForAnalyzer = true
+            waitingHandler = handler
             return !preparingInFlight
         }
         if needsAnalyzer { prepareNext() }
@@ -139,18 +173,20 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
             defer {
                 current = nil
                 waitingForAnalyzer = false
+                waitingHandler = nil
                 backlog.removeAll()
             }
             return current
         }
         guard let utterance else { return "" }
+        utterance.live.set(nil)
         let interval = signposter.beginInterval("finalize")
         defer { signposter.endInterval("finalize", interval) }
         utterance.continuation.finish()
         try await utterance.analyzer.finalizeAndFinishThroughEndOfInput()
         let text = try await utterance.results.value
         prepareNext()
-        return Self.normalize(text)
+        return LiveWordsFold.normalize(text)
     }
 
     /// On-device, the transcript alone: the pipeline translates it.
@@ -163,10 +199,12 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
             defer {
                 current = nil
                 waitingForAnalyzer = false
+                waitingHandler = nil
                 backlog.removeAll()
             }
             return current
         }
+        utterance?.live.set(nil)
         if let utterance { await Self.discard(utterance) }
         prepareNext()
     }
@@ -179,10 +217,12 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
             defer {
                 current = nil
                 waitingForAnalyzer = false
+                waitingHandler = nil
                 backlog.removeAll()
             }
             return current
         }
+        utterance?.live.set(nil)
         Task { [weak self] in
             if let utterance { await Self.discard(utterance) }
             self?.prepareNextIfIdle()
@@ -196,11 +236,15 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
             defer {
                 current = nil
                 prepared = nil
+                waitingHandler = nil
                 backlog.removeAll()
             }
             return [current, prepared].compactMap { $0 }
         }
-        for utterance in utterances { await Self.discard(utterance) }
+        for utterance in utterances {
+            utterance.live.set(nil)
+            await Self.discard(utterance)
+        }
         await SpeechModels.endRetention()
     }
 
@@ -230,33 +274,27 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
         }
         try await analyzer.prepareToAnalyze(in: format)
         let (stream, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self)
-        let results = Task { try await Self.collectFinalText(from: module) }
+        let live = LiveWordsSink()
+        let results = Task { try await Self.collectFinalText(from: module, live: live) }
         try await analyzer.start(inputSequence: stream)
-        return Utterance(analyzer: analyzer, continuation: continuation, results: results)
+        return Utterance(analyzer: analyzer, continuation: continuation, results: results, live: live)
     }
 
-    private static func collectFinalText(from module: any SpeechModule) async throws -> String {
-        var text = ""
+    /// The transcript is made of the final results; the ones before them only feed the live words.
+    private static func collectFinalText(from module: any SpeechModule, live: LiveWordsSink) async throws -> String {
+        var fold = LiveWordsFold()
         if let transcriber = module as? SpeechTranscriber {
-            for try await result in transcriber.results where result.isFinal {
-                appendSegment(String(result.text.characters), to: &text)
+            for try await result in transcriber.results {
+                fold.add(String(result.text.characters), isFinal: result.isFinal)
+                live.report(fold)
             }
         } else if let transcriber = module as? DictationTranscriber {
-            for try await result in transcriber.results where result.isFinal {
-                appendSegment(String(result.text.characters), to: &text)
+            for try await result in transcriber.results {
+                fold.add(String(result.text.characters), isFinal: result.isFinal)
+                live.report(fold)
             }
         }
-        return text
-    }
-
-    /// Final segments usually carry their own leading space; add one when they don't.
-    private static func appendSegment(_ segment: String, to text: inout String) {
-        guard !segment.isEmpty else { return }
-        if let last = text.last, let first = segment.first,
-           last.isLetter || last.isNumber, first.isLetter || first.isNumber {
-            text += " "
-        }
-        text += segment
+        return fold.text
     }
 
     /// Prepares the analyzer for the next dictation in the background, discarding a previously
@@ -335,6 +373,8 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
             // Ready only after `shutdown`: discarded like a stale one.
             if isShutDown { return ([], nil, nil, utterance) }
             if waitingForAnalyzer, current == nil {
+                utterance.live.set(waitingHandler)
+                waitingHandler = nil
                 current = utterance
                 waitingForAnalyzer = false
                 defer { backlog.removeAll() }
@@ -418,11 +458,6 @@ final class AppleSpeechTranscriber: Transcriber, @unchecked Sendable {
 
     private final class SuppliedFlag: @unchecked Sendable {
         var value = false
-    }
-
-    private static func normalize(_ text: String) -> String {
-        text.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     enum TranscriberError: LocalizedError {

@@ -50,6 +50,7 @@ final class SessionController {
 
     @ObservationIgnored private let transport: IPCTransport
     @ObservationIgnored private let publisher: HotStatePublisher
+    @ObservationIgnored private let liveWords: LiveWordsPublisher
     @ObservationIgnored private let pipeline: DictationPipeline
     @ObservationIgnored private let assets: SpeechAssetManager
     @ObservationIgnored private let transcription: (any CloudTranscribing)?
@@ -136,6 +137,7 @@ final class SessionController {
         self.signedIn = signedIn
         self.transport = transport
         self.publisher = HotStatePublisher(transport: transport)
+        self.liveWords = LiveWordsPublisher(transport: transport)
         self.pipeline = pipeline
         self.assets = assets
         self.transcription = transcription
@@ -153,7 +155,15 @@ final class SessionController {
             MainActor.assumeIsolated { self?.keyboardStatusChanged() }
         }
         observeAudioNotifications()
+        // Swiped away while it records: iOS says so first, and the keyboard's words go with the app.
+        notificationTokens.append(NotificationCenter.default.addObserver(
+            forName: UIApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.appWillTerminate() }
+        })
         transport.payloads.prune(olderThan: 24 * 3600)
+        // A preview the app left when it was killed mid-dictation: its words must not outlive it.
+        transport.payloads.clearLivePreview()
     }
 
     // MARK: Session lifecycle
@@ -236,6 +246,10 @@ final class SessionController {
         languages = [language.tag: language]
         phase = .ready
     }
+
+    /// Tests: where a reconnect leaves the session, ready again, while a dictation that ended
+    /// before it may still be uploading.
+    func reconnectedForTesting() { becomeReady(afterReconnect: true) }
 
     /// Set by `pinForScreenshots`: the app becoming active must not restart a pinned session.
     @ObservationIgnored private var isPinnedForScreenshots = false
@@ -533,6 +547,7 @@ final class SessionController {
         transcriber = nil
         languages = [:]
         transport.payloads.clearSessionFailure()
+        liveWords.close()
         phase = .off
         publisher.set(.off)
         transport.post(.stateChanged)
@@ -546,6 +561,7 @@ final class SessionController {
     func discardDictations() {
         if let dictation = active {
             active = nil
+            liveWords.close()
             capTask?.cancel()
             _ = audio.closeGate()
             playSound(.stop)
@@ -587,6 +603,10 @@ final class SessionController {
         backgroundSince = Date()
         scheduleIdleStop()
     }
+
+    /// The app is about to be ended (swiped away while it runs in the background): the preview goes
+    /// with it. A crash or a kill for memory gives no such notice; `init` clears what that leaves.
+    func appWillTerminate() { liveWords.close() }
 
     // MARK: Dictation
 
@@ -693,7 +713,21 @@ final class SessionController {
         // The last Auto-detect dictation may have been in another language.
         if language.language.isAutomatic { updateAutomaticFallback() }
         idleTask?.cancel()
-        transcriber.beginUtterance()
+        // The keyboard shows the words while it listens, when an on-device model hears this dictation.
+        // Not for a note's own mic, and not while the week's words were said to be used up and the
+        // server hasn't said they are back: words on screen would stand in for a dictation it refuses.
+        if source == .keyboard, !settings.wordsAwaitServer, let live = transcriber as? LiveWordsProviding {
+            if live.beginUtterance(liveWords: liveWords.handler(for: requestId)) {
+                // Before `recording` is published below: the keyboard picks its listening layout from it.
+                liveWords.open()
+            } else {
+                liveWords.close()
+            }
+        } else {
+            // Whatever might still be published is not this dictation's.
+            liveWords.close()
+            transcriber.beginUtterance()
+        }
         audio.openGate()
         active = ActiveDictation(requestId: requestId, documentIdentifier: documentIdentifier,
                                  style: style, language: language.tag,
@@ -754,6 +788,8 @@ final class SessionController {
         }
         guard let dictation = active, let transcriber else { return }
         active = nil
+        // Gone before the state changes and before anything is sent.
+        liveWords.close()
         capTask?.cancel()
         let frames = audio.closeGate()
         let audioSeconds = Double(frames) / (audio.inputFormat?.sampleRate ?? 48_000)
@@ -833,6 +869,9 @@ final class SessionController {
         case .needsReconnect where !afterReconnect: return
         default: break
         }
+        // An earlier dictation's completion, or a reconnect, can get here under one still being
+        // recorded: its preview doesn't outlive the `recording` phase.
+        liveWords.close()
         phase = .ready
         idleSince = Date()
         publisher.set(.ready)
@@ -1175,6 +1214,7 @@ final class SessionController {
                 logger.error("Reconnect failed: \(error.localizedDescription, privacy: .public)")
             }
         }
+        liveWords.close()
         phase = .needsReconnect
         publisher.set(.needsReconnect)
         transport.post(.stateChanged)

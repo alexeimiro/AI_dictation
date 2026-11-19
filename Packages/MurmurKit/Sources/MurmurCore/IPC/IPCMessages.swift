@@ -214,6 +214,8 @@ public enum IPCEvent: String, Sendable, CaseIterable {
     case resultReady = "result"
     case keyboardStatus = "kbstatus"
     case dictionaryAdded = "dict"
+    /// The app wrote or removed the `LivePreview`.
+    case livePreview = "preview"
 
     public func notificationName(group: String) -> String {
         "\(group).\(rawValue)"

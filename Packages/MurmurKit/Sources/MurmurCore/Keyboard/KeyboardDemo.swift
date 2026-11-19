@@ -8,6 +8,9 @@ public struct KeyboardDemo: Equatable, Sendable {
         /// `idle` has a live session; `off` has none, so the key layouts show Start.
         case idle, off, translate, starting, opening, reconnect, listening, processing, inserted
         case notice, pending, fullAccess, style, menu
+        /// Listening with the dictation's words on screen: `wordsStart` before the first one,
+        /// `wordsRunning` as they come, a word at a time.
+        case words, wordsStart, wordsRunning
         /// Basic's weekly words are used up.
         case limit
         /// Nobody is signed in: "You are logged out" in place of the whole keyboard.
@@ -35,5 +38,24 @@ public struct KeyboardDemo: Equatable, Sendable {
 
     public var value: String {
         layout.map { "\(state.rawValue)@\($0.rawValue)" } ?? state.rawValue
+    }
+
+    /// What the `words` state shows for `requestId`: more than two lines on either listening
+    /// screen, the last words unsettled.
+    public static func sampleWords(for requestId: UUID) -> LivePreview {
+        LivePreview(requestId: requestId,
+                    settled: "So I was thinking we could meet on Thursday afternoon instead, because the morning is already full,",
+                    unsettled: " and then go over the numbers")
+    }
+
+    /// What the `wordsRunning` state has heard after `count` words: the sample over and over, its
+    /// last three words unsettled, cut to its end as the app cuts it (`LivePreview.tail`).
+    public static func runningWords(for requestId: UUID, count: Int) -> LivePreview {
+        let sample = sampleWords(for: requestId).text.split(separator: " ")
+        let words = (0..<max(0, count)).map { String(sample[$0 % sample.count]) }
+        let settled = words.dropLast(3).joined(separator: " ")
+        let unsettled = words.suffix(3).joined(separator: " ")
+        return LivePreview.tail(requestId: requestId, settled: settled,
+                                unsettled: settled.isEmpty ? unsettled : " " + unsettled)
     }
 }

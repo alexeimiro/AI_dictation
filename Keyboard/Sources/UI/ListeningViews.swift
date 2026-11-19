@@ -104,6 +104,30 @@ struct ListeningCaption: View {
     }
 }
 
+/// "Listening" and the time in the toolbar, beside ✕: where the voice pad's caption goes while the
+/// dictation's words show under the talk button.
+struct ListeningBarCaption: View {
+    let model: KeyboardModel
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(model.captionTitle)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(KeyboardChrome.primary)
+            if let since = model.listeningSince {
+                Text(since, style: .timer)
+                    .font(.system(size: 15))
+                    .monospacedDigit()
+                    .foregroundStyle(KeyboardChrome.muted)
+            }
+        }
+        .lineLimit(1)
+        .fixedSize()
+        .padding(.leading, 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// The line under the voice pad's talk button while nothing records: what a tap will do, what is
 /// happening, or the last dictation with Undo.
 struct PadHint: View {

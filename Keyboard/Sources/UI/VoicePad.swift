@@ -3,9 +3,10 @@ import SwiftUI
 
 /// The voice keyboard under the toolbar: the big talk button with a hint under it. While a
 /// dictation runs the row of keys below gives way to the listening view (the rings and two
-/// lines), and the disc stays put as ✓, so one spot starts and finishes. A notice or the last
-/// dictation that couldn't be inserted sits above the disc. Dragging in the empty space moves the
-/// cursor, like holding the space bar.
+/// lines), and the disc stays put as ✓, so one spot starts and finishes. A dictation that has a
+/// preview shows its words under the disc instead, two lines of them, and "Listening" with the
+/// time moves up to the toolbar. A notice or the last dictation that couldn't be inserted sits
+/// above the disc. Dragging in the empty space moves the cursor, like holding the space bar.
 struct VoicePad: View {
     let model: KeyboardModel
     /// Trackpad distance already turned into cursor moves.
@@ -24,24 +25,29 @@ struct VoicePad: View {
         /// From the disc to the line under it; more while the rings need the room.
         var gap: CGFloat
         var listeningGap: CGFloat
+        /// From the disc to the dictation's words: clear of the rings at full voice.
+        var wordsGap: CGFloat
 
-        static let regular = Metrics(top: 18, mic: 76, smallMic: 56, gap: 12, listeningGap: 30)
-        static let compact = Metrics(top: 10, mic: 60, smallMic: 46, gap: 8, listeningGap: 22)
+        static let regular = Metrics(top: 18, mic: 76, smallMic: 56, gap: 12, listeningGap: 30, wordsGap: 40)
+        static let compact = Metrics(top: 10, mic: 60, smallMic: 46, gap: 8, listeningGap: 22, wordsGap: 34)
     }
 
     var body: some View {
         let metrics = model.compactHeight ? Metrics.compact : .regular
         let card = showsCard
         let listening = model.listeningSince != nil
+        let live = model.showsLiveWords
         VStack(spacing: 0) {
             if card {
                 topSlot
                     .padding(.horizontal, 10)
                     .padding(.top, 2)
             }
-            VStack(spacing: listening ? metrics.listeningGap : metrics.gap) {
+            VStack(spacing: live ? metrics.wordsGap : listening ? metrics.listeningGap : metrics.gap) {
                 MicButton(model: model, size: card ? metrics.smallMic : metrics.mic, showsRings: true)
-                if model.isCapturing {
+                if live {
+                    LiveWords(model: model, place: .pad)
+                } else if model.isCapturing {
                     ListeningCaption(model: model)
                 } else {
                     PadHint(model: model)

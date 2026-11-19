@@ -2,10 +2,12 @@ import MurmurBrand
 import MurmurCore
 import SwiftUI
 
-/// The style pill: an outlined capsule with the style's name and ⌄. It fades while a dictation
-/// runs, whose style is already fixed, and opens the style page, where it turns solid.
+/// The style pill: a solid ink capsule with the style's name, as tall as the bar's disc. While a
+/// dictation runs, whose style is already fixed, it is grey; while the style page is open it is
+/// the reverse of rest, an ink outline, so open and closed differ.
 struct StylePill: View {
     let model: KeyboardModel
+    /// The touch target's height; the capsule is `BarMetrics.disc`.
     var height: CGFloat = 46
 
     var body: some View {
@@ -14,12 +16,40 @@ struct StylePill: View {
         Button {
             open ? model.actions.hideOverlay() : model.actions.showOverlay(.style)
         } label: {
-            OutlineChip(filled: open) {
+            ZStack(alignment: .trailing) {
+                // The outlined pill this one replaced, unseen: it keeps the width the pill always
+                // had, so the touch area is the same and nothing beside it in the bar moves. The
+                // capsule is a little narrower and keeps the trailing edge.
                 HStack(spacing: 3) {
                     Text(model.style.shortTitle)
-                    Image(systemName: open ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 10, weight: .bold))
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
                 }
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 12)
+                .hidden()
+
+                Text(model.style.shortTitle)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .foregroundStyle(locked ? KeyboardChrome.muted
+                                     : open ? KeyboardChrome.primary : KeyboardChrome.primaryGlyph)
+                    .padding(.horizontal, 14)
+                    .frame(height: BarMetrics.of(model).disc)
+                    .background {
+                        if locked {
+                            KeyboardSurface(shape: Capsule(style: .circular), fill: KeyboardChrome.disabled)
+                        } else if !open {
+                            Capsule(style: .circular).fill(KeyboardChrome.primary)
+                        }
+                    }
+                    .overlay {
+                        if open, !locked {
+                            Capsule(style: .circular).strokeBorder(KeyboardChrome.primary, lineWidth: 1.5)
+                        }
+                    }
             }
             .frame(height: height)
             .padding(.horizontal, 2)
@@ -27,7 +57,6 @@ struct StylePill: View {
         }
         .buttonStyle(.keyboardPress)
         .disabled(locked)
-        .opacity(locked ? 0.4 : 1)
         .accessibilityLabel("Style: \(model.style.title)")
         .accessibilityHint("Shows the writing styles")
     }

@@ -139,6 +139,11 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         }
         repeater.stop()
         client?.deactivate()
+        // The words go with the screen: the client's copy is emptied without a word to its host. The
+        // layout flag stays, so coming back to the dictation moves nothing.
+        if let shown = model.livePreview, !shown.isEmpty {
+            model.livePreview = LivePreview(requestId: shown.requestId)
+        }
         ScreenWake.keepAwake(false, from: self)
         memoryTimer?.invalidate()
         #if DEBUG
@@ -865,6 +870,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         let id = UUID()
         model.pendingResult = nil
         model.undoableWords = nil
+        model.livePreview = nil
+        model.showsLiveWords = false
         model.sessionStatus = demo.state == .off ? .off : .ready
         switch demo.state {
         case .idle, .off:
@@ -882,6 +889,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             model.translationEnabled = true
             model.phase = .listening(id, since: Date().addingTimeInterval(-12))
             startDemoLevels()
+        case .words, .wordsStart, .wordsRunning:
+            let running = demo.state == .wordsRunning
+            model.phase = .listening(id, since: Date().addingTimeInterval(running ? 0 : -7))
+            model.livePreview = demo.state == .words ? KeyboardDemo.sampleWords(for: id) : LivePreview(requestId: id)
+            model.showsLiveWords = true
+            startDemoLevels(speaking: running ? id : nil)
         case .processing:
             model.translationEnabled = true
             model.phase = .processing(id)
@@ -913,8 +926,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         updateKeyAreas()
     }
 
-    /// A speech-like level for the demo's listening state: syllables riding a slower phrase.
-    private func startDemoLevels() {
+    /// A speech-like level for the demo's listening state: syllables riding a slower phrase. With
+    /// `speaking`, a word every 0.4 s as well (`wordsRunning`).
+    private func startDemoLevels(speaking id: UUID? = nil) {
         let start = Date()
         demoTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
@@ -923,6 +937,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
                 let level = 0.12 + 0.7 * abs(sin(time * 7.3)) * (0.55 + 0.45 * sin(time * 1.3))
                 self.model.levels.removeFirst()
                 self.model.levels.append(min(1, max(0.06, level)))
+                if let id {
+                    let words = KeyboardDemo.runningWords(for: id, count: Int(time / 0.4))
+                    if self.model.livePreview != words { self.model.livePreview = words }
+                }
             }
         }
     }

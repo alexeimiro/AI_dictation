@@ -75,6 +75,58 @@ struct PayloadStoreTests {
         #expect(store.takeDictionaryAdditions().map(\.term) == ["Mironenko", "Supabase"])
         #expect(store.takeDictionaryAdditions().isEmpty)
     }
+
+    /// The words of the dictation being recorded have a directory of their own, which goes whole
+    /// when the dictation ends.
+    @Test func theLivePreviewRoundTripsAndClearingRemovesItsDirectory() throws {
+        let container = SharedContainer.temporary()
+        let store = IPCPayloadStore(container: container)
+        #expect(store.readLivePreview() == nil)
+
+        let preview = LivePreview(requestId: UUID(), settled: "Hello there,", unsettled: " how are")
+        try store.write(livePreview: preview)
+        #expect(store.readLivePreview() == preview)
+
+        store.clearLivePreview()
+        #expect(store.readLivePreview() == nil)
+        #expect(!FileManager.default.fileExists(atPath: container.directory("live").path))
+        // Clearing what is already gone is harmless.
+        store.clearLivePreview()
+        #expect(store.readLivePreview() == nil)
+
+        let next = LivePreview(requestId: UUID(), settled: "Привет", unsettled: "")
+        try store.write(livePreview: next)
+        #expect(store.readLivePreview() == next)
+    }
+
+    /// A write is staged inside `live/` and renamed over the file, so nothing is left beside it,
+    /// and what a write that was cut short leaves goes with the directory. Backups skip it.
+    @Test func aLivePreviewWriteLeavesNothingBesideTheFile() throws {
+        let container = SharedContainer.temporary()
+        let store = IPCPayloadStore(container: container)
+        let live = container.directory("live")
+        let id = UUID()
+        try store.write(livePreview: LivePreview(requestId: id, settled: "One"))
+        try store.write(livePreview: LivePreview(requestId: id, settled: "One", unsettled: " two"))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: live.path) == ["preview.json"])
+        #expect(store.readLivePreview()?.text == "One two")
+        #expect(try live.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
+
+        // What a write that was cut short would leave.
+        let cutShort = live.appendingPathComponent("preview.tmp")
+        try Data("{\"requestId\":".utf8).write(to: cutShort)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: live.path).count == 2)
+        // The next write is staged in that very place and takes it along.
+        try store.write(livePreview: LivePreview(requestId: id, settled: "One two", unsettled: " three"))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: live.path) == ["preview.json"])
+        #expect(store.readLivePreview()?.text == "One two three")
+        // And the end of the dictation takes whatever is there.
+        try Data("{\"requestId\":".utf8).write(to: cutShort)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: live.path).count == 2)
+        store.clearLivePreview()
+        #expect(!FileManager.default.fileExists(atPath: live.path))
+        #expect(store.readLivePreview() == nil)
+    }
 }
 
 struct DictionaryCandidateTests {
@@ -803,6 +855,9 @@ struct SharedSettingsTests {
         #expect(KeyboardDemo("off")?.state == .off)
         #expect(KeyboardDemo("limit@numbers") == KeyboardDemo(state: .limit, layout: .numbers))
         #expect(KeyboardDemo("loggedOut") == KeyboardDemo(state: .loggedOut))
+        #expect(KeyboardDemo("words@voice") == KeyboardDemo(state: .words, layout: .voice))
+        #expect(KeyboardDemo("wordsStart")?.state == .wordsStart)
+        #expect(KeyboardDemo("wordsRunning@numbers")?.state == .wordsRunning)
         #expect(KeyboardDemo("settings") == nil)
         #expect(KeyboardDemo("listening@dvorak") == nil)
         #expect(KeyboardDemo("dancing") == nil)
@@ -815,10 +870,45 @@ struct SharedSettingsTests {
         #expect(settings.debugKeyboardDemo == nil)
         settings.debugKeyboardDemo = nil
         #expect(defaults.string(forKey: "debugKeyboardDemo") == nil)
+
+        // The `words` state's text: long enough to pass two lines, its end unsettled.
+        let id = UUID()
+        let sample = KeyboardDemo.sampleWords(for: id)
+        #expect(sample.requestId == id)
+        #expect(sample.text.count > 100)
+        #expect(!sample.unsettled.isEmpty)
+    }
+
+    /// The `wordsRunning` state says the sample a word at a time, the last three words unsettled,
+    /// and shows only the end of it, as the app would.
+    @Test func theRunningDemoGrowsAndKeepsOnlyItsEnd() {
+        let id = UUID()
+        #expect(KeyboardDemo.runningWords(for: id, count: 0).isEmpty)
+        #expect(KeyboardDemo.runningWords(for: id, count: -1).isEmpty)
+        #expect(KeyboardDemo.runningWords(for: id, count: 2) == LivePreview(requestId: id, unsettled: "So I"))
+
+        let five = KeyboardDemo.runningWords(for: id, count: 5)
+        #expect(five.requestId == id)
+        #expect(five.settled == "So I")
+        #expect(five.unsettled == " was thinking we")
+
+        let long = KeyboardDemo.runningWords(for: id, count: 200)
+        #expect(long.text.count <= LivePreview.tailLimit)
+        #expect(long.text.count > LivePreview.tailLimit - LivePreview.tailStep - 24)
+        #expect(!long.unsettled.isEmpty)
+        // The sample has 23 words, so the 198th to 200th are its 14th to 16th.
+        #expect(long.unsettled == " morning is already")
     }
 }
 
 struct IPCMessageTests {
+    /// Both processes build the notification's name from it, and the app and its keyboard are
+    /// not always the same build.
+    @Test func theLivePreviewEventKeepsItsWireName() {
+        #expect(IPCEvent.livePreview.rawValue == "preview")
+        #expect(IPCEvent.livePreview.notificationName(group: "group.example") == "group.example.preview")
+    }
+
     @Test func commandLanguageOverrideRoundTripsAndLegacyJSONStillDecodes() throws {
         let command = KeyboardCommand(requestId: UUID(), kind: .start, createdAt: Date(), languageOverride: "ru-RU",
                                       translationTargetLanguage: "tr-TR")

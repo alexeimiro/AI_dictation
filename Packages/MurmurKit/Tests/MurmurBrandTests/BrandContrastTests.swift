@@ -2,7 +2,8 @@ import Testing
 @testable import MurmurBrand
 
 /// Every place text or a mark sits on a colour, in both appearances: WCAG AA (4.5:1) for text,
-/// 3:1 for graphics. A new pairing in the UI belongs here first.
+/// 3:1 for graphics and for the label of a control that is locked. A new pairing in the UI
+/// belongs here first.
 struct BrandContrastTests {
     static let text: [(text: BrandToken, on: BrandToken)] = [
         (.ink, .canvas), (.second, .canvas), (.third, .canvas),
@@ -37,6 +38,26 @@ struct BrandContrastTests {
                                             background.value(dark: dark, highContrast: highContrast))
             #expect(ratio >= 3, "\(mark) on \(background), dark \(dark), high contrast \(highContrast): \(ratio)")
         }
+    }
+
+    /// The keyboard's style pill while a dictation holds its options: a control that can't be
+    /// used just then, so its label is held to 3:1 and stays out of `text`.
+    @Test(arguments: [false, true], [false, true])
+    func theLabelOfAControlThatIsLockedStillReads(dark: Bool, highContrast: Bool) {
+        let ratio = BrandContrast.ratio(BrandToken.second.value(dark: dark, highContrast: highContrast),
+                                        BrandToken.disabled.value(dark: dark, highContrast: highContrast))
+        #expect(ratio >= 3, "second on disabled, dark \(dark), high contrast \(highContrast): \(ratio)")
+    }
+
+    /// The newest words of a dictation, which may still change, are `third` on the dark keyboard:
+    /// `second` is too close to ink there to tell them from the settled words. Dark only, and so
+    /// not in `text`: on the light panel `third` is 4.2:1, and the keyboard uses `second` instead,
+    /// which `text` covers.
+    @Test(arguments: [false, true])
+    func theNewestWordsOfADictationReadOnTheDarkKeyboard(highContrast: Bool) {
+        let ratio = BrandContrast.ratio(BrandToken.third.value(dark: true, highContrast: highContrast),
+                                        BrandToken.keyboardPanel.value(dark: true, highContrast: highContrast))
+        #expect(ratio >= 4.5, "third on keyboardPanel, dark, high contrast \(highContrast): \(ratio)")
     }
 
     /// The Live Activity is dark in both appearances: white labels, grey status, a red timer.

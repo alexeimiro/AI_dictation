@@ -55,6 +55,14 @@ public final class KeyboardSessionClient {
     public private(set) var sessionStatus: SessionStatus = .off
     /// Mic level 0...1 while listening.
     public private(set) var level: Double = 0
+    /// The words of the dictation being listened to, as the app last published them. Nil while
+    /// not listening, and for a dictation without a preview (no on-device model listened to it).
+    /// Whether a dictation has one is settled as listening begins: the app publishes an empty
+    /// preview before it reports `recording`, and this is read before the host hears of the new
+    /// phase. A dictation that began without a preview never gets one; one that began with it
+    /// keeps it until the phase moves on, emptied if the app takes the words away first. So the
+    /// listening screen never changes its layout midway. Never inserted.
+    public private(set) var livePreview: LivePreview?
     /// A finished dictation that couldn't be inserted automatically (other field, or late).
     public private(set) var pendingResult: DictationResult?
     /// The style in the keyboard's style pill, sent with each dictation; nil leaves it to the app's
@@ -92,6 +100,9 @@ public final class KeyboardSessionClient {
     /// A dictation followed again after the keyboard came back: its text goes into whichever field
     /// is focused now, since that is where the user is looking.
     private var resumedRequestId: UUID?
+    /// A dictation come back to whose app hasn't shown since that it is still there (its state
+    /// hasn't moved on): what the file holds may be a dead app's words, so none are shown yet.
+    private var unconfirmedResume: UUID?
     /// The last start command and when it was sent: the tap, should the app have to be opened for
     /// that dictation after all.
     private var startSent: (requestId: UUID, at: Date)?
@@ -127,6 +138,9 @@ public final class KeyboardSessionClient {
                 transport.observe(.resultReady) { [weak self] in
                     MainActor.assumeIsolated { self?.checkForResult() }
                 },
+                transport.observe(.livePreview) { [weak self] in
+                    MainActor.assumeIsolated { self?.refreshLivePreview() }
+                },
             ]
         }
         resumeAwayDictation()
@@ -145,6 +159,8 @@ public final class KeyboardSessionClient {
         switch phase {
         case .listening(let id, let since):
             away = (id, since)
+            // Off screen nothing shows them; coming back reads them again.
+            if livePreview != nil { livePreview = LivePreview(requestId: id) }
         case .starting(let id):
             // Gone before the app answered (or while it was busy): don't record for a field
             // nobody is looking at, and don't come back stuck waiting.
@@ -210,6 +226,8 @@ public final class KeyboardSessionClient {
         case .listening(let id, _), .starting(let id), .processing(let id):
             send(.cancel, requestId: id)
             transport.payloads.claim(id)
+            // Discarded words least of all outlive the dictation, should the app be gone.
+            removeLivePreview(of: id)
             cancelTasks()
             setPhase(.idle)
         case .openingApp(let id):
@@ -358,6 +376,8 @@ public final class KeyboardSessionClient {
         resumedRequestId = pending.requestId
         switch state.status {
         case .recording:
+            // As in `resumeAwayDictation`: the app may have died since it began recording this.
+            unconfirmedResume = pending.requestId
             setPhase(.listening(pending.requestId, since: clock()))
             startListeningLoop(pending.requestId)
         case .processing:
@@ -382,6 +402,8 @@ public final class KeyboardSessionClient {
         let state = transport.currentState()
         if state.status == .recording, state.requestTag == left.requestId.tag16 {
             activeDocumentIdentifier = host?.currentDocumentIdentifier
+            // `recording` may be what an app that died meanwhile left behind.
+            unconfirmedResume = left.requestId
             setPhase(.listening(left.requestId, since: left.since))
             startListeningLoop(left.requestId)
         } else if case .listening(left.requestId, _) = phase {
@@ -400,6 +422,10 @@ public final class KeyboardSessionClient {
         // Right away: it tells the app the keyboard is following this dictation, which matters
         // when the app started it on its own and is waiting for the keyboard to come back.
         writeKeyboardStatus()
+        // Coming back to a dictation leaves the phase as it was, so `setPhase` settles nothing:
+        // its preview is brought here to what may be shown now, which is no words until the app
+        // shows that it is there (`trackSequence` reads them then).
+        refreshLivePreview()
         listenTask = Task { [weak self] in
             var tick = 0
             while !Task.isCancelled {
@@ -408,7 +434,8 @@ public final class KeyboardSessionClient {
                 guard case .listening(requestId, _) = self.phase else { return }
                 self.pollListening(requestId)
                 tick += 1
-                if tick % 20 == 0 { self.writeKeyboardStatus() }
+                // Once a second; the preview too, for a notification that was missed.
+                if tick % 20 == 0 { self.writeKeyboardStatus(); self.refreshLivePreview() }
             }
         }
     }
@@ -422,6 +449,8 @@ public final class KeyboardSessionClient {
                 // The app stopped publishing: it was killed or suspended.
                 cancelTasks()
                 sessionStatus = .off
+                // It can't take its preview away any more, so the keyboard does: the words don't outlive it.
+                removeLivePreview(of: requestId)
                 setPhase(.notice("Murmur stopped listening. Tap the mic to start again."))
             } else {
                 notifyHost()
@@ -434,6 +463,8 @@ public final class KeyboardSessionClient {
     private func stop(_ requestId: UUID, listeningSince: Date) {
         listenTask?.cancel()
         send(.stop, requestId: requestId, listeningSince: listeningSince)
+        // The app removes its preview when it hears this; one that died a moment ago can't.
+        removeLivePreview(of: requestId)
         setPhase(.processing(requestId))
         waitForResult(requestId)
     }
@@ -598,6 +629,11 @@ public final class KeyboardSessionClient {
         if state.sequence != lastSequence {
             lastSequence = state.sequence
             lastSequenceChange = clock()
+            // The app is there: the words of the dictation come back to are its own.
+            if unconfirmedResume != nil {
+                unconfirmedResume = nil
+                refreshLivePreview()
+            }
         }
     }
 
@@ -640,8 +676,41 @@ public final class KeyboardSessionClient {
     private func setPhase(_ newPhase: Phase) {
         guard phase != newPhase else { return }
         phase = newPhase
-        if case .listening = newPhase {} else { level = 0 }
+        if case .listening(let id, _) = newPhase {
+            // Before the host hears of the phase, so the listening screen is laid out once.
+            livePreview = storedLivePreview(for: id)
+        } else {
+            level = 0
+            livePreview = nil
+        }
         notifyHost()
+    }
+
+    /// The app's preview, if it is `requestId`'s. Never while the week's words are used up.
+    private func storedLivePreview(for requestId: UUID) -> LivePreview? {
+        guard !wordsUsedUp(), let stored = transport.payloads.readLivePreview(),
+              stored.requestId == requestId else { return nil }
+        return unconfirmedResume == requestId ? LivePreview(requestId: requestId) : stored
+    }
+
+    /// Removes the preview if it is still `requestId`'s: when the keyboard stops following that
+    /// dictation, in case the app is no longer there to remove it. A live app removes it too, and
+    /// removes again what a last write of its own may bring back.
+    private func removeLivePreview(of requestId: UUID) {
+        if transport.payloads.readLivePreview()?.requestId == requestId {
+            transport.payloads.clearLivePreview()
+        }
+    }
+
+    /// New words for the dictation being listened to: on the app's event, on coming back (once
+    /// the app has shown that it is there), and once a second. Only a dictation that began with a
+    /// preview is refreshed; when the file is gone or another dictation's, its words go and its
+    /// layout stays. The 20 Hz poll hands the change to the host, so nothing is notified here (a
+    /// notification would also shift the rings' level history).
+    private func refreshLivePreview() {
+        guard case .listening(let id, _) = phase, livePreview != nil else { return }
+        let latest = storedLivePreview(for: id) ?? LivePreview(requestId: id)
+        if latest != livePreview { livePreview = latest }
     }
 
     private func notifyHost() {
