@@ -150,6 +150,66 @@ words too. The menu button opens the keyboard's own page: translation, Add to di
 the ready vibration, start and stop sounds, and Light / Dark / Auto, with ABC and a link to
 Murmur's Settings.
 
+**Type as I speak (beta).** The words on the keyboard are shown, not inserted: a dictation's text
+goes into the field once, when it is ready. Settings › Keyboard › Type as I speak, off by default,
+changes that for the settled words (the ones the on-device recognizer no longer changes): the
+keyboard types them into the field as they are said, and the dictation's text replaces them in
+one step when it arrives (`LiveTyping`). The newest words stay on the keyboard as before.
+
+- **Who and where:** Pro and its trial (the app tells the keyboard the plan,
+  `SharedSettings.planIsPro`, and when a trial ends, `planIsProUntil`, so the typing stops at
+  that moment though Murmur isn't opened again; on Basic the switch leads to Murmur Pro, and its
+  chip reads "Pro · Beta"). Never with Translate on, only in fields with more than one line (not
+  search or address bars, nor a field whose Return key sends), and not while text is selected.
+- **Which dictations:** one that has words on the keyboard and began on the mic with Murmur's
+  microphone already on. A dictation the keyboard opened the app for is never typed, and one that
+  begins before the on-device model is ready has no live words at all: in practice, the first
+  dictation after the microphone turns on. Under Auto-detect the live words are in the language
+  the iPhone guesses. While they are typed they are joined (spaces, capitals) by the rules of
+  the language in the keyboard's pill; under Auto-detect, by the primary language's.
+- **How much:** up to 280 characters; later words stay on the keyboard and come with the text.
+  Text a host doesn't delete a character at a time (emoji made of several parts, pointed Hebrew,
+  vocalised Arabic, Thai, Devanagari) isn't typed.
+- **The text replaces the words, and can differ from them:** they are what the iPhone heard, the
+  text is what the cloud wrote, in the chosen style. The replacement deletes every typed
+  character and inserts the whole text, in one step.
+- **When the field changes:** the keyboard only adds to the end of its own words, with plain
+  insertions, and first checks that the text before the cursor still shows all of them. When it
+  doesn't (a tap moved the cursor, the app cleared or changed the text and reported it, the
+  keyboard left the screen), no more words are typed for that dictation. At the end the text
+  replaces the words if all of them are still before the cursor; otherwise it isn't put beside
+  them and waits as "Insert last dictation". A tap on that replaces the words if all of them
+  show before the cursor again; otherwise it inserts the text at the cursor and the words stay
+  beside it, for the person to delete. Nothing is ever deleted where only a part of the typed
+  words shows. Putting the card away leaves the words as text. ✕ takes the typed words out
+  again while all of them are still before the cursor, and so does a dictation that ends with
+  nothing to insert, but only within 10 minutes of that dictation's end, whichever way the
+  keyboard comes to it; later the words stay as text. That holds also when the keyboard was no
+  longer waiting for it (after the 20-second notice, or in a keyboard iOS made again): the
+  result's message then takes the place of the notice, and a keyboard at rest shows it only
+  within those 10 minutes. Once another dictation has started, the earlier
+  words are ordinary text: a text that comes for them later is inserted at the cursor like any
+  other.
+- **A field that shows only the end of its text:** once a web page's field has reported a change
+  (a tap in it does), it hands the keyboard about a sentence before the cursor. Where that is
+  less than was typed, nothing is replaced or removed: the text waits as "Insert last
+  dictation", a tap on the card inserts it at the cursor and leaves the raw words, and ✕
+  leaves the words.
+- **What the check can't see:** it reads the text iOS gives the keyboard, which is the
+  keyboard's own copy until the app reports a change. Not reported (measured on iOS 26.5): text
+  an app inserts with its own code, in any field, and a web page's script emptying an editable
+  box or moving the cursor in any of its fields, as a page's Send button would. There the words
+  go on being typed, and at the end the deletions (one for each typed character) and the whole
+  final text land wherever the cursor really is. After such a Send the next message's box gets
+  the complete text. After text the app put in at the cursor, that text is deleted and as many
+  of the first typed letters stay in front of the final text. After a cursor the page's script
+  moved (any web field), the words typed before the move stay where they were, and up to as
+  many characters as were typed are deleted before the new cursor, the person's own text among
+  them. ✕ and a dictation that ends with nothing delete there too.
+
+In a debug build the `typing` and `typingCancel` keyboard demos (below) play it in the simulator,
+through the real code and into the real field; the keyboard needs Full Access there too.
+
 Debug builds can pin any keyboard state for screenshots: launch the app with
 `-keyboard-demo <state>[@voice|@numbers|@qwerty]` (e.g. `listening@numbers`; the states are in
 `KeyboardDemo`), or pick one in Settings › Debug › Keyboard demo. A demo ends after 15 minutes or at

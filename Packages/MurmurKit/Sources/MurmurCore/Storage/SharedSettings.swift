@@ -99,7 +99,7 @@ public final class SharedSettings: @unchecked Sendable {
         case defaultStyle
         case useBuiltInMic, transcriberEngine, liveActivities, transcriptRetention, autoReturn, keepScreenAwake
         case translateInOneRequest, lowDataMode, smartFormatting, keepRecordings, autoOpenNote, aiConsentVersion
-        case signedOut, wordsUsedUpUntil
+        case signedOut, wordsUsedUpUntil, liveTyping, planIsPro, planIsProUntil
         case primaryLanguage, secondaryLanguage, dictationLanguages, verifiedEngines
         case translationEnabled, translationSourceLanguage, translationTargetLanguage, recentTranslationLanguages
         case lastDetectedLanguage, autoDetectDefaultApplied, keyboardAppearance
@@ -264,18 +264,73 @@ public final class SharedSettings: @unchecked Sendable {
     /// The server refused a dictation for the week's words: none is recorded until the next reset.
     /// A refusal that reaches the iPhone just after the reset (latency, a clock a little ahead)
     /// still belongs to the week before, so it doesn't hold the new week's words back.
+    /// Only Basic has a week's words, so the plan isn't Pro's any more either (`planIsPro`).
     public func noteWordsUsedUp(at now: Date = Date()) {
         wordsUsedUpUntil = WeeklyWords.nextReset(after: now.addingTimeInterval(-WeeklyWords.clockMargin))
+        if planIsPro { planIsPro = false }
     }
 
     /// What the server said is left of the week's free words, from the plan or a dictation's reply:
-    /// none marks them used up (an earlier mark's reset is kept), any lifts the mark.
+    /// none marks them used up (an earlier mark's reset is kept), any lifts the mark. Either way
+    /// it counted them, which it does on Basic only: the plan isn't Pro's (`planIsPro`), whatever
+    /// the app last read (a trial that ended since).
     public func noteWordsLeft(_ remaining: Int, at now: Date = Date()) {
+        if planIsPro { planIsPro = false }
         if remaining <= 0 {
             if !wordsUsedUp(at: now) { noteWordsUsedUp(at: now) }
         } else if wordsUsedUpUntil != nil {
             wordsUsedUpUntil = nil
         }
+    }
+
+    /// "Type as I speak" (beta), the switch in Settings: while a dictation is recorded, the
+    /// keyboard types its settled words into the field, and the final text replaces them when it
+    /// arrives (`LiveTyping`). Off until the user turns it on. The keyboard types only with
+    /// `planIsPro` as well (`typesAsSpoken`).
+    public var liveTyping: Bool {
+        get { bool(.liveTyping, default: false) }
+        set { defaults.set(newValue, forKey: Key.liveTyping.rawValue) }
+    }
+
+    /// The signed-in account has Pro or is in its trial, as the app last read the plan. False
+    /// until it has read one, on Basic, once nobody is signed in, and once a trial it read has
+    /// ended (`planIsProUntil`). Written by the app whenever it reads the plan and when the
+    /// account goes or changes, and taken back when the server counts a dictation against the
+    /// week's free words (`noteWordsLeft`, `noteWordsUsedUp`); the keyboard reads it for "Type as
+    /// I speak", which Basic doesn't have.
+    public var planIsPro: Bool {
+        get { planIsPro(at: Date()) }
+        set { defaults.set(newValue, forKey: Key.planIsPro.rawValue) }
+    }
+
+    /// `planIsPro` at `now`: what the app wrote, until the trial it wrote it for ends.
+    public func planIsPro(at now: Date) -> Bool {
+        bool(.planIsPro, default: false) && (planIsProUntil.map { $0 > now } ?? true)
+    }
+
+    /// When the plan stops being Pro's by itself: the end of the trial `planIsPro` was written
+    /// for, which is where the server puts the account on Basic. Nothing tells the iPhone when
+    /// that moment comes while Murmur's session stays on in the background, and a dictation that
+    /// is then typed live and cancelled is never counted, so `planIsPro` goes by this date. Nil
+    /// for a subscription (the plan the app reads gives no end for one), on Basic, and with
+    /// nobody signed in. Whoever removes it writes `planIsPro` as well: removed alone, it would
+    /// leave an ended trial's flag standing.
+    public var planIsProUntil: Date? {
+        get { defaults.object(forKey: Key.planIsProUntil.rawValue) as? Date }
+        set {
+            if let newValue {
+                defaults.set(newValue, forKey: Key.planIsProUntil.rawValue)
+            } else {
+                defaults.removeObject(forKey: Key.planIsProUntil.rawValue)
+            }
+        }
+    }
+
+    /// The keyboard's condition for "Type as I speak": the switch is on, the plan has it, and the
+    /// keyboard has Full Access (`fullAccess`), without which it can't keep its record of what it
+    /// typed. Asked each time `LiveTyping` asks, so a change counts at once.
+    public func typesAsSpoken(fullAccess: Bool) -> Bool {
+        liveTyping && planIsPro && fullAccess
     }
 
     /// Auto-delete transcripts older than this. App-only; applied by the history store.

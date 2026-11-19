@@ -34,6 +34,9 @@ final class SettingsModel {
     var smartFormatting: Bool { didSet { settings.smartFormatting = smartFormatting } }
     var keepRecordings: Bool { didSet { settings.keepRecordings = keepRecordings } }
     var autoOpenNote: Bool { didSet { settings.autoOpenNote = autoOpenNote } }
+    /// "Type as I speak" (beta): the user's switch. The keyboard types live only while the plan
+    /// has it as well (`SharedSettings.planIsPro`).
+    var liveTyping: Bool { didSet { settings.liveTyping = liveTyping } }
     /// Settings › Languages: the languages the user speaks, in the order picked; empty is Auto-detect.
     var dictationLanguages: [String] { didSet { settings.dictationLanguages = dictationLanguages } }
 
@@ -62,6 +65,27 @@ final class SettingsModel {
         smartFormatting = settings.smartFormatting
         keepRecordings = settings.keepRecordings
         autoOpenNote = settings.autoOpenNote
+        liveTyping = settings.liveTyping
+    }
+
+    /// "Type as I speak" as its switch shows it: on only while the plan has it (Pro or its trial).
+    /// A switch left on when the plan ended shows off, and is on again when Pro is back.
+    func typesAsSpoken(planIsPro: Bool) -> Bool {
+        liveTyping && planIsPro
+    }
+
+    /// The chip beside "Type as I speak": on a plan that lacks it, it says whose the switch is,
+    /// before a tap answers with Murmur Pro.
+    nonisolated static func liveTypingBadge(planIsPro: Bool) -> String {
+        planIsPro ? "Beta" : "Pro · Beta"
+    }
+
+    /// A tap on the "Type as I speak" switch. False when it asked for what the plan doesn't have:
+    /// nothing changes then, and Settings shows Murmur Pro instead.
+    func setLiveTyping(_ on: Bool, planIsPro: Bool) -> Bool {
+        guard planIsPro || !on else { return false }
+        liveTyping = on
+        return true
     }
 
     /// Picks `tag`, or unpicks the language it's a variant of.

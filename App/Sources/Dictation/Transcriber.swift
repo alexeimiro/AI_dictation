@@ -116,7 +116,8 @@ protocol UtteranceTimingProviding: AnyObject {
 }
 
 /// A dictation's words while it is still being spoken, for the keyboard's preview. `settled` won't
-/// change any more; `unsettled` is the newest stretch, which the recognizer may still rewrite, with
+/// change any more ("Type as I speak" types it into the field as it grows, and stops if it ever
+/// did); `unsettled` is the newest stretch, which the recognizer may still rewrite, with
 /// the space that separates it from `settled`. Both are text as it reads, and `settled + unsettled`
 /// is everything recognized so far. Called on the recognizer's own task: never the main thread,
 /// never the audio thread.

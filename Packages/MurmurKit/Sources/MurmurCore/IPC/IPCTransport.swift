@@ -12,7 +12,9 @@ public protocol IPCObservation: AnyObject, Sendable {
 /// - Hot state: one 64-bit value (status, mic level, request tag, sequence), polled cheaply.
 /// - Events: payload-less Darwin notifications.
 /// - Payloads: small JSON files in the App Group container (`payloads`), among them the words of
-///   the dictation being recorded (`LivePreview`), which the app removes when the dictation ends.
+///   the dictation being recorded (`LivePreview`), which the app removes when the dictation ends,
+///   and the keyboard's note of the words "Type as I speak" has put into a field
+///   (`LiveTypedRecord`), which goes when the final text has replaced them.
 public protocol IPCTransport: AnyObject, Sendable {
     var payloads: IPCPayloadStore { get }
 
@@ -43,6 +45,8 @@ public final class IPCPayloadStore: @unchecked Sendable {
     private var claimsDirectory: URL { container.directory("claimed") }
     private var livePreviewDirectory: URL { container.directory("live") }
     private var livePreviewURL: URL { livePreviewDirectory.appendingPathComponent("preview.json") }
+    private var liveTypedDirectory: URL { container.directory("typed") }
+    private var liveTypedURL: URL { liveTypedDirectory.appendingPathComponent("record.json") }
 
     // MARK: Commands (keyboard → app)
 
@@ -156,8 +160,12 @@ public final class IPCPayloadStore: @unchecked Sendable {
     /// The words of the dictation being recorded. Only the app writes it. Staged beside the file
     /// and renamed over it, so a reader never sees half of it; its directory is kept out of backups.
     public func write(livePreview: LivePreview) throws {
-        let data = try JSONEncoder().encode(livePreview)
-        let directory = livePreviewDirectory
+        try writeStaged(JSONEncoder().encode(livePreview), to: livePreviewURL)
+    }
+
+    /// Writes a file of dictated words into its own directory, which is kept out of backups.
+    private func writeStaged(_ data: Data, to url: URL) throws {
+        let directory = url.deletingLastPathComponent()
         if !FileManager.default.fileExists(atPath: directory.path) {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             // The words are no part of a backup.
@@ -167,10 +175,10 @@ public final class IPCPayloadStore: @unchecked Sendable {
             try? marked.setResourceValues(values)
         }
         // Staged here, not by `.atomic`, whose temporary copy a sandboxed process keeps outside
-        // this folder: `clearLivePreview()` then takes a write that was cut short with it.
-        let staging = directory.appendingPathComponent("preview.tmp")
+        // this folder: removing the directory then takes a write that was cut short with it.
+        let staging = url.deletingPathExtension().appendingPathExtension("tmp")
         try data.write(to: staging)
-        guard rename(staging.path, livePreviewURL.path) == 0 else { throw CocoaError(.fileWriteUnknown) }
+        guard rename(staging.path, url.path) == 0 else { throw CocoaError(.fileWriteUnknown) }
     }
 
     public func readLivePreview() -> LivePreview? {
@@ -183,6 +191,29 @@ public final class IPCPayloadStore: @unchecked Sendable {
     /// cross, or the app stopped answering), should the app be gone.
     public func clearLivePreview() {
         JSONFile.remove(livePreviewDirectory)
+    }
+
+    // MARK: Live typing (the keyboard's own)
+
+    /// What "Type as I speak" has put into the field for a dictation. Only the keyboard writes it,
+    /// before each insertion. Staged and renamed like the preview, in a directory of its own
+    /// (`typed/`) that is kept out of backups too and that `clearLivePreview()` leaves alone: the
+    /// record outlives the preview, until the final text has replaced its words.
+    public func write(liveTyped record: LiveTypedRecord) throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .millisecondsSince1970
+        try writeStaged(encoder.encode(record), to: liveTypedURL)
+    }
+
+    public func readLiveTyped() -> LiveTypedRecord? {
+        JSONFile.read(LiveTypedRecord.self, from: liveTypedURL)
+    }
+
+    /// Removes the record, and a write of it that was cut short. The keyboard calls it when the
+    /// words are replaced or taken out, when they are left as text for good (`LiveTypedRecord`)
+    /// and when the next dictation starts; the app when the account goes.
+    public func clearLiveTyped() {
+        JSONFile.remove(liveTypedDirectory)
     }
 
     // MARK: Dictionary additions (keyboard → app)
@@ -206,9 +237,14 @@ public final class IPCPayloadStore: @unchecked Sendable {
 
     // MARK: Housekeeping
 
-    /// Deletes results and claim markers older than `age`.
+    /// Deletes results and claim markers older than `age`, and a `LiveTypedRecord` last written
+    /// longer ago: its words are ordinary text by then.
     public func prune(olderThan age: TimeInterval, now: Date = Date()) {
         let fileManager = FileManager.default
+        if let written = (try? liveTypedURL.resourceValues(forKeys: [.contentModificationDateKey]))?
+            .contentModificationDate, now.timeIntervalSince(written) > age {
+            clearLiveTyped()
+        }
         for directory in [resultsDirectory, claimsDirectory] {
             guard let files = try? fileManager.contentsOfDirectory(
                 at: directory, includingPropertiesForKeys: [.contentModificationDateKey]) else { continue }

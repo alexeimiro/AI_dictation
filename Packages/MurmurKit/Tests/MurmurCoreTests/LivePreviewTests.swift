@@ -184,11 +184,96 @@ struct LivePreviewTests {
         let data = try JSONEncoder().encode(empty)
         #expect(try JSONDecoder().decode(LivePreview.self, from: data) == empty)
         let keys = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any]).keys
-        #expect(Set(keys) == ["requestId", "settled", "unsettled"])
+        #expect(Set(keys) == ["requestId", "settled", "unsettled", "settledLength"])
 
         let words = LivePreview(requestId: id, settled: "Привет,", unsettled: " как дела")
         #expect(!words.isEmpty)
         #expect(words.text == "Привет, как дела")
         #expect(try JSONDecoder().decode(LivePreview.self, from: JSONEncoder().encode(words)) == words)
+    }
+
+    // MARK: Where the settled words belong
+
+    /// A preview says how long the dictation's whole settled text is, in Unicode scalars, so that
+    /// "Type as I speak" can tell where its settled words go on from the ones it has typed.
+    /// While nothing is cut, `settled` is that whole text.
+    @Test func aPreviewSaysHowLongTheSettledTextIs() throws {
+        let empty = LivePreview(requestId: id)
+        #expect(empty.settledLength == 0 && empty.settledStart == 0)
+
+        let words = LivePreview(requestId: id, settled: "Привет, как", unsettled: " дела")
+        #expect(words.settledLength == 11)
+        #expect(words.settledStart == 0)
+
+        // Scalars, not characters: a letter with a combining accent is two.
+        let accented = LivePreview(requestId: id, settled: "cafe\u{0301}")
+        #expect(accented.settled.count == 4)
+        #expect(accented.settledLength == 5)
+
+        // The end of a longer text.
+        let end = LivePreview(requestId: id, settled: "nine ten", unsettled: " eleven", settledLength: 40)
+        #expect(end.settledStart == 32)
+        #expect(end != LivePreview(requestId: id, settled: "nine ten", unsettled: " eleven"))
+        #expect(try JSONDecoder().decode(LivePreview.self, from: JSONEncoder().encode(end)) == end)
+
+        let short = LivePreview.tail(requestId: id, settled: "Hello there,", unsettled: " how are")
+        #expect(short.settledLength == 12 && short.settledStart == 0)
+    }
+
+    /// A file written by an app from before the count has none: its settled words are taken for
+    /// the whole settled text, as they were until the preview was first cut.
+    @Test func aPreviewFromBeforeTheCountIsReadAsWhole() throws {
+        let old = Data(#"{"requestId":"\#(id.uuidString)","settled":"cafe\u0301 au","unsettled":" lait"}"#.utf8)
+        let preview = try JSONDecoder().decode(LivePreview.self, from: old)
+        #expect(preview == LivePreview(requestId: id, settled: "cafe\u{0301} au", unsettled: " lait"))
+        #expect(preview.settledLength == 8)
+        #expect(preview.settledStart == 0)
+
+        // A file without its words is still no preview.
+        let broken = Data(#"{"requestId":"\#(id.uuidString)","settledLength":3}"#.utf8)
+        #expect((try? JSONDecoder().decode(LivePreview.self, from: broken)) == nil)
+    }
+
+    /// However the end of a long dictation is cut, what is left of the settled words is an exact
+    /// end of the settled text, and `settledStart` is where it begins there. In scalars: in
+    /// Russian with its accents apart ("й" as "и" and a mark) they are not the characters.
+    @Test func theTailSaysWhereItsSettledWordsBegin() {
+        let decomposed = Self.russian.map(\.decomposedStringWithCanonicalMapping)
+        #expect(decomposed.joined().unicodeScalars.count > decomposed.joined().count)
+        for vocabulary in [Self.english, decomposed] {
+            var cuts = 0
+            for step in Self.dictation(of: vocabulary, characters: 3_000) {
+                let whole = Array(step.settled.unicodeScalars)
+                let tail = LivePreview.tail(requestId: id, settled: step.settled, unsettled: step.unsettled)
+                #expect(tail.settledLength == whole.count)
+                #expect(tail.settledStart >= 0 && tail.settledStart <= whole.count)
+                guard tail.settledStart >= 0, tail.settledStart <= whole.count else { continue }
+                #expect(Array(tail.settled.unicodeScalars) == Array(whole[tail.settledStart...]))
+                if tail.settledStart > 0 { cuts += 1 }
+            }
+            #expect(cuts > 0)
+        }
+    }
+
+    /// A mark that opens the unsettled words reads as part of the last settled character. It is
+    /// unsettled all the same: the settled words in the preview end where the settled text ends.
+    @Test func aMarkThatJoinsTheSettledWordsStaysUnsettled() {
+        let settled = String(repeating: "word ", count: 80) + "e"
+        let whole = Array(settled.unicodeScalars)
+        for unsettled in ["\u{0301}xyz and more", "\u{0301}"] {
+            let tail = LivePreview.tail(requestId: id, settled: settled, unsettled: unsettled)
+            #expect(tail.settledLength == whole.count)
+            #expect(tail.settledStart > 0)
+            #expect(Array(tail.settled.unicodeScalars) == Array(whole[tail.settledStart...]))
+            #expect(tail.settled.last == "e")
+            #expect(Array(tail.unsettled.unicodeScalars) == Array(unsettled.unicodeScalars))
+            #expect(tail.text.count <= LivePreview.tailLimit)
+        }
+
+        // Nothing settled is left after the cut: it begins where the settled text ends, or later.
+        let late = LivePreview.tail(requestId: id, settled: "Hello there,",
+                                    unsettled: " " + String(repeating: "word ", count: 100))
+        #expect(late.settled == "")
+        #expect(late.settledLength == 12 && late.settledStart == 12)
     }
 }

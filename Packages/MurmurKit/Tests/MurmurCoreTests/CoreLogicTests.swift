@@ -127,6 +127,54 @@ struct PayloadStoreTests {
         #expect(!FileManager.default.fileExists(atPath: live.path))
         #expect(store.readLivePreview() == nil)
     }
+
+    /// What "Type as I speak" typed has a directory of its own too. It outlives the preview,
+    /// which goes when the recording ends: the final text has yet to replace the typed words.
+    @Test func theLiveTypedRecordRoundTripsAndOutlivesThePreview() throws {
+        let container = SharedContainer.temporary()
+        let store = IPCPayloadStore(container: container)
+        let typed = container.directory("typed")
+        #expect(store.readLiveTyped() == nil)
+
+        let id = UUID()
+        var record = LiveTypedRecord(
+            requestId: id, typed: " и\u{0306}од", settledConsumed: 4, settledText: "И\u{0306}од", contextTail: "а,",
+            language: "ru-RU", updatedAt: Date(timeIntervalSince1970: 1_800_000_000))
+        try store.write(liveTyped: record)
+        #expect(store.readLiveTyped() == record)
+        // To the scalar: the accent is still a mark of its own.
+        #expect(store.readLiveTyped()?.typed.unicodeScalars.count == 5)
+        record.typed += " и ещё"
+        record.frozen = true
+        try store.write(liveTyped: record)
+        #expect(store.readLiveTyped() == record)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: typed.path) == ["record.json"])
+        #expect(try typed.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup == true)
+
+        try store.write(livePreview: LivePreview(requestId: id, settled: "Йод"))
+        store.clearLivePreview()
+        #expect(store.readLivePreview() == nil)
+        #expect(store.readLiveTyped() == record)
+
+        // With it goes a write that was cut short.
+        try Data("{\"requestId\":".utf8).write(to: typed.appendingPathComponent("record.tmp"))
+        store.clearLiveTyped()
+        #expect(store.readLiveTyped() == nil)
+        #expect(!FileManager.default.fileExists(atPath: typed.path))
+        store.clearLiveTyped()
+    }
+
+    /// The app's daily clean-up takes a record a day old: its words are ordinary text by then.
+    @Test func aLiveTypedRecordADayOldIsPruned() throws {
+        let store = IPCPayloadStore(container: .temporary())
+        let now = Date()
+        store.prune(olderThan: 24 * 3600, now: now)
+        try store.write(liveTyped: LiveTypedRecord(requestId: UUID(), typed: "So I was", updatedAt: now))
+        store.prune(olderThan: 24 * 3600, now: now.addingTimeInterval(23 * 3600))
+        #expect(store.readLiveTyped()?.typed == "So I was")
+        store.prune(olderThan: 24 * 3600, now: now.addingTimeInterval(25 * 3600))
+        #expect(store.readLiveTyped() == nil)
+    }
 }
 
 struct DictionaryCandidateTests {
@@ -636,6 +684,26 @@ struct KeyboardLanguageDefaultsTests {
 }
 
 struct SharedSettingsTests {
+    /// "Type as I speak" is off until the user turns it on, and the plan is Basic until the app
+    /// says otherwise: an update changes nothing for anyone.
+    @Test func typeAsISpeakIsOffAndThePlanBasicUntilSaid() throws {
+        let suite = "test.murmur.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SharedSettings(defaults: defaults)
+        #expect(!settings.liveTyping)
+        #expect(!settings.planIsPro)
+
+        settings.liveTyping = true
+        settings.planIsPro = true
+        #expect(SharedSettings(defaults: defaults).liveTyping)
+        #expect(SharedSettings(defaults: defaults).planIsPro)
+        // Signed out, or back on Basic: the switch is the user's and stays.
+        settings.planIsPro = false
+        #expect(!SharedSettings(defaults: defaults).planIsPro)
+        #expect(SharedSettings(defaults: defaults).liveTyping)
+    }
+
     @Test func migratesTheLegacyLanguageKeyAndNormalizesTags() throws {
         let suite = "test.murmur.settings.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -805,6 +873,69 @@ struct SharedSettingsTests {
         #expect(settings.wordsUsedUpUntil == reset)
         settings.noteWordsLeft(12, at: friday)
         #expect(settings.wordsUsedUpUntil == nil)
+    }
+
+    /// The server counts words on Basic only. A reply that says how many are left, or a refusal
+    /// for them, therefore ends "Type as I speak" at once for a plan the app last read as Pro's
+    /// (a trial that ended while Murmur stayed in the background).
+    @Test func countedWordsSayThePlanIsNotPro() throws {
+        let suite = "test.murmur.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SharedSettings(defaults: defaults)
+        let friday = try Date("2026-11-20T12:00:00Z", strategy: .iso8601)
+
+        settings.planIsPro = true
+        settings.noteWordsLeft(640, at: friday)
+        #expect(!settings.planIsPro)
+        settings.planIsPro = true
+        settings.noteWordsLeft(0, at: friday)
+        #expect(!settings.planIsPro)
+        settings.planIsPro = true
+        settings.noteWordsUsedUp(at: friday)
+        #expect(!settings.planIsPro)
+        // The switch is the user's: it waits for the plan to have it again.
+        settings.liveTyping = true
+        settings.noteWordsUsedUp(at: friday)
+        #expect(settings.liveTyping)
+    }
+
+    /// A trial ends at a moment the server knows, and nothing tells the iPhone while Murmur stays
+    /// in the background. The app writes that moment beside the plan (`planIsProUntil`), and from
+    /// then on the plan reads as not Pro's, for the keyboard's "Type as I speak" as well.
+    @Test func aTrialPastItsEndIsNotPros() throws {
+        let suite = "test.murmur.settings.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SharedSettings(defaults: defaults)
+        let ends = try Date("2026-11-20T12:00:00Z", strategy: .iso8601)
+        #expect(settings.planIsProUntil == nil)
+
+        settings.liveTyping = true
+        settings.planIsPro = true
+        settings.planIsProUntil = ends
+        #expect(SharedSettings(defaults: defaults).planIsProUntil == ends)
+        #expect(settings.planIsPro(at: ends.addingTimeInterval(-1)))
+        #expect(!settings.planIsPro(at: ends))
+        #expect(!SharedSettings(defaults: defaults).planIsPro(at: ends.addingTimeInterval(3600)))
+
+        // As the keyboard reads it, by the clock.
+        settings.planIsProUntil = Date().addingTimeInterval(3600)
+        #expect(settings.planIsPro)
+        #expect(settings.typesAsSpoken(fullAccess: true))
+        settings.planIsProUntil = Date().addingTimeInterval(-1)
+        #expect(!settings.planIsPro)
+        #expect(!settings.typesAsSpoken(fullAccess: true))
+        #expect(!settings.typesAsSpoken(fullAccess: false))
+
+        // No end (a subscription): the plan is what the app last wrote.
+        settings.planIsProUntil = nil
+        #expect(SharedSettings(defaults: defaults).planIsProUntil == nil)
+        #expect(settings.planIsPro(at: .distantFuture))
+        // An end to come makes nothing Pro's that isn't.
+        settings.planIsPro = false
+        settings.planIsProUntil = ends
+        #expect(!settings.planIsPro(at: ends.addingTimeInterval(-1)))
     }
 
     /// The server's `week_start()`: Sunday 00:00 in Los Angeles, in summer and in winter time.

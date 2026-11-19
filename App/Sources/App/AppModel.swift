@@ -86,6 +86,18 @@ final class AppModel {
         guard let quota else { return true }
         return quota.isPro && !quota.onTrial
     }
+
+    /// The signed-in account has Pro or is in its trial: what "Type as I speak" needs, in Settings
+    /// as on the keyboard. The plan read since launch says; before the first answer (offline),
+    /// what the keyboard goes by does: the last plan read for this account
+    /// (`SharedSettings.planIsPro`).
+    var planIsPro: Bool {
+        Self.planIsPro(signedIn: maySignedInDictate, quota: quota, stored: SharedSettings.shared.planIsPro)
+    }
+
+    nonisolated static func planIsPro(signedIn: Bool, quota: AccountService.Quota?, stored: Bool) -> Bool {
+        signedIn && (quota?.isPro ?? stored)
+    }
     /// The "Sign in again" sheet while it's up, and where it opened. RootView presents it, so it
     /// also opens during onboarding; the keyboard's start and the start dialog close it first.
     var signInSheet: SignInAgainView.Start?
@@ -493,11 +505,15 @@ final class AppModel {
 
     func refreshQuota() {
         guard !launchOptions.useFixtures, launchOptions.accountState == nil, onboarding.isComplete else { return }
+        let asked = signedInUser
         Task {
             do {
                 if let quota = try await accountService.quota() {
+                    // The plan of whoever asked. An account that went or changed while the server
+                    // answered must not leave its plan behind for the next one.
+                    guard signedInUser == asked else { return }
                     self.quota = quota
-                    Self.recordWordsLeft(quota, in: SharedSettings.shared)
+                    Self.recordWordsLeft(quota, in: SharedSettings.shared, signedIn: asked != nil)
                 }
             } catch {
                 // Offline or signed out: the menu keeps the last answer.
@@ -508,8 +524,16 @@ final class AppModel {
     /// What the plan says about the free words, for the keyboard's mic and the session
     /// (`SharedSettings.wordsUsedUpUntil`): used up until the next reset on Basic with none left,
     /// otherwise not (Pro, a trial, a new week, words from an invite).
+    ///
+    /// And whether it is Pro's, for the keyboard's "Type as I speak" (`SharedSettings.planIsPro`):
+    /// Pro and its trial are, Basic isn't. `signedIn`: the plan is a signed-in account's. A
+    /// guest's is never Pro's for the keyboard, so it can't be left behind for the account that
+    /// signs in next. A trial's end goes with it (`SharedSettings.planIsProUntil`): the trial can
+    /// end while Murmur stays in the background, where nothing reads the plan again.
     nonisolated static func recordWordsLeft(_ quota: AccountService.Quota, in settings: SharedSettings,
-                                            now: Date = Date()) {
+                                            signedIn: Bool = true, now: Date = Date()) {
+        settings.planIsPro = signedIn && quota.isPro
+        settings.planIsProUntil = signedIn && quota.onTrial ? quota.trialEndsAt : nil
         if quota.isPro {
             settings.wordsUsedUpUntil = nil
         } else if let remaining = quota.remaining {
@@ -519,8 +543,12 @@ final class AppModel {
 
     private func keepWordsMark() {
         guard !launchOptions.useFixtures, launchOptions.accountState == nil else { return }
-        let signedIn: UUID? = if case .signedIn(let account) = account?.state { account.userID } else { nil }
-        Self.keepWordsMark(for: signedIn, in: SharedSettings.shared, defaults: .standard)
+        Self.keepWordsMark(for: signedInUser, in: SharedSettings.shared, defaults: .standard)
+    }
+
+    /// The account that is signed in; nil for a guest, a lost session and nobody.
+    private var signedInUser: UUID? {
+        if case .signedIn(let account) = account?.state { account.userID } else { nil }
     }
 
     /// The account whose words `SharedSettings.wordsUsedUpUntil` is about: the last one signed in.
@@ -529,13 +557,34 @@ final class AppModel {
     /// The used-up mark belongs to the account it was said of. Signing out keeps it, so signing the
     /// same account in again (offline, before the plan is read) doesn't bring the words back;
     /// another account starts without it.
+    ///
+    /// So does the plan (`SharedSettings.planIsPro`), the other way round: it is nobody's once
+    /// nobody is signed in, and another account isn't Pro until its own plan is read. Its trial's
+    /// end (`planIsProUntil`) goes with it, each time after the plan itself is written: a trial
+    /// past its end reads as not Pro's with the flag still set, and must not be Pro's again once
+    /// the date is gone.
     nonisolated static func keepWordsMark(for signedIn: UUID?, in settings: SharedSettings, defaults: UserDefaults) {
-        guard let signedIn else { return }
+        guard let signedIn else {
+            settings.planIsPro = false
+            settings.planIsProUntil = nil
+            return
+        }
         let last = defaults.string(forKey: wordsAccountKey).flatMap(UUID.init(uuidString:))
         if last != signedIn {
             settings.wordsUsedUpUntil = nil
+            settings.planIsPro = false
+            settings.planIsProUntil = nil
             defaults.set(signedIn.uuidString, forKey: wordsAccountKey)
         }
+    }
+
+    /// The account is gone from this iPhone (signed out, deleted): the plan went with it, and so
+    /// does the keyboard's note of the words "Type as I speak" put into a field
+    /// (`LiveTypedRecord`), which are part of a dictation.
+    nonisolated static func forgetPlanAndTypedWords(in settings: SharedSettings, payloads: IPCPayloadStore) {
+        settings.planIsPro = false
+        settings.planIsProUntil = nil
+        payloads.clearLiveTyped()
     }
 
     /// Sign out: this iPhone forgets the account and its data, and onboarding starts over. A
@@ -590,6 +639,7 @@ final class AppModel {
         deleteAllHistory()
         library.deleteAll()
         quota = nil
+        Self.forgetPlanAndTypedWords(in: SharedSettings.shared, payloads: transport.payloads)
         router.isMenuOpen = false
         router.paths = [:]
         router.tab = .home
@@ -658,6 +708,9 @@ final class AppModel {
         keepWordsMark()
         publishSignIn()
         if maySignedInDictate {
+            // The plan of whoever is signed in now, for the menu and for the keyboard
+            // (`SharedSettings.planIsPro`), rather than when Murmur next comes to the front.
+            refreshQuota()
             if case .failed(let message) = session.phase,
                message == SessionController.SessionError.signedOut.localizedDescription {
                 session.stop()

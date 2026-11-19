@@ -35,6 +35,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     private var client: KeyboardSessionClient?
     /// The App Group channel, for the ☰ menu's dictionary additions.
     private var transport: IPCTransport?
+    /// "Type as I speak" (`SharedSettings.liveTyping`): a dictation's settled words go into the
+    /// field while it is recorded, and `insertDictation` has its final text replace them. The
+    /// session client tells it when; here it gets its field and its switch (`typesAsSpoken`).
+    private var liveTyping: LiveTyping?
+    /// The field it types into, `textDocumentProxy`. Kept here: `LiveTyping` holds it weakly.
+    private var typedField: DocumentProxyField?
     private var plane: KeyboardPlane = .numbers
     /// The voice layout: the pad is home, and the full keys get a key back to it.
     private var usesVoicePad = false
@@ -54,6 +60,10 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     /// `SharedSettings.debugKeyboardDemo`, read when the keyboard appears.
     private var demo: KeyboardDemo?
     private var demoTimer: Timer?
+    /// The typing demos' dictation, from its start until its text is in the field or the cross
+    /// took it away. It goes on while the keyboard is off screen, as the app goes on recording a
+    /// real one, so the keyboard comes back to it where it is by then.
+    private var demoDictation: (id: UUID, since: Date)?
     #endif
     private lazy var haptics = UIImpactFeedbackGenerator(style: .light, view: view)
     private lazy var readyHaptics = UINotificationFeedbackGenerator(view: view)
@@ -83,7 +93,14 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         let transport: IPCTransport = SharedContainer.appGroup()
             .map { DarwinIPCTransport(container: $0) } ?? InMemoryIPCTransport()
         self.transport = transport
-        let client = KeyboardSessionClient(transport: transport, wordsUsedUp: { SharedSettings.shared.wordsUsedUp() })
+        let typedField = DocumentProxyField(keyboard: self)
+        let liveTyping = LiveTyping(store: transport.payloads,
+                                    isEnabled: { [weak self] in self?.typesAsSpoken ?? false })
+        liveTyping.field = typedField
+        self.typedField = typedField
+        self.liveTyping = liveTyping
+        let client = KeyboardSessionClient(transport: transport, wordsUsedUp: { SharedSettings.shared.wordsUsedUp() },
+                                           liveTyping: liveTyping)
         client.host = self
         self.client = client
 
@@ -405,9 +422,24 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
                 client?.micTapped()
             },
             stop: { [weak self] in self?.client?.stopTapped() },
-            cancel: { [weak self] in self?.client?.cancelTapped() },
-            insertPending: { [weak self] in self?.client?.insertPendingResult() },
-            dismissPending: { [weak self] in self?.client?.dismissPendingResult() },
+            cancel: { [weak self] in
+                #if DEBUG
+                if self?.cancelDemoTyping() == true { return }
+                #endif
+                self?.client?.cancelTapped()
+            },
+            insertPending: { [weak self] in
+                #if DEBUG
+                if self?.resolveDemoPending(inserting: true) == true { return }
+                #endif
+                self?.client?.insertPendingResult()
+            },
+            dismissPending: { [weak self] in
+                #if DEBUG
+                if self?.resolveDemoPending(inserting: false) == true { return }
+                #endif
+                self?.client?.dismissPendingResult()
+            },
             dismissNotice: { [weak self] in self?.client?.dismissNotice() },
             openApp: { [weak self] in
                 guard let self else { return }
@@ -556,6 +588,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             return DictationLanguage(tag: tag)
         }
         model.primaryLanguage = primary
+        client?.primaryLanguage = primary.tag
         model.secondaryLanguage = secondary
         model.spokenLanguages = settings.dictationLanguages.map(DictationLanguage.init(tag:))
     }
@@ -704,8 +737,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     }
 
     private func moveCursor(_ offset: Int) {
+        guard !liveWordsHoldCursor else { return }
         textDocumentProxy.adjustTextPosition(byCharacterOffset: offset)
         clearUndo()
+    }
+
+    /// The words "Type as I speak" typed stand before the cursor until the dictation's final text
+    /// has replaced them, so while that dictation listens or is written the voice pad's drag
+    /// leaves the cursor with them. (It is the one thing on the keyboard that moves it then.)
+    private var liveWordsHoldCursor: Bool {
+        switch model.phase {
+        case .listening(let id, _), .processing(let id): liveTyping?.typedRequestId == id
+        default: false
+        }
     }
 
     /// Double space after a word types ". ", like the system keyboard.
@@ -762,8 +806,15 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
 
     // MARK: KeyboardSessionHost
 
+    /// Asked through key-value coding: once a field has let go of the keyboard the proxy has no
+    /// identifier, and Swift's own getter, which promises one, traps on that (seen on iOS 26.5).
+    /// The client asks while a dictation listens too, when the field can go at any moment.
+    /// A proxy without the getter would raise on the key, so it is asked first; no identifier
+    /// means the result goes into the focused field, as it does after the trip to the app.
     var currentDocumentIdentifier: UUID? {
-        textDocumentProxy.documentIdentifier
+        guard textDocumentProxy.responds(to: #selector(getter: UITextDocumentProxy.documentIdentifier)),
+              let proxy = textDocumentProxy as? NSObject else { return nil }
+        return proxy.value(forKey: #keyPath(UITextDocumentProxy.documentIdentifier)) as? UUID
     }
 
     func openContainingApp(_ url: URL) {
@@ -773,13 +824,19 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     }
 
     func insertDictation(_ result: DictationResult) {
-        let traits = InsertionTraits(
-            contextBefore: textDocumentProxy.documentContextBeforeInput,
-            singleLine: isSingleLineField,
-            language: result.language)
-        let text = TextJoiner.prepare(result.text, traits: traits)
-        guard !text.isEmpty else { return }
-        textDocumentProxy.insertText(text)
+        let text: String
+        if let placed = liveTyping?.place(result) {
+            // "Type as I speak" typed words for this dictation, and its text has replaced them.
+            text = placed
+        } else {
+            let traits = InsertionTraits(
+                contextBefore: textDocumentProxy.documentContextBeforeInput,
+                singleLine: isSingleLineField,
+                language: result.language)
+            text = TextJoiner.prepare(result.text, traits: traits)
+            guard !text.isEmpty else { return }
+            textDocumentProxy.insertText(text)
+        }
         undoableDictation = text
         model.undoableWords = text.split(whereSeparator: \.isWhitespace).count
     }
@@ -830,8 +887,9 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         if model.undoableWords != nil { model.undoableWords = nil }
     }
 
-    /// Return would submit here (send/go/search…), so dictations must stay on one line.
-    private var isSingleLineField: Bool {
+    /// Return would submit here (send/go/search…), so dictations must stay on one line, and
+    /// "Type as I speak" types nothing (`DocumentProxyField`).
+    var isSingleLineField: Bool {
         switch textDocumentProxy.returnKeyType ?? .default {
         case .default: break
         default: return true
@@ -840,6 +898,18 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         case .URL, .webSearch, .emailAddress, .twitter: return true
         default: return false
         }
+    }
+
+    /// "Type as I speak" is on: its switch in Murmur's Settings, a plan that has it (Pro or its
+    /// trial, as the app last wrote it), and Full Access, without which the keyboard can't keep
+    /// its record of what it typed (`SharedSettings.typesAsSpoken`, where a test holds the rule).
+    /// Read whenever `LiveTyping` asks, so a change counts at once.
+    private var typesAsSpoken: Bool {
+        #if DEBUG
+        // The typing demos stand in for the switch and the plan, and for nothing else.
+        if demoTypesLive { return hasFullAccess }
+        #endif
+        return settings.typesAsSpoken(fullAccess: hasFullAccess)
     }
 
     // MARK: Debug
@@ -866,6 +936,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     private func applyDemo() {
         demoTimer?.invalidate()
         demoTimer = nil
+        if !demoTypesLive { demoDictation = nil }
         guard let demo else { return }
         let id = UUID()
         model.pendingResult = nil
@@ -895,6 +966,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             model.livePreview = demo.state == .words ? KeyboardDemo.sampleWords(for: id) : LivePreview(requestId: id)
             model.showsLiveWords = true
             startDemoLevels(speaking: running ? id : nil)
+        case .typing, .typingCancel:
+            startDemoTyping()
         case .processing:
             model.translationEnabled = true
             model.phase = .processing(id)
@@ -934,15 +1007,150 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 let time = Date().timeIntervalSince(start)
-                let level = 0.12 + 0.7 * abs(sin(time * 7.3)) * (0.55 + 0.45 * sin(time * 1.3))
-                self.model.levels.removeFirst()
-                self.model.levels.append(min(1, max(0.06, level)))
+                self.pushDemoLevel(at: time)
                 if let id {
-                    let words = KeyboardDemo.runningWords(for: id, count: Int(time / 0.4))
+                    let words = KeyboardDemo.runningWords(for: id, count: Int(time / Self.demoWordInterval))
                     if self.model.livePreview != words { self.model.livePreview = words }
                 }
             }
         }
+    }
+
+    private func pushDemoLevel(at time: TimeInterval) {
+        let level = 0.12 + 0.7 * abs(sin(time * 7.3)) * (0.55 + 0.45 * sin(time * 1.3))
+        model.levels.removeFirst()
+        model.levels.append(min(1, max(0.06, level)))
+    }
+
+    /// The demos hear a word every 0.4 s.
+    private static let demoWordInterval: TimeInterval = 0.4
+    /// How long the `typing` demo's text is written for, between ✓ and its final text.
+    private static let demoWritingTime: TimeInterval = 1.2
+
+    // MARK: Debug: "Type as I speak"
+
+    /// The pinned demo is one of "Type as I speak".
+    private var demoTypesLive: Bool {
+        demo?.state == .typing || demo?.state == .typingCancel
+    }
+
+    /// `typing` and `typingCancel`: a dictation that hears `wordsRunning`'s words, with every new
+    /// preview handed to the real `LiveTyping` as the session client hands it one, so its settled
+    /// words are typed into the field the keyboard is up for. The demo stands in for the switch
+    /// and the plan only (`typesAsSpoken`), and plays the client's part, since nothing records:
+    /// every rule about the field holds, and Translate keeps the words out as ever.
+    ///
+    /// A keyboard that left the screen meanwhile comes back to the same dictation, as far as it is
+    /// by then, and types no more of it: leaving suspended it (`KeyboardSessionClient.deactivate`,
+    /// as for a real one), and its final text still replaces what is in the field. iOS makes the
+    /// keyboard anew when its app has been away; that one knows the dictation by the record of
+    /// its words, if all of them still show before the cursor, and takes it as heard out meanwhile.
+    private func startDemoTyping() {
+        let dictation: (id: UUID, since: Date)
+        if let demoDictation {
+            dictation = demoDictation
+        } else if let left = liveTyping?.typedRequestId, liveTyping?.canPlace(left) == true {
+            dictation = (left, Date().addingTimeInterval(-demoHeardAll))
+            demoDictation = dictation
+        } else {
+            dictation = (UUID(), Date())
+            demoDictation = dictation
+            // The client's part at the mic tap, and as the dictation begins to listen.
+            liveTyping?.forget()
+            liveTyping?.begin(dictation.id, translating: client?.translationTargetLanguage != nil,
+                              language: client?.liveWordsLanguage)
+        }
+        model.phase = .listening(dictation.id, since: dictation.since)
+        model.livePreview = LivePreview(requestId: dictation.id)
+        model.showsLiveWords = true
+        stepDemoTyping(dictation.id, since: dictation.since)
+        guard demoDictation != nil else { return }
+        demoTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stepDemoTyping(dictation.id, since: dictation.since) }
+        }
+    }
+
+    /// How many words the pinned typing demo hears.
+    private var demoTypingWords: Int {
+        demo?.state == .typingCancel ? KeyboardDemo.typingCancelWords : KeyboardDemo.typingWords
+    }
+
+    /// How long the typing demo's dictation listens: until a beat after its last word.
+    private var demoHeardAll: TimeInterval {
+        Double(demoTypingWords + 1) * Self.demoWordInterval
+    }
+
+    /// Where the typing demo's dictation is `since` its start. It listens for `demoHeardAll`. Then
+    /// `typingCancel` gets the cross; `typing` gets ✓, is written for `demoWritingTime`, and its
+    /// final text arrives.
+    private func stepDemoTyping(_ id: UUID, since: Date) {
+        let time = Date().timeIntervalSince(since)
+        if time < demoHeardAll {
+            pushDemoLevel(at: time)
+            let heard = min(Int(time / Self.demoWordInterval), demoTypingWords)
+            let words = KeyboardDemo.runningWords(for: id, count: heard)
+            if model.livePreview != words {
+                model.livePreview = words
+                liveTyping?.apply(words)
+            }
+        } else if demo?.state == .typingCancel {
+            model.actions.cancel()
+        } else if time < demoHeardAll + Self.demoWritingTime {
+            guard !model.isProcessing else { return }
+            model.phase = .processing(id)
+            model.livePreview = nil
+            model.showsLiveWords = false
+        } else {
+            deliverDemoTyping(id)
+        }
+    }
+
+    /// The typing demo's final text (`KeyboardDemo.typingFinalText`) arrives. As
+    /// `KeyboardSessionClient.deliver` decides for a real one, it goes in unasked only where it
+    /// replaces the words typed live, or none were typed; otherwise it waits as "Insert last
+    /// dictation". Either way it is placed by `insertDictation`.
+    private func deliverDemoTyping(_ id: UUID) {
+        let result = DictationResult(requestId: id, documentIdentifier: nil, text: KeyboardDemo.typingFinalText,
+                                     status: .cleaned, createdAt: Date())
+        endDemoTyping()
+        if liveTyping?.canPlace(id) ?? true {
+            insertDictation(result)
+        } else {
+            model.pendingResult = result
+        }
+    }
+
+    /// ✕ during a typing demo, tapped or played by `typingCancel`: what
+    /// `KeyboardSessionClient.cancelTapped` does with the words typed live. False when no typing
+    /// demo's dictation is under way, and ✕ is the client's.
+    private func cancelDemoTyping() -> Bool {
+        guard demoTypesLive, let demoDictation else { return false }
+        liveTyping?.discard(demoDictation.id)
+        endDemoTyping()
+        return true
+    }
+
+    /// A tap on the typing demo's "Insert last dictation", or on its ✕: the client knows nothing
+    /// of that card. The text goes where the client sends a real one, to `insertDictation`. False
+    /// when the card isn't a typing demo's.
+    private func resolveDemoPending(inserting: Bool) -> Bool {
+        guard demoTypesLive, let result = model.pendingResult else { return false }
+        model.pendingResult = nil
+        if inserting { insertDictation(result) }
+        return true
+    }
+
+    /// The typing demo's dictation is over, and the keyboard at rest. The demo plays again when
+    /// the keyboard next appears.
+    private func endDemoTyping() {
+        demoTimer?.invalidate()
+        demoTimer = nil
+        demoDictation = nil
+        model.phase = .idle
+        model.livePreview = nil
+        model.showsLiveWords = false
+        model.levels = Array(repeating: 0.06, count: model.levels.count)
+        updateKeyAreas()
     }
 
     /// The footprint and what is left before the extension is killed, in MB, e.g. "21.4/27MB"

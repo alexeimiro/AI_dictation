@@ -2,7 +2,9 @@ import Foundation
 import MurmurCore
 
 /// Shows the keyboard the words of the dictation being recorded (`LivePreview`): at most four times
-/// a second, only when they changed, and only their end. The file is removed when the dictation
+/// a second, only when they changed, and only their end. The keyboard shows them and inserts none,
+/// unless "Type as I speak" is on: then it types the settled ones into the field as they come, and
+/// the dictation's text replaces them (`LiveTyping`). The file is removed when the dictation
 /// ends, however the app ends it. A crash or a kill for memory mid-dictation gives the app no
 /// chance to: a keyboard following that dictation removes the file when it stops following it
 /// (`KeyboardSessionClient`), and otherwise `SessionController.init` does when the app next starts.

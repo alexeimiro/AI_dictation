@@ -11,6 +11,11 @@ public struct KeyboardDemo: Equatable, Sendable {
         /// Listening with the dictation's words on screen: `wordsStart` before the first one,
         /// `wordsRunning` as they come, a word at a time.
         case words, wordsStart, wordsRunning
+        /// "Type as I speak", played through the real `LiveTyping` into the focused field: the
+        /// running words go in as they settle. `typing` ends with the final text replacing them
+        /// (`typingFinalText`, after `typingWords` words); `typingCancel` with the cross taking
+        /// them out again (after `typingCancelWords`).
+        case typing, typingCancel
         /// Basic's weekly words are used up.
         case limit
         /// Nobody is signed in: "You are logged out" in place of the whole keyboard.
@@ -58,4 +63,18 @@ public struct KeyboardDemo: Equatable, Sendable {
         return LivePreview.tail(requestId: requestId, settled: settled,
                                 unsettled: settled.isEmpty ? unsettled : " " + unsettled)
     }
+
+    /// How many of the running words the `typing` state hears before its final text arrives.
+    public static let typingWords = 24
+    /// How many the `typingCancel` state hears before the cross.
+    public static let typingCancelWords = 12
+
+    /// The final text of the `typing` state's dictation: its `typingWords` running words as the
+    /// cloud might write them, with another word near the start ("hoping" for "thinking") and
+    /// other capitals and punctuation further on. So it begins as the typed words do and then
+    /// differs, and the replacement shows that all of them are written again.
+    public static let typingFinalText = """
+        So I was hoping we could meet on Thursday afternoon instead, because the morning is already \
+        full. And then go over the numbers, so.
+        """
 }

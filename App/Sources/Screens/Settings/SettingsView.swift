@@ -106,6 +106,17 @@ struct SettingsView: View {
                     SettingLabel("Keep the screen on while dictating", detail: "So Auto-Lock doesn’t cut a long dictation short")
                 }
                 .settingRow()
+                // Pro's, and its trial's: on any other plan the switch stays off and leads to Pro.
+                Toggle(isOn: Binding(get: { settings.typesAsSpoken(planIsPro: model.planIsPro) },
+                                     set: { on in
+                                         if !settings.setLiveTyping(on, planIsPro: model.planIsPro) {
+                                             model.showsPaywall = true
+                                         }
+                                     })) {
+                    SettingLabel("Type as I speak", badge: SettingsModel.liveTypingBadge(planIsPro: model.planIsPro),
+                                 detail: "Your words go into the app as you say them and are tidied when you finish. Not with Translate, and not in search or address bars.")
+                }
+                .settingRow()
 
                 header("Audio")
                 Toggle(isOn: $settings.interactionSounds) {
@@ -314,13 +325,17 @@ struct SettingPicker<Value: Hashable, Options: View>: View {
 }
 
 /// A settings row's title with its one-line explanation under it, and what goes on the right.
+/// `badge`: a word or two in a chip beside the title ("Beta").
 struct SettingLabel<Trailing: View>: View {
     let title: String
+    let badge: String?
     let detail: String
     @ViewBuilder let trailing: Trailing
 
-    init(_ title: String, detail: String, @ViewBuilder trailing: () -> Trailing = { EmptyView() }) {
+    init(_ title: String, badge: String? = nil, detail: String,
+         @ViewBuilder trailing: () -> Trailing = { EmptyView() }) {
         self.title = title
+        self.badge = badge
         self.detail = detail
         self.trailing = trailing()
     }
@@ -334,9 +349,12 @@ struct SettingLabel<Trailing: View>: View {
             : AnyLayout(HStackLayout(spacing: 12))
         layout {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.murmur(.body))
-                    .foregroundStyle(Theme.ink)
+                HStack(spacing: 8) {
+                    Text(title)
+                        .font(.murmur(.body))
+                        .foregroundStyle(Theme.ink)
+                    if let badge { Chip(badge) }
+                }
                 Text(detail)
                     .font(.murmur(.footnote))
                     .foregroundStyle(Theme.third)
