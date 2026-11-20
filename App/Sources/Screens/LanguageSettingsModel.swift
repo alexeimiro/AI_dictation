@@ -44,7 +44,12 @@ final class LanguageSettingsModel {
     }
 
     func setPrimary(_ tag: String) async {
-        guard tag != primary else { return }
+        // `primary` is only a default until `load()` has run, and onboarding never loads: what
+        // counts is what the settings hold and whether the model is there. (Onboarding's first
+        // language used to be skipped when it was that default, US English: never stored, its
+        // model never downloaded.)
+        let chosen = tag == primary && settings.primaryLanguage == tag
+        guard await Self.needsPreparing(chosen: chosen, isReady: { await self.assets.status(for: tag).isReady }) else { return }
         settings.primaryLanguage = tag
         primary = tag
         if secondary == tag {
@@ -58,12 +63,23 @@ final class LanguageSettingsModel {
 
     func setSecondary(_ tag: String?) async {
         let tag = tag == primary ? nil : tag
-        guard tag != secondary else { return }
+        let chosen = tag == secondary && settings.secondaryLanguage == tag
+        guard await Self.needsPreparing(chosen: chosen, isReady: {
+            guard let tag else { return true }
+            return await self.assets.status(for: tag).isReady
+        }) else { return }
         settings.secondaryLanguage = tag
         secondary = tag
         if let tag { await prepare(tag) }
         session?.languagesDidChange()
         await reconcile()
+    }
+
+    /// A language is set and its model brought unless it is the chosen one already and its model
+    /// is ready: the choice alone says nothing of the model.
+    static func needsPreparing(chosen: Bool, isReady: () async -> Bool) async -> Bool {
+        guard chosen else { return true }
+        return !(await isReady())
     }
 
     func download(_ tag: String) async {

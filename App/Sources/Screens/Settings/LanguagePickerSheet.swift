@@ -52,6 +52,8 @@ struct LanguagePickerSheet: View {
         }
         .background(Theme.canvas)
         .presentationBackground(Theme.canvas)
+        // The picked languages' on-device models are brought once the session hears of them.
+        .onDisappear { model.session.languagesDidChange() }
     }
 
     private func header(_ title: String) -> some View {

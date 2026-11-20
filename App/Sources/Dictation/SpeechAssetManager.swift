@@ -97,28 +97,22 @@ actor SpeechAssetManager {
     }
 
     /// Makes `tag` ready for recognition: picks the engine, downloads the model if needed,
-    /// validates it once per OS version, and reserves the locale.
+    /// validates it once per OS version, and reserves the locale. `retainModel`: the validated
+    /// model stays loaded for the session that asked (the default); false for a check made in
+    /// the background, beside a session that may never use this language.
     func ensureReady(
         tag: String,
         contextualStrings: [String] = [],
         override: Engine? = nil,
+        retainModel: Bool = true,
         progress: (@Sendable (InstallEvent) -> Void)? = nil
     ) async throws -> ResolvedLanguage {
-        let candidates = override.map { [$0] } ?? Engine.allCases
-        var supported: [(engine: Engine, locale: Locale)] = []
-        for engine in candidates {
-            if let locale = await Self.supportedLocale(for: engine, equivalentTo: tag) {
-                supported.append((engine, locale))
-            }
-        }
+        let supported = await supportedEngines(for: tag, override: override)
         guard !supported.isEmpty else { throw LanguageError.unsupported(tag) }
 
         // Fast path: verified on this OS version recently, and the asset is still installed
         // (the system may drop assets an app hasn't used for a while).
-        if let record = settings.verifiedEngines[tag], record.osVersion == Self.osVersion,
-           Date().timeIntervalSince(record.verifiedAt) < Self.verificationLifetime,
-           let match = supported.first(where: { $0.engine.rawValue == record.engine }),
-           await AssetInventory.status(forModules: [Self.makeModule(match.engine, locale: match.locale)]) == .installed {
+        if let match = await currentVerification(of: tag, among: supported) {
             return ResolvedLanguage(tag: tag, locale: match.locale, engine: match.engine,
                                     contextualStrings: contextualStrings)
         }
@@ -136,7 +130,7 @@ actor SpeechAssetManager {
             }
             progress?(.validating(engine))
             do {
-                try await Self.withTimeout(seconds: 15) { try await Self.validate(module) }
+                try await Self.withTimeout(seconds: 15) { try await Self.validate(module, retainModel: retainModel) }
             } catch {
                 logger.error("Validating \(engine.displayName, privacy: .public) for \(tag, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
                 failure = .validationFailed(tag, error.localizedDescription)
@@ -168,18 +162,73 @@ actor SpeechAssetManager {
                               verified: settings.verifiedEngines[tag], reserved: reserved)
     }
 
+    /// The engines that know `tag`, in the order `ensureReady` tries them, with the locale each accepts.
+    private func supportedEngines(for tag: String, override: Engine?) async -> [(engine: Engine, locale: Locale)] {
+        var supported: [(engine: Engine, locale: Locale)] = []
+        for engine in override.map({ [$0] }) ?? Engine.allCases {
+            if let locale = await Self.supportedLocale(for: engine, equivalentTo: tag) {
+                supported.append((engine, locale))
+            }
+        }
+        return supported
+    }
+
+    /// The engine `tag` was verified with, if that check is of this OS version and recent, and its
+    /// model is still installed.
+    private func currentVerification(
+        of tag: String, among supported: [(engine: Engine, locale: Locale)]
+    ) async -> (engine: Engine, locale: Locale)? {
+        guard let record = settings.verifiedEngines[tag], record.osVersion == Self.osVersion,
+              Date().timeIntervalSince(record.verifiedAt) < Self.verificationLifetime,
+              let match = supported.first(where: { $0.engine.rawValue == record.engine }),
+              await AssetInventory.status(forModules: [Self.makeModule(match.engine, locale: match.locale)]) == .installed
+        else { return nil }
+        return match
+    }
+
+    /// The language as it was last verified, if that engine's model is still on the iPhone: no
+    /// download and no new check, however long ago the check was. For a cloud session, whose
+    /// start waits for neither; `ensureReady` renews the check in a quiet moment
+    /// (`OnDeviceModelKeeper`). An engine that stopped working since is found out when it is
+    /// prepared, and the session goes on without it.
+    func verifiedLanguage(tag: String, contextualStrings: [String] = [], override: Engine? = nil) async -> ResolvedLanguage? {
+        guard let record = settings.verifiedEngines[tag], let engine = Engine(rawValue: record.engine),
+              override == nil || override == engine,
+              let locale = await Self.supportedLocale(for: engine, equivalentTo: tag),
+              await AssetInventory.status(forModules: [Self.makeModule(engine, locale: locale)]) == .installed
+        else { return nil }
+        return ResolvedLanguage(tag: tag, locale: locale, engine: engine, contextualStrings: contextualStrings)
+    }
+
+    /// What `ensureReady` would have to do for `tag`: nothing, a new check, or a download first.
+    /// It tries the engines in order and downloads what the first one lacks, so that one's model
+    /// decides whether a download is needed.
+    func modelState(for tag: String, override: Engine? = nil) async -> OnDeviceModelKeeper.ModelState {
+        let supported = await supportedEngines(for: tag, override: override)
+        guard let first = supported.first else { return .unsupported }
+        if await currentVerification(of: tag, among: supported) != nil { return .ready }
+        let installed = await AssetInventory.status(forModules: [Self.makeModule(first.engine, locale: first.locale)]) == .installed
+        return installed ? .unchecked : .missing
+    }
+
     /// Forces a fresh download check and validation on the next `ensureReady`.
     func forgetVerification(tag: String) {
         settings.verifiedEngines[tag] = nil
     }
 
-    /// Releases every reserved locale that is no longer a chosen language.
+    /// Releases every reserved locale that is no longer a chosen language: neither one of `tags`
+    /// nor a language picked in Settings (by language, whatever the region).
     func reconcileReservations(keep tags: [String]) async {
-        let keep = Set(tags)
-        for locale in await AssetInventory.reservedLocales where !keep.contains(locale.identifier(.bcp47)) {
+        let keep = Self.languageCodes(tags + settings.dictationLanguages)
+        for locale in await AssetInventory.reservedLocales
+        where !keep.contains(DictationLanguage(tag: locale.identifier(.bcp47)).languageCode) {
             _ = await AssetInventory.release(reservedLocale: locale)
             logger.info("Released speech assets for \(locale.identifier(.bcp47), privacy: .public)")
         }
+    }
+
+    private static func languageCodes(_ tags: [String]) -> Set<String> {
+        Set(tags.map { DictationLanguage(tag: $0).languageCode })
     }
 
     /// Everything the device reports about the engines, for the Debug screen and bug reports.
@@ -248,9 +297,11 @@ actor SpeechAssetManager {
     /// Loads the model and runs half a second of silence through it. Any failure (including the
     /// "asset not found after attempted download" case) disqualifies the engine for this
     /// language. The retained model is reused by the session, so the cost is paid once.
-    private static func validate(_ module: any SpeechModule) async throws {
+    private static func validate(_ module: any SpeechModule, retainModel: Bool = true) async throws {
         let analyzer = SpeechAnalyzer(
-            modules: [module], options: .init(priority: .userInitiated, modelRetention: .processLifetime))
+            modules: [module],
+            options: .init(priority: retainModel ? .userInitiated : .utility,
+                           modelRetention: retainModel ? .processLifetime : .whileInUse))
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [module]) else {
             throw ValidationError.noCompatibleFormat
         }
@@ -289,8 +340,10 @@ actor SpeechAssetManager {
         if (try? await AssetInventory.reserve(locale: locale)) == true { return }
         // Over the per-app limit: free a locale that is no longer chosen and retry once.
         let tag = locale.identifier(.bcp47)
-        let keep = Set(keptTags + [tag])
-        guard let victim = await AssetInventory.reservedLocales.first(where: { !keep.contains($0.identifier(.bcp47)) }) else {
+        let keep = Self.languageCodes(keptTags + [tag])
+        guard let victim = await AssetInventory.reservedLocales.first(where: {
+            !keep.contains(DictationLanguage(tag: $0.identifier(.bcp47)).languageCode)
+        }) else {
             logger.notice("Couldn't reserve speech assets for \(tag, privacy: .public); limit \(AssetInventory.maximumReservedLocales)")
             return
         }
@@ -300,8 +353,9 @@ actor SpeechAssetManager {
         }
     }
 
+    /// The primary and the secondary language, and the ones picked in Settings.
     private func keptTags() -> [String] {
-        [settings.primaryLanguage, settings.secondaryLanguage].compactMap { $0 }
+        [settings.primaryLanguage, settings.secondaryLanguage].compactMap { $0 } + settings.dictationLanguages
     }
 
     // MARK: Helpers

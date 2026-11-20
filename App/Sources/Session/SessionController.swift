@@ -90,6 +90,9 @@ final class SessionController {
     @ObservationIgnored private var secondaryTask: Task<Void, Never>?
     @ObservationIgnored private var reconnectTask: Task<Void, Never>?
     @ObservationIgnored private var fallbackTask: Task<Void, Never>?
+    /// Brings the on-device models a cloud session lacks, one run at a time.
+    @ObservationIgnored private var modelTask: Task<Void, Never>?
+    @ObservationIgnored private var modelKeeper: OnDeviceModelKeeper?
     /// The dictation the keyboard asked for when it opened the app, started once the session is ready.
     @ObservationIgnored private var requestedStart: PendingStart?
     /// The last dictation started that way, to start again if the audio path is rebuilt before
@@ -431,11 +434,52 @@ final class SessionController {
                          languageHints: DictationLanguage(tag: tag).isAutomatic ? settings.dictationLanguages : [])
     }
 
-    /// The on-device model for `tag` if it's already downloaded and verified. Never downloads.
+    /// The on-device model for `tag` if it is on the iPhone and was verified, under its own tag or
+    /// that of the same language for another region. Never downloads, and never checks anew: the
+    /// session's start waits for neither. A check that has run out (an iOS update, 30 days) is
+    /// renewed by the model keeper in a quiet moment.
     private func installedOnDeviceLanguage(_ tag: String) async -> ResolvedLanguage? {
-        guard await assets.status(for: tag).isReady else { return nil }
-        return try? await assets.ensureReady(
-            tag: tag, contextualStrings: pipeline.contextualStrings(), override: TranscriberEngine.current.kindOverride)
+        let verified = settings.verifiedEngines.keys
+        let code = DictationLanguage(tag: tag).languageCode
+        guard let known = verified.contains(tag) ? tag
+            : verified.sorted().first(where: { DictationLanguage(tag: $0).languageCode == code }) else { return nil }
+        return await assets.verifiedLanguage(tag: known, contextualStrings: pipeline.contextualStrings(),
+                                             override: TranscriberEngine.current.kindOverride)
+    }
+
+    /// The models a cloud session lacks are brought between dictations, and the checks that have
+    /// run out are renewed (`OnDeviceModelKeeper`). Whatever becomes ready joins the fallback's
+    /// languages of the session that is live then.
+    private func keepModels() {
+        guard usesCloud, isLive, modelTask == nil else { return }
+        let tags = OnDeviceModelKeeper.wanted(primary: primaryTag, secondary: settings.secondaryLanguage,
+                                              picked: settings.dictationLanguages)
+        let keeper = modelKeeper ?? makeModelKeeper()
+        modelKeeper = keeper
+        modelTask = Task { [weak self] in
+            await keeper.keep(tags) { [weak self] language in
+                guard let self, self.usesCloud, self.isLive else { return }
+                self.addFallback(language)
+            }
+            self?.modelTask = nil
+        }
+    }
+
+    /// The keeper asks Apple's framework through the asset manager, and the session whether it is
+    /// a quiet moment. One for the app's run, so what it has learned of a language (a failure an
+    /// hour ago) outlives a session.
+    private func makeModelKeeper() -> OnDeviceModelKeeper {
+        let assets = assets, pipeline = pipeline, settings = settings
+        return OnDeviceModelKeeper(environment: .init(
+            supportedTag: { tag in await LanguageResolver.supportedTag(equivalentTo: tag) },
+            state: { tag in await assets.modelState(for: tag, override: TranscriberEngine.current.kindOverride) },
+            ensure: { tag in
+                try await assets.ensureReady(tag: tag, contextualStrings: pipeline.contextualStrings(),
+                                             override: TranscriberEngine.current.kindOverride, retainModel: false)
+            },
+            mayDownload: { NetworkConditions.shared.downloadsModels(settings: settings) },
+            isIdle: { [weak self] in self?.phase == .ready },
+            now: { Date() }))
     }
 
     /// Lets a running cloud session fall back to a language whose model turned up later.
@@ -480,25 +524,24 @@ final class SessionController {
             updateAutomaticFallback()
             await cloud.prepareFallback()
             engineName = cloud.displayName
+            keepModels()
         }
     }
 
     /// The languages whose on-device model may be on the iPhone, the one the next dictation is
-    /// most likely in first: the primary and the secondary, led by the one the transcriber is set
-    /// to, or under Auto-detect by the one the last dictation was in.
+    /// most likely in first: the primary, the secondary and the ones picked in Settings, led by
+    /// the one the transcriber is set to, or under Auto-detect by the one the last dictation was in.
     private func fallbackCandidates() -> [String] {
         let current = transcriber?.currentLanguage?.language
         let likely = current.flatMap { $0.isAutomatic ? nil : $0.languageCode }
             ?? settings.lastDetectedLanguage.map { DictationLanguage(normalizing: $0).languageCode }
-        return Self.fallbackCandidates(primary: primaryTag, secondary: settings.secondaryLanguage, likely: likely)
+        return Self.fallbackCandidates(primary: primaryTag, secondary: settings.secondaryLanguage,
+                                       picked: settings.dictationLanguages, likely: likely)
     }
 
-    nonisolated static func fallbackCandidates(primary: String, secondary: String?, likely: String?) -> [String] {
-        var tags: [String] = []
-        for tag in [primary, secondary].compactMap({ $0 })
-        where !DictationLanguage(tag: tag).isAutomatic && !tags.contains(tag) {
-            tags.append(tag)
-        }
+    nonisolated static func fallbackCandidates(primary: String, secondary: String?, picked: [String] = [],
+                                               likely: String?) -> [String] {
+        let tags = OnDeviceModelKeeper.wanted(primary: primary, secondary: secondary, picked: picked)
         guard let likely else { return tags }
         return tags.filter { DictationLanguage(tag: $0).languageCode == likely }
             + tags.filter { DictationLanguage(tag: $0).languageCode != likely }
@@ -954,6 +997,8 @@ final class SessionController {
         }
         beginQueuedStart()
         beginRequestedStart()
+        // A quiet moment, unless one of the two has just begun a dictation: then the next one.
+        keepModels()
     }
 
     // MARK: Keyboard commands

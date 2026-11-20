@@ -49,4 +49,21 @@ struct FallbackLanguagesTests {
         #expect(SessionController.fallbackCandidates(primary: "en-US", secondary: "en-US", likely: nil) == ["en-US"])
         #expect(SessionController.fallbackCandidates(primary: "und", secondary: "ru-RU", likely: nil) == ["ru-RU"])
     }
+
+    /// The languages picked in Settings count too, once their models have been brought.
+    @Test func thePickedLanguagesAreCandidatesToo() {
+        #expect(SessionController.fallbackCandidates(
+            primary: "en-US", secondary: nil, picked: ["ru-RU", "en-GB"], likely: "ru") == ["ru-RU", "en-US"])
+        #expect(SessionController.fallbackCandidates(
+            primary: "en-US", secondary: "ru-RU", picked: ["de-DE", "fr-FR"], likely: "de") == ["de-DE", "en-US", "ru-RU"])
+    }
+
+    /// Onboarding confirms a language that was the default all along: it is still set, and its
+    /// model brought, unless both are already so.
+    @Test func aLanguageIsPreparedUnlessItIsChosenAndReady() async {
+        #expect(await LanguageSettingsModel.needsPreparing(chosen: false, isReady: { true }))
+        #expect(await LanguageSettingsModel.needsPreparing(chosen: false, isReady: { false }))
+        #expect(await LanguageSettingsModel.needsPreparing(chosen: true, isReady: { false }))
+        #expect(!(await LanguageSettingsModel.needsPreparing(chosen: true, isReady: { true })))
+    }
 }
