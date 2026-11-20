@@ -98,9 +98,12 @@ is, and the dictation is formatted, cleaned up and filed in it. Pinning a langua
 menu sends it to OpenAI instead. The app records the dictation, compresses it to AAC and sends it
 to the `transcribe` function (or `dictate`, below), which passes it to OpenAI (`gpt-transcribe`)
 with the language, if any, and the personal dictionary as keyword hints; the audio isn't stored.
-If OpenAI can't be reached, a language whose on-device model is already installed is recognized on
-the iPhone instead; under Auto-detect that is the language of the last dictation, else the
-iPhone's. Without a backend, or in a Debug build with Settings › Debug › Recognizer set to
+If OpenAI can't be reached, a language whose on-device model is on the iPhone is recognized there
+instead (the model of the same language for another region counts); under Auto-detect that is the
+language of the last dictation, else the iPhone's. That model listens beside every cloud
+dictation, and its words are what the keyboard shows while you talk. It is prepared beside the
+microphone's start, so the first dictation after a break begins without it: the model takes that
+dictation up a moment later, with everything said so far. Without a backend, or in a Debug build with Settings › Debug › Recognizer set to
 On-device, recognition is on-device only, in the primary language. Until they are picked, the letters and the
 translation target follow the iPhone's language (ЙЦУКЕН on a Russian iPhone).
 
@@ -129,8 +132,13 @@ first of the iPhone's preferred languages that an engine supports, else US Engli
 On the device, for each language the app tries `SpeechTranscriber` first and `DictationTranscriber` second: it
 downloads the model, runs half a second of silence through it as a validation (Apple's locale
 list has misreported support before) and remembers the engine that passed, per OS version.
-Settings › Languages › Verify re-runs that check; Speech diagnostics lists what the device
-reports. The cleanup prompt gets the dictation's BCP-47 tag and applies the matching language
+With a backend the models are for the fallback and the keyboard's words, and the app brings them
+by itself (`OnDeviceModelKeeper`): the primary and the secondary language's and those picked in
+Settings › Set language, three at most, one at a time and between dictations, a download only on
+Wi-Fi and not in Low Data Mode, and after a failure not again for an hour. A session uses a
+verified model as it is and never waits for a download or a new check. In a Debug build
+Settings › Debug › On-device languages has Verify, which re-runs the check, and Speech
+diagnostics, which lists what the device reports. The cleanup prompt gets the dictation's BCP-47 tag and applies the matching language
 pack (Russian fillers, self-corrections, «ёлочки», 24-hour times, «25 000 ₽», loanwords stay in
 Cyrillic, brands in Latin).
 
@@ -140,7 +148,9 @@ The default is the voice keyboard:
 - a bar with the menu, an outlined chip for translation, a solid pill for the style, and Delete;
 - a big ink talk button with a ring around it, which turns red with ✓ and echo rings that follow
   the voice while it listens (nothing else on the keyboard is red). The words of the dictation
-  show under it while it listens, when the language's on-device model is on the iPhone;
+  show under it while it listens, when the language's on-device model is on the iPhone. For the
+  first dictation after the microphone turns on they come a second or two in, all that was said
+  so far at once;
 - space and return.
 
 It is 278 pt tall (272 in landscape). It can't dictate without Allow Full Access, so until that is
