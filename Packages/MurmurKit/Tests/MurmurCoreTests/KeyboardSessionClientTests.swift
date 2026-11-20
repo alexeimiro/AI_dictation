@@ -99,6 +99,25 @@ private final class FakeApp {
         if posts { transport.post(.livePreview) }
     }
 
+    /// The words so far as the app really writes them: only their end, once they are long.
+    func sayCut(_ id: UUID, _ settled: String, _ unsettled: String = "") throws {
+        try transport.payloads.write(livePreview: .tail(requestId: id, settled: settled, unsettled: unsettled))
+        transport.post(.livePreview)
+    }
+
+    /// The Action Button, Control Center or a shortcut asks for a dictation while the keyboard is
+    /// on screen (`SessionController.beginDictationForKeyboard`): the app writes the request with
+    /// its own options and records it at once, its preview there before it reports `recording`.
+    func beginForKeyboard(at date: Date, language: String? = nil, translatingTo target: String? = nil) throws -> UUID {
+        let id = UUID()
+        try transport.payloads.write(pendingStart: PendingStart(
+            requestId: id, documentIdentifier: nil, createdAt: date, autoStart: true,
+            languageOverride: language, translationTargetLanguage: target))
+        if previews { try transport.payloads.write(livePreview: LivePreview(requestId: id)) }
+        publish(.recording, tag: id.tag16)
+        return id
+    }
+
     /// The app removes the preview, as it does when the dictation ends.
     func takeWordsAway() {
         transport.payloads.clearLivePreview()
@@ -180,8 +199,9 @@ private struct TypingLive {
 @MainActor
 private func typingKeyboard(
     _ field: FakeTextField, on transport: InMemoryIPCTransport = InMemoryIPCTransport(), live: Bool = true,
-    enabled: @escaping () -> Bool = { true }, resultTimeout: Duration = .seconds(20), staleAfter: TimeInterval = 2.5,
-    wordsUsedUp: @escaping () -> Bool = { false }
+    enabled: @escaping () -> Bool = { true }, clock: @escaping () -> Date = Date.init,
+    resultTimeout: Duration = .seconds(20), staleAfter: TimeInterval = 2.5,
+    wordsUsedUp: @escaping () -> Bool = { false }, trace: @escaping (String) -> Void = { _ in }
 ) -> (app: FakeApp, host: FakeHost, client: KeyboardSessionClient, typing: LiveTyping) {
     let app = FakeApp(transport: transport)
     app.previews = true
@@ -190,12 +210,87 @@ private func typingKeyboard(
     let host = FakeHost()
     host.liveTyping = typing
     host.field = field
-    let client = KeyboardSessionClient(transport: transport, resultTimeout: resultTimeout, staleAfter: staleAfter,
-                                       wordsUsedUp: wordsUsedUp, liveTyping: typing)
+    let client = KeyboardSessionClient(transport: transport, clock: clock, resultTimeout: resultTimeout,
+                                       staleAfter: staleAfter, wordsUsedUp: wordsUsedUp, liveTyping: typing,
+                                       trace: trace)
     client.host = host
     if live { app.publish(.ready) }
     client.activate()
     return (app, host, client, typing)
+}
+
+/// The keyboard's time, which a test moves by hand: the first second after the keyboard comes
+/// back on screen (`KeyboardSessionClient.attachSettle`) is over when the test says so, however
+/// busy the machine.
+@MainActor
+private final class FakeClock {
+    var now = Date()
+
+    func pass(_ seconds: TimeInterval) { now = now.addingTimeInterval(seconds) }
+}
+
+/// What the client wrote to the keyboard's log.
+@MainActor
+private final class FakeLog {
+    var lines: [String] = []
+}
+
+/// A keyboard with "Type as I speak" that follows a dictation the app began for it, in `field`.
+@MainActor
+private struct Joined {
+    let transport: InMemoryIPCTransport
+    let app: FakeApp
+    let host: FakeHost
+    let client: KeyboardSessionClient
+    let typing: LiveTyping
+    let field: FakeTextField
+    let id: UUID
+    let clock: FakeClock
+    let log: FakeLog
+
+    var record: LiveTypedRecord? { transport.payloads.readLiveTyped() }
+
+    /// The keyboard has been back on screen for longer than the second in which nothing is
+    /// typed, and the app publishes its state again, which shows that it is there.
+    func settle() {
+        clock.pass(KeyboardSessionClient.attachSettle + 0.5)
+        app.publish(.recording, tag: id.tag16)
+    }
+
+    /// The words so far, and the keyboard has them.
+    func say(_ settled: String, _ unsettled: String = "") async throws {
+        try app.say(id, settled, unsettled)
+        #expect(await waitUntil { client.livePreview?.settled == settled })
+    }
+}
+
+/// The bounce, with "Type as I speak": the mic is tapped with no session, the app is opened and
+/// begins the dictation while the keyboard is away, having heard `heard` by the time the keyboard
+/// is back on screen and follows it. Time is the test's (`FakeClock`), and the app, silent
+/// between the test's steps, is not taken for gone.
+@MainActor
+private func joinAfterTheBounce(
+    into field: FakeTextField = FakeTextField("Hi. "), heard: String = "",
+    enabled: @escaping () -> Bool = { true }, before: (KeyboardSessionClient) -> Void = { _ in }
+) throws -> Joined {
+    let transport = InMemoryIPCTransport()
+    let clock = FakeClock()
+    let log = FakeLog()
+    let (app, host, client, typing) = typingKeyboard(
+        field, on: transport, live: false, enabled: enabled, clock: { clock.now }, staleAfter: 600,
+        trace: { log.lines.append($0) })
+    before(client)
+    client.micTapped()
+    let opened: UUID? = if case .openingApp(let id) = client.phase { id } else { nil }
+    let id = try #require(opened)
+    client.deactivate()
+    // Before it reports `recording`, as the app does.
+    try transport.payloads.write(livePreview: LivePreview(requestId: id, settled: heard))
+    #expect(app.autoStart() == id)
+    client.activate()
+    #expect(client.phase.isListening(to: id))
+    return Joined(transport: transport, app: app, host: host, client: client, typing: typing, field: field,
+                  id: id, clock: clock, log: log)
 }
 
 /// Taps the mic on a live session, with "Type as I speak", and waits until the keyboard listens.
@@ -1494,47 +1589,610 @@ struct KeyboardSessionClientTests {
     }
 
     /// The keyboard opened the app for the dictation, and the app was recording before the
-    /// keyboard came back: its words are shown, and never typed. The final text goes in as ever.
-    @Test func aDictationTheAppWasOpenedForIsNeverTypedLive() async throws {
-        let transport = InMemoryIPCTransport()
-        let field = FakeTextField("Hi. ")
-        let (app, host, client, typing) = typingKeyboard(field, on: transport, live: false)
-        client.micTapped()
-        guard case .openingApp(let requestId) = client.phase else { Issue.record("no openingApp"); return }
-        client.deactivate()
-        try transport.payloads.write(livePreview: LivePreview(requestId: requestId, settled: "said in the app"))
-        #expect(try #require(app.autoStart()) == requestId)
-
-        client.activate()
-        app.publish(.recording, tag: requestId.tag16)
-        #expect(await waitUntil { client.livePreview?.settled == "said in the app" })
-        try app.say(requestId, "said in the app and after", " coming back")
-        #expect(await waitUntil { client.livePreview?.settled == "said in the app and after" })
+    /// keyboard came back: the first dictation after the microphone turns on. Its words are typed
+    /// too, once the app has shown that it is there and the keyboard has been back for a second,
+    /// and its final text replaces them.
+    @Test func aDictationTheAppWasOpenedForIsTypedLive() async throws {
+        let joined = try joinAfterTheBounce(heard: "said in the app")
+        let (app, host, client, field, id) = (joined.app, joined.host, joined.client, joined.field, joined.id)
+        // `recording` may be what an app that died left behind: none of its words are shown, or typed.
+        #expect(client.livePreview == LivePreview(requestId: id))
         #expect(field.text == "Hi. ")
-        #expect(!typing.isTyping(requestId))
-        #expect(transport.payloads.readLiveTyped() == nil)
+
+        // The app is there. Its words are shown, and not typed while the field may not be ready.
+        app.publish(.recording, tag: id.tag16)
+        #expect(await waitUntil { client.livePreview?.settled == "said in the app" })
+        #expect(field.text == "Hi. ")
+        #expect(!joined.typing.isTyping(id))
+        #expect(joined.record == nil)
+
+        // The second is over: the next words bring the ones before them along.
+        joined.clock.pass(KeyboardSessionClient.attachSettle + 0.5)
+        try app.say(id, "said in the app and after", " coming back")
+        #expect(await waitUntil { field.text == "Hi. said in the app and after" })
+        #expect(field.insertions == ["said in the app and after"])
+        #expect(client.livePreview?.unsettled == " coming back", "the newest words stay on the keyboard")
+        #expect(joined.typing.typedRequestId == id)
+        try app.say(id, "said in the app and after coming back", " to it")
+        #expect(await waitUntil { field.text == "Hi. said in the app and after coming back" })
 
         client.stopTapped()
-        try app.finish(requestId, text: "Said in the app and after coming back.", document: nil)
+        try app.finish(id, text: "Said in the app and after coming back to it.", document: nil)
         #expect(await waitUntil { host.inserted.count == 1 })
-        #expect(field.text == "Hi. Said in the app and after coming back.")
-        #expect(field.deletions == 0)
+        #expect(field.text == "Hi. Said in the app and after coming back to it.")
+        // Every typed character went and the whole text came, in one insertion.
+        #expect(field.deletions == "said in the app and after coming back".count)
+        #expect(field.insertions.last == "Said in the app and after coming back to it.")
+        #expect(joined.record == nil)
+        #expect(client.pendingResult == nil)
+        #expect(host.outcomes == [.ready])
 
-        // Nor one the app hadn't started yet, which the keyboard starts itself once it is back.
+        // One the app hadn't started yet, which the keyboard starts itself once it is back, is
+        // typed too. By the machine's own clock here: not in the first second, and then without
+        // newer words to bring it about (the app, silent meanwhile, is not taken for gone).
         let later = InMemoryIPCTransport()
         let laterField = FakeTextField("Hi. ")
-        let waiting = typingKeyboard(laterField, on: later, live: false)
+        let waiting = typingKeyboard(laterField, on: later, live: false, staleAfter: 60)
         waiting.client.micTapped()
         guard case .openingApp(let laterId) = waiting.client.phase else { Issue.record("no openingApp"); return }
         waiting.client.deactivate()
         waiting.app.publish(.ready)
+        let returned = Date()
         waiting.client.activate()
         #expect(await waitUntil { waiting.client.phase.isListening(to: laterId) })
         #expect(waiting.client.livePreview != nil)
         try waiting.app.say(laterId, "said after the trip")
-        #expect(await waitUntil { waiting.client.livePreview?.settled == "said after the trip" })
-        #expect(laterField.text == "Hi. ")
-        #expect(!waiting.typing.isTyping(laterId))
+        #expect(await waitUntil(timeout: .seconds(10)) { laterField.text == "Hi. said after the trip" })
+        #expect(Date().timeIntervalSince(returned) >= KeyboardSessionClient.attachSettle)
+        waiting.client.stopTapped()
+        try waiting.app.finish(laterId, text: "Said after the trip.", document: nil)
+        #expect(await waitUntil { waiting.host.inserted.count == 1 })
+        #expect(laterField.text == "Hi. Said after the trip.")
+        #expect(laterField.deletions == "said after the trip".count)
+    }
+
+    /// The words of a dictation joined after the bounce wait for a sign of the app, as they do on
+    /// the keyboard: until its state moves on, `recording` may be what an app that died left
+    /// behind. Nothing is typed on that, or decided about typing, however long the keyboard has
+    /// been back.
+    @Test func wordsOfADictationJoinedAreNotTypedBeforeTheAppShowsLife() async throws {
+        let joined = try joinAfterTheBounce(heard: "said in the app")
+        joined.clock.pass(KeyboardSessionClient.attachSettle + 1)
+        // More than a second of the machine's time: the listening loop has looked again.
+        try? await Task.sleep(for: .milliseconds(1300))
+        #expect(joined.client.livePreview == LivePreview(requestId: joined.id))
+        #expect(joined.field.text == "Hi. ")
+        #expect(joined.log.lines == ["start tap", "start attach"])
+
+        joined.app.publish(.recording, tag: joined.id.tag16)
+        #expect(await waitUntil { joined.field.text == "Hi. said in the app" })
+        #expect(joined.log.lines == ["start tap", "start attach", "typing armed"])
+    }
+
+    /// Right after the trip to the app a field may not be ready. An insertion it dropped would
+    /// still show in the keyboard's own copy of the text, and the final text's replacement would
+    /// then delete the person's own text in place of the words. So for the first second after
+    /// the keyboard is back nothing is typed, whatever comes. After it the words that came
+    /// meanwhile are typed though no newer ones follow: the listening loop offers them again.
+    @Test func nothingIsTypedInTheFirstSecondAfterTheKeyboardIsBack() async throws {
+        let joined = try joinAfterTheBounce(heard: "said in the app")
+        let (app, client, field, id) = (joined.app, joined.client, joined.field, joined.id)
+        app.publish(.recording, tag: id.tag16)
+        #expect(await waitUntil { client.livePreview?.settled == "said in the app" })
+        try await joined.say("said in the app and after", " coming back")
+        // Most of the keyboard's second, and more than one of the machine's: the listening loop
+        // has looked again meanwhile.
+        joined.clock.pass(KeyboardSessionClient.attachSettle - 0.1)
+        try? await Task.sleep(for: .milliseconds(1300))
+        #expect(field.text == "Hi. ")
+        #expect(field.insertions.isEmpty)
+        #expect(!joined.typing.isTyping(id))
+        #expect(joined.record == nil)
+        #expect(joined.log.lines == ["start tap", "start attach"], "nothing is decided before the second is over")
+
+        joined.clock.pass(0.2)
+        #expect(await waitUntil(timeout: .seconds(10)) { field.text == "Hi. said in the app and after" })
+        #expect(field.insertions == ["said in the app and after"])
+        #expect(joined.log.lines == ["start tap", "start attach", "typing armed"])
+    }
+
+    /// Should the keyboard be told twice that it is coming on screen, without having left in
+    /// between, that is no leaving and coming back: the dictation it joined is still typed, a
+    /// second after the later call. (Dropping the offer there would cost the first dictation its
+    /// typing wherever iOS calls `viewWillAppear` again.)
+    @Test func comingOnScreenTwiceWithoutLeavingKeepsTheTyping() async throws {
+        let joined = try joinAfterTheBounce(heard: "said in the app")
+        joined.clock.pass(KeyboardSessionClient.attachSettle - 0.1)
+        joined.client.activate()
+        joined.clock.pass(0.2)
+        joined.app.publish(.recording, tag: joined.id.tag16)
+        #expect(await waitUntil { joined.client.livePreview?.settled == "said in the app" })
+        #expect(joined.field.text == "Hi. ", "the second counts from the later call")
+
+        joined.clock.pass(KeyboardSessionClient.attachSettle)
+        try joined.app.say(joined.id, "said in the app and after")
+        #expect(await waitUntil { joined.field.text == "Hi. said in the app and after" })
+    }
+
+    /// The first dictation after the microphone turns on can have no words for its first
+    /// seconds: the app gives the recognizer the audio recorded so far once it is ready, and the
+    /// first preview with words then brings many settled ones at once. They are typed in one
+    /// insertion, and the final text replaces them.
+    @Test func theFirstWordsThatComeAllAtOnceAreTypedInOneInsertion() async throws {
+        let heard = "so i was thinking we could meet on thursday afternoon instead"
+        let final = "So I was thinking we could meet on Thursday afternoon instead, because it is quieter."
+
+        // On a session that was already live.
+        let live = try await typeLive(into: FakeTextField("Hi. "))
+        try live.app.say(live.id, heard, " because it is")
+        #expect(await waitUntil { live.field.text == "Hi. " + heard })
+        #expect(live.field.insertions == [heard])
+        live.client.stopTapped()
+        try live.app.finish(live.id, text: final, document: live.host.currentDocumentIdentifier)
+        #expect(await waitUntil { live.host.inserted.count == 1 })
+        #expect(live.field.text == "Hi. " + final)
+        #expect(live.field.deletions == heard.count)
+        #expect(live.field.insertions == [heard, final])
+
+        // After the bounce: nothing had been heard when the keyboard came back.
+        let joined = try joinAfterTheBounce()
+        joined.settle()
+        try joined.app.say(joined.id, heard, " because it is")
+        #expect(await waitUntil { joined.field.text == "Hi. " + heard })
+        #expect(joined.field.insertions == [heard])
+        #expect(joined.record?.typed == heard)
+        joined.client.stopTapped()
+        try joined.app.finish(joined.id, text: final, document: nil)
+        #expect(await waitUntil { joined.host.inserted.count == 1 })
+        #expect(joined.field.text == "Hi. " + final)
+        #expect(joined.field.deletions == heard.count)
+        #expect(joined.field.insertions == [heard, final])
+        #expect(joined.record == nil)
+    }
+
+    /// What the keyboard is first shown may be more than is ever typed live: a dictation whose
+    /// beginning has left the preview by then (only the end of a long one is written), or more
+    /// than the 280 characters. None of it is typed, and its text goes in at the end as any
+    /// dictation's does.
+    @Test func aFirstPreviewThatIsCutOrTooLongTypesNothing() async throws {
+        let cutWords = Array(repeating: "word", count: 100).joined(separator: " ")
+        let cut = try joinAfterTheBounce()
+        cut.settle()
+        try cut.app.sayCut(cut.id, cutWords, " and")
+        #expect(await waitUntil { (cut.client.livePreview?.settledStart ?? 0) > 0 })
+        #expect(cut.field.text == "Hi. ")
+        #expect(cut.field.insertions.isEmpty)
+        #expect(!cut.typing.isTyping(cut.id))
+        #expect(cut.record == nil)
+        #expect(cut.log.lines.suffix(2) == ["typing armed", "typing stopped"])
+        cut.client.stopTapped()
+        try cut.app.finish(cut.id, text: "Word word.", document: nil)
+        #expect(await waitUntil { cut.host.inserted.count == 1 })
+        #expect(cut.field.text == "Hi. Word word.")
+        #expect(cut.field.deletions == 0)
+
+        // Whole, and past the limit.
+        let longWords = Array(repeating: "word", count: 60).joined(separator: " ")
+        #expect(longWords.count > LiveTyping.limit && longWords.count <= LivePreview.tailLimit)
+        let long = try joinAfterTheBounce()
+        long.settle()
+        try await long.say(longWords)
+        #expect(long.field.text == "Hi. ")
+        #expect(!long.typing.isTyping(long.id))
+        #expect(long.record == nil)
+        // Nor are the words after them, which would fit by themselves.
+        try long.app.sayCut(long.id, longWords + " and more", " to come")
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(long.field.text == "Hi. ")
+        long.client.stopTapped()
+        try long.app.finish(long.id, text: "Word word.", document: nil)
+        #expect(await waitUntil { long.host.inserted.count == 1 })
+        #expect(long.field.text == "Hi. Word word.")
+        #expect(long.field.deletions == 0)
+
+        // The same on a session that was already live.
+        let live = try await typeLive(into: FakeTextField("Hi. "))
+        try live.app.sayCut(live.id, cutWords)
+        #expect(await waitUntil { (live.client.livePreview?.settledStart ?? 0) > 0 })
+        #expect(live.field.text == "Hi. ")
+        #expect(!live.typing.isTyping(live.id))
+        #expect(live.record == nil)
+    }
+
+    /// The cross takes out the words typed for a dictation the app was opened for, and so does a
+    /// result with nothing to insert, as for any dictation.
+    @Test func wordsTypedAfterTheBounceGoWithTheCrossAndWithAResultOfNothing() async throws {
+        let crossed = try joinAfterTheBounce(heard: "said in the app")
+        crossed.settle()
+        #expect(await waitUntil { crossed.field.text == "Hi. said in the app" })
+        crossed.client.cancelTapped()
+        #expect(crossed.field.text == "Hi. ")
+        #expect(crossed.field.deletions == "said in the app".count)
+        #expect(crossed.record == nil)
+        #expect(crossed.typing.typedRequestId == nil)
+        #expect(crossed.client.phase == .idle)
+
+        let empty = try joinAfterTheBounce(heard: "um")
+        empty.settle()
+        #expect(await waitUntil { empty.field.text == "Hi. um" })
+        empty.client.stopTapped()
+        try empty.app.finish(empty.id, text: "", document: nil, status: .empty, message: "We didn't catch anything")
+        #expect(await waitUntil { empty.client.phase == .notice("We didn't catch anything") })
+        #expect(empty.field.text == "Hi. ")
+        #expect(empty.field.deletions == "um".count)
+        #expect(empty.record == nil)
+        #expect(empty.host.inserted.isEmpty)
+        #expect(empty.host.outcomes == [.problem])
+    }
+
+    /// Whether a dictation is typed is settled once, when its typing could begin. What was in
+    /// the way then (a selection, a field of one line, the switch, the focus in another field)
+    /// may be gone a moment later: the dictation is not typed for that, and its text comes at the
+    /// end as ever. (The switch on a live session: `withTypeAsISpeakOffNothingIsTypedUntilTheEnd`.)
+    @Test func aDictationRefusedWhenItsTypingCouldBeginIsNotTypedLater() async throws {
+        // On a live session it is settled as the dictation begins to listen. Text is selected then.
+        let selected = FakeTextField("Replace this")
+        selected.selectLast(4)
+        let withSelection = try await typeLive(into: selected)
+        #expect(!withSelection.typing.isTyping(withSelection.id))
+        selected.moveCursorToEnd()
+        try withSelection.app.say(withSelection.id, "and more")
+        #expect(await waitUntil { withSelection.client.livePreview?.settled == "and more" })
+        #expect(selected.text == "Replace this")
+        #expect(selected.insertions.isEmpty)
+
+        // A search bar, and the focus goes to a field of several lines.
+        let bar = FakeTextField("Hi. ")
+        bar.isSingleLine = true
+        let inBar = try await typeLive(into: bar)
+        bar.isSingleLine = false
+        try inBar.app.say(inBar.id, "and more")
+        #expect(await waitUntil { inBar.client.livePreview?.settled == "and more" })
+        #expect(bar.text == "Hi. ")
+
+        // The focus was in another field than the one tapped in as the app answered, and is back.
+        let tapped = FakeTextField("Hi. ")
+        let (app, host, client, typing) = typingKeyboard(tapped)
+        let tappedIn = host.currentDocumentIdentifier
+        client.micTapped()
+        host.currentDocumentIdentifier = UUID()
+        #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
+        guard case .listening(let id, _) = client.phase else { return }
+        #expect(!typing.isTyping(id))
+        host.currentDocumentIdentifier = tappedIn
+        try app.say(id, "and more")
+        #expect(await waitUntil { client.livePreview?.settled == "and more" })
+        #expect(tapped.text == "Hi. ")
+        #expect(!typing.isTyping(id))
+
+        // After the bounce it is settled when the keyboard has been back for a second.
+        let reselected = FakeTextField("Replace this")
+        reselected.selectLast(4)
+        let joined = try joinAfterTheBounce(into: reselected)
+        joined.settle()
+        try await joined.say("and more")
+        #expect(joined.log.lines.last == "typing not armed: selection")
+        reselected.moveCursorToEnd()
+        try await joined.say("and more words")
+        #expect(reselected.text == "Replace this")
+        #expect(reselected.insertions.isEmpty)
+        #expect(joined.record == nil)
+
+        let search = FakeTextField("Hi. ")
+        search.isSingleLine = true
+        let inSearch = try joinAfterTheBounce(into: search)
+        inSearch.settle()
+        try await inSearch.say("and more")
+        #expect(inSearch.log.lines.last == "typing not armed: single line")
+        search.isSingleLine = false
+        try await inSearch.say("and more words")
+        #expect(search.text == "Hi. ")
+
+        var enabled = false
+        let off = try joinAfterTheBounce(enabled: { enabled })
+        off.settle()
+        try await off.say("and more")
+        #expect(off.log.lines.last == "typing not armed: off")
+        enabled = true
+        try await off.say("and more words")
+        #expect(off.field.text == "Hi. ")
+        #expect(!off.typing.isTyping(off.id))
+
+        // And the text goes in at the end as it always did.
+        off.client.stopTapped()
+        try off.app.finish(off.id, text: "And more words.", document: nil)
+        #expect(await waitUntil { off.host.inserted.count == 1 })
+        #expect(off.field.text == "Hi. And more words.")
+        #expect(off.field.deletions == 0)
+    }
+
+    /// iOS gives the field a new identifier after the trip to the app, and it may not be the
+    /// last one when the keyboard is first back. The words go into the field that has the focus
+    /// when the typing begins; a focus that moves on after that ends it, as for any dictation.
+    @Test func afterTheBounceTheWordsGoIntoTheFieldFocusedWhenTheTypingBegins() async throws {
+        let joined = try joinAfterTheBounce()
+        joined.host.currentDocumentIdentifier = UUID()
+        joined.settle()
+        try await joined.say("said in the app")
+        #expect(joined.field.text == "Hi. said in the app")
+        #expect(joined.typing.isTyping(joined.id))
+
+        joined.host.currentDocumentIdentifier = UUID()
+        joined.field.focusElsewhere("Subject: ")
+        try await joined.say("said in the app and after")
+        #expect(joined.field.text == "Subject: ")
+        #expect(!joined.typing.isTyping(joined.id))
+        #expect(joined.record?.typed == "said in the app")
+        #expect(joined.record?.frozen == true)
+        #expect(joined.log.lines.last == "typing stopped: other field")
+    }
+
+    /// The Action Button asks for a dictation while the keyboard is on screen: the app begins it
+    /// with its own options, and the keyboard that joins it types it by those, not by what its
+    /// own pills say. Without a wait: the keyboard has been on screen all along.
+    @Test func anActionButtonDictationIsTypedWithTheAppsOptions() async throws {
+        /// A keyboard at rest on a live session for a while, and the dictation the app begins for it.
+        func pressed(
+            _ field: FakeTextField, language: String? = nil, translatingTo target: String? = nil,
+            keyboard: (KeyboardSessionClient) -> Void = { _ in }
+        ) async throws -> (app: FakeApp, host: FakeHost, client: KeyboardSessionClient, typing: LiveTyping,
+                           id: UUID, log: FakeLog, transport: InMemoryIPCTransport) {
+            let transport = InMemoryIPCTransport()
+            let clock = FakeClock()
+            let log = FakeLog()
+            let (app, host, client, typing) = typingKeyboard(
+                field, on: transport, clock: { clock.now }, staleAfter: 600, trace: { log.lines.append($0) })
+            keyboard(client)
+            clock.pass(10)
+            let id = try app.beginForKeyboard(at: clock.now, language: language, translatingTo: target)
+            #expect(await waitUntil { client.phase.isListening(to: id) })
+            #expect(transport.payloads.readCommand() == nil, "the app started it; no start command")
+            // The app is there.
+            app.publish(.recording, tag: id.tag16)
+            return (app, host, client, typing, id, log, transport)
+        }
+
+        // Translate is on in the app's request, and off on this keyboard: the words are in the
+        // wrong language for the text, and stay on the keyboard.
+        let russian = FakeTextField("Привет,")
+        let translated = try await pressed(russian, language: "ru-RU", translatingTo: "en-US")
+        #expect(translated.client.translationTargetLanguage == nil)
+        try translated.app.say(translated.id, "Я думаю", " что")
+        #expect(await waitUntil { translated.client.livePreview?.settled == "Я думаю" })
+        #expect(translated.log.lines == ["start attach", "typing not armed: translation"])
+        #expect(russian.text == "Привет,")
+        #expect(!translated.typing.isTyping(translated.id))
+        #expect(translated.transport.payloads.readLiveTyped() == nil)
+
+        // The other way round: this keyboard's pills say English into Turkish, and the request
+        // says Russian and no translation. Typed, and joined by Russian rules.
+        let field = FakeTextField("Привет,")
+        let plain = try await pressed(field, language: "ru-RU") {
+            $0.primaryLanguage = "en-US"
+            $0.languageOverride = "en-US"
+            $0.translationTargetLanguage = "tr-TR"
+        }
+        try plain.app.say(plain.id, "Я думаю", " что")
+        #expect(await waitUntil { field.text == "Привет, я думаю" })
+        #expect(plain.log.lines == ["start attach", "typing armed"])
+        #expect(plain.transport.payloads.readLiveTyped()?.language == "ru-RU")
+        plain.client.stopTapped()
+        try plain.app.finish(plain.id, text: "Я думаю, что да.", document: nil)
+        #expect(await waitUntil { plain.host.inserted.count == 1 })
+        #expect(field.deletions == " я думаю".count)
+
+        // Auto-detect in the request names no language until the text comes: the primary one's rules.
+        let automatic = FakeTextField("Привет,")
+        let detected = try await pressed(automatic, language: DictationLanguage.automatic.tag) {
+            $0.primaryLanguage = "ru-RU"
+        }
+        try detected.app.say(detected.id, "Я думаю")
+        #expect(await waitUntil { automatic.text == "Привет, я думаю" })
+        #expect(detected.transport.payloads.readLiveTyped()?.language == "ru-RU")
+    }
+
+    /// iOS may end the keyboard while the user is in Murmur and make a new one for the way back.
+    /// It knows the dictation by the request on disk, and types it by that request's options.
+    @Test func aKeyboardMadeAnewForTheWayBackTypesTheDictationToo() async throws {
+        let transport = InMemoryIPCTransport()
+        let field = FakeTextField("Привет,")
+        let first = typingKeyboard(field, on: transport, live: false)
+        first.client.primaryLanguage = "en-US"
+        first.client.languageOverride = "ru-RU"
+        first.client.micTapped()
+        guard case .openingApp(let id) = first.client.phase else { Issue.record("no openingApp"); return }
+        first.client.deactivate()
+        try transport.payloads.write(livePreview: LivePreview(requestId: id))
+        #expect(first.app.autoStart() == id)
+
+        let clock = FakeClock()
+        let typing = LiveTyping(store: transport.payloads, isEnabled: { true })
+        typing.field = field
+        let host = FakeHost()
+        host.liveTyping = typing
+        host.field = field
+        let anew = KeyboardSessionClient(transport: transport, clock: { clock.now }, staleAfter: 600,
+                                         liveTyping: typing)
+        anew.host = host
+        anew.primaryLanguage = "en-US"
+        anew.activate()
+        #expect(anew.phase.isListening(to: id))
+        clock.pass(KeyboardSessionClient.attachSettle + 0.5)
+        first.app.publish(.recording, tag: id.tag16)
+        try first.app.say(id, "Я думаю")
+        #expect(await waitUntil { field.text == "Привет, я думаю" })
+        #expect(transport.payloads.readLiveTyped()?.language == "ru-RU")
+
+        anew.stopTapped()
+        try first.app.finish(id, text: "Думаю, что да.", document: nil)
+        #expect(await waitUntil { host.inserted.count == 1 })
+        #expect(field.text == "Привет, Думаю, что да.")
+        #expect(field.deletions == " я думаю".count)
+        #expect(transport.payloads.readLiveTyped() == nil)
+    }
+
+    /// Words typed for an earlier dictation still wait in the field for their text, which came
+    /// while the cursor was elsewhere and is offered as the card, when the Action Button begins
+    /// another dictation. A tap on the mic would have made those words ordinary text; nobody
+    /// tapped, so their record stays, and nothing is typed for the new dictation over it.
+    @Test func anAttachDoesNotTypeOverAnEarlierDictationsWords() async throws {
+        let transport = InMemoryIPCTransport()
+        let clock = FakeClock()
+        let log = FakeLog()
+        let field = FakeTextField("Dear Anna, ")
+        let (app, host, client, typing) = typingKeyboard(
+            field, on: transport, clock: { clock.now }, staleAfter: 600, trace: { log.lines.append($0) })
+        client.micTapped()
+        #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
+        guard case .listening(let earlier, _) = client.phase else { return }
+        try app.say(earlier, "I will be late")
+        #expect(await waitUntil { field.text == "Dear Anna, I will be late" })
+        field.moveCursor(to: 4)
+        client.stopTapped()
+        try app.finish(earlier, text: "I'll be late today.", document: host.currentDocumentIdentifier)
+        #expect(await waitUntil { client.pendingResult?.requestId == earlier })
+        #expect(client.phase == .idle)
+        #expect(typing.typedRequestId == earlier)
+
+        clock.pass(10)
+        let id = try app.beginForKeyboard(at: clock.now)
+        #expect(await waitUntil { client.phase.isListening(to: id) })
+        app.publish(.recording, tag: id.tag16)
+        field.moveCursorToEnd()
+        try app.say(id, "and one more thing")
+        #expect(await waitUntil { client.livePreview?.settled == "and one more thing" })
+        #expect(log.lines.last == "typing not armed: earlier words")
+        try app.say(id, "and one more thing to say")
+        #expect(await waitUntil { client.livePreview?.settled == "and one more thing to say" })
+        #expect(field.text == "Dear Anna, I will be late")
+        #expect(field.insertions == ["I will be late"])
+        #expect(!typing.isTyping(id))
+        #expect(typing.typedRequestId == earlier)
+        #expect(transport.payloads.readLiveTyped()?.requestId == earlier)
+        #expect(transport.payloads.readLiveTyped()?.typed == "I will be late")
+
+        // Its own text goes in at the cursor, and deletes nothing.
+        client.stopTapped()
+        try app.finish(id, text: "One more thing to say.", document: nil)
+        #expect(await waitUntil { host.inserted.count == 1 })
+        #expect(field.text == "Dear Anna, I will be late One more thing to say.")
+        #expect(field.deletions == 0)
+        #expect(transport.payloads.readLiveTyped()?.requestId == earlier)
+    }
+
+    /// A dictation the keyboard left and came back to is never armed, whatever it had or hadn't
+    /// typed: here its first words come only after the keyboard is back. They are shown, and its
+    /// text goes in at the end with nothing to replace.
+    @Test func aDictationComeBackToIsNotArmedAgain() async throws {
+        // Begun on a live session, and left before its first word.
+        let live = try await typeLive(into: FakeTextField("Hi. "), staleAfter: 60)
+        #expect(live.typing.isTyping(live.id))
+        live.client.deactivate()
+        #expect(!live.typing.isTyping(live.id))
+        try live.app.say(live.id, "said while away")
+        live.client.activate()
+        live.app.publish(.recording, tag: live.id.tag16)
+        #expect(await waitUntil { live.client.livePreview?.settled == "said while away" })
+        try live.app.say(live.id, "said while away and after", " coming back")
+        #expect(await waitUntil { live.client.livePreview?.settled == "said while away and after" })
+        // Nor when the listening loop looks again, a second after the keyboard is back.
+        try? await Task.sleep(for: .milliseconds(1300))
+        #expect(live.field.text == "Hi. ")
+        #expect(live.field.insertions.isEmpty)
+        #expect(!live.typing.isTyping(live.id))
+        #expect(live.record == nil)
+        live.client.stopTapped()
+        try live.app.finish(live.id, text: "Said while away and after coming back.",
+                            document: live.host.currentDocumentIdentifier)
+        #expect(await waitUntil { live.host.inserted.count == 1 })
+        #expect(live.field.text == "Hi. Said while away and after coming back.")
+        #expect(live.field.deletions == 0)
+
+        // Joined after the bounce, and left again within the second in which nothing is typed.
+        let joined = try joinAfterTheBounce(heard: "said in the app")
+        joined.app.publish(.recording, tag: joined.id.tag16)
+        #expect(await waitUntil { joined.client.livePreview?.settled == "said in the app" })
+        joined.client.deactivate()
+        #expect(joined.log.lines.last == "typing not armed: left the screen")
+        joined.client.activate()
+        joined.settle()
+        try await joined.say("said in the app and after", " coming back")
+        joined.clock.pass(5)
+        try await joined.say("said in the app and after coming back", " again")
+        #expect(joined.field.text == "Hi. ")
+        #expect(joined.field.insertions.isEmpty)
+        #expect(!joined.typing.isTyping(joined.id))
+        #expect(joined.log.lines == ["start tap", "start attach", "typing not armed: left the screen"])
+        joined.client.stopTapped()
+        try joined.app.finish(joined.id, text: "Said in the app and after coming back again.", document: nil)
+        #expect(await waitUntil { joined.host.inserted.count == 1 })
+        #expect(joined.field.text == "Hi. Said in the app and after coming back again.")
+        #expect(joined.field.deletions == 0)
+    }
+
+    /// The keyboard's log says how a dictation started and whether its words were typed, in
+    /// fixed words: nothing of what was said, or of the field, is in it.
+    @Test func theLogSaysHowADictationWentAndNothingOfItsWords() async throws {
+        let log = FakeLog()
+        let field = FakeTextField("Dear Anna, ")
+        let (app, host, client, _) = typingKeyboard(field, trace: { log.lines.append($0) })
+        client.micTapped()
+        #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
+        guard case .listening(let id, _) = client.phase else { return }
+        #expect(log.lines == ["start tap", "typing armed"])
+        try app.say(id, "I will be late")
+        #expect(await waitUntil { field.text == "Dear Anna, I will be late" })
+        field.moveCursor(to: 4)
+        try app.say(id, "I will be late today")
+        #expect(await waitUntil { log.lines.last == "typing stopped" })
+        client.stopTapped()
+        try app.finish(id, text: "I'll be late today.", document: host.currentDocumentIdentifier)
+        #expect(await waitUntil { client.pendingResult?.requestId == id })
+        #expect(log.lines == ["start tap", "typing armed", "typing stopped", "deliver: cannot place"])
+        // The next one is typed to its end, and replaced.
+        field.moveCursorToEnd()
+        client.micTapped()
+        #expect(await waitUntil { if case .listening = client.phase { true } else { false } })
+        guard case .listening(let next, _) = client.phase else { return }
+        try app.say(next, "see you")
+        #expect(await waitUntil { field.text == "Dear Anna, I will be late see you" })
+        client.stopTapped()
+        try app.finish(next, text: "See you.", document: host.currentDocumentIdentifier)
+        #expect(await waitUntil { host.inserted.count == 1 })
+        #expect(log.lines.suffix(3) == ["start tap", "typing armed", "deliver: can place"])
+        for word in ["late", "Anna", "today", "see", "you", "Dear"] {
+            #expect(!log.lines.contains { $0.localizedCaseInsensitiveContains(word) }, "\(word) is in the log")
+        }
+
+        // A dictation without words on the keyboard (no on-device model heard it) says so.
+        let silentLog = FakeLog()
+        let silent = typingKeyboard(FakeTextField(), trace: { silentLog.lines.append($0) })
+        silent.app.previews = false
+        silent.client.micTapped()
+        #expect(await waitUntil { if case .listening = silent.client.phase { true } else { false } })
+        #expect(silentLog.lines == ["start tap", "typing not armed: no words"])
+
+        // One the keyboard starts itself when it is back from the app, on a keyboard without
+        // "Type as I speak" at all.
+        let plainLog = FakeLog()
+        let clock = FakeClock()
+        let transport = InMemoryIPCTransport()
+        let plainApp = FakeApp(transport: transport)
+        plainApp.previews = true
+        let plainHost = FakeHost()
+        let plain = KeyboardSessionClient(transport: transport, clock: { clock.now }, staleAfter: 600,
+                                          trace: { plainLog.lines.append($0) })
+        plain.host = plainHost
+        plain.activate()
+        plain.micTapped()
+        plain.deactivate()
+        plainApp.publish(.ready)
+        plain.activate()
+        #expect(await waitUntil { if case .listening = plain.phase { true } else { false } })
+        #expect(plainLog.lines == ["start tap", "start attach-ready"])
+        clock.pass(KeyboardSessionClient.attachSettle + 0.5)
+        #expect(await waitUntil(timeout: .seconds(10)) { plainLog.lines.count == 3 })
+        #expect(plainLog.lines.last == "typing not armed: off")
     }
 
     /// The keyboard left the screen and came back to the dictation: what it had typed stays, no
@@ -1610,6 +2268,60 @@ struct KeyboardSessionClientTests {
         try app.say(id, "One two three")
         #expect(await waitUntil { field.text == "One two three" })
         #expect(field.insertions == ["One two", " three"])
+    }
+
+    /// The app's words can be gone for longer than the listening loop takes to look again (the
+    /// app removes its preview when an earlier dictation's text is done, also under one that is
+    /// being recorded, and writes it again with the next word). What the keyboard holds
+    /// meanwhile is its own empty stand-in, which "Type as I speak" is never handed, by the
+    /// loop's look either: it would read as the dictation starting over, and end the typing.
+    @Test func wordsGoneForLongerThanASecondGoOnBeingTypedWhenTheyAreBack() async throws {
+        let live = try await typeLive(into: FakeTextField(), staleAfter: 60)
+        let (app, client, field, id) = (live.app, live.client, live.field, live.id)
+        try app.say(id, "One two")
+        #expect(await waitUntil { field.text == "One two" })
+        app.takeWordsAway()
+        #expect(await waitUntil { client.livePreview == LivePreview(requestId: id) })
+        try? await Task.sleep(for: .milliseconds(1300))
+        #expect(live.typing.isTyping(id))
+        #expect(live.record?.frozen == false)
+        try app.say(id, "One two three")
+        #expect(await waitUntil { field.text == "One two three" })
+        #expect(field.insertions == ["One two", " three"])
+    }
+
+    /// Nor is the typing of a dictation joined after the bounce begun on that stand-in, when the
+    /// app's words are gone as the keyboard's second ends: it waits for words of the app's.
+    @Test func theTypingOfADictationJoinedIsNotBegunWhileItsWordsAreGone() async throws {
+        let joined = try joinAfterTheBounce(heard: "said in the app")
+        joined.app.publish(.recording, tag: joined.id.tag16)
+        #expect(await waitUntil { joined.client.livePreview?.settled == "said in the app" })
+        joined.app.takeWordsAway()
+        #expect(await waitUntil { joined.client.livePreview == LivePreview(requestId: joined.id) })
+        joined.clock.pass(KeyboardSessionClient.attachSettle + 0.5)
+        try? await Task.sleep(for: .milliseconds(1300))
+        #expect(joined.log.lines == ["start tap", "start attach"])
+        try joined.app.say(joined.id, "said in the app and after")
+        #expect(await waitUntil { joined.field.text == "Hi. said in the app and after" })
+        #expect(joined.log.lines == ["start tap", "start attach", "typing armed"])
+    }
+
+    /// The loop's look once a second is for a dictation whose typing is not settled yet. One that
+    /// is being typed is asked about its field and its switch with each new word, as it always
+    /// was, and not in between: a focus that left the field and is back before the next word
+    /// ends nothing.
+    @Test func theLookOnceASecondAsksNothingOfADictationBeingTyped() async throws {
+        let live = try await typeLive(into: FakeTextField(), staleAfter: 60)
+        let (app, host, field, id) = (live.app, live.host, live.field, live.id)
+        try app.say(id, "One two")
+        #expect(await waitUntil { field.text == "One two" })
+        let tappedIn = host.currentDocumentIdentifier
+        host.currentDocumentIdentifier = UUID()
+        try? await Task.sleep(for: .milliseconds(1300))
+        host.currentDocumentIdentifier = tappedIn
+        #expect(live.typing.isTyping(id))
+        try app.say(id, "One two three")
+        #expect(await waitUntil { field.text == "One two three" })
     }
 
     /// No result came (the app is gone, or the text is taking too long): the typed words stay

@@ -171,10 +171,16 @@ one step when it arrives (`LiveTyping`). The newest words stay on the keyboard a
   that moment though Murmur isn't opened again; on Basic the switch leads to Murmur Pro, and its
   chip reads "Pro · Beta"). Never with Translate on, only in fields with more than one line (not
   search or address bars, nor a field whose Return key sends), and not while text is selected.
-- **Which dictations:** one that has words on the keyboard and began on the mic with Murmur's
-  microphone already on. A dictation the keyboard opened the app for is never typed, and one that
-  begins before the on-device model is ready has no live words at all: in practice, the first
-  dictation after the microphone turns on. Under Auto-detect the live words are in the language
+- **Which dictations:** one that has words on the keyboard and that the keyboard follows from
+  its start. A dictation begun on the mic with Murmur's microphone already on is typed from its
+  first word. One the keyboard opened the app for (the first after the microphone turns on), or
+  that the Action Button began while the keyboard was up, is typed once its words arrive, which
+  can be a few seconds in and many words at once. It is not typed in the first second after the
+  keyboard is back: a field that isn't ready yet could drop the words, and the text that
+  replaces them would then delete the person's own text. Never typed: a dictation the keyboard
+  left and came back to (the words typed before it left stay, and the text replaces them), one
+  the Action Button begins while an earlier dictation's typed words still wait for their text,
+  and one without words on the keyboard. Under Auto-detect the live words are in the language
   the iPhone guesses. While they are typed they are joined (spaces, capitals) by the rules of
   the language in the keyboard's pill; under Auto-detect, by the primary language's.
 - **How much:** up to 280 characters; later words stay on the keyboard and come with the text.

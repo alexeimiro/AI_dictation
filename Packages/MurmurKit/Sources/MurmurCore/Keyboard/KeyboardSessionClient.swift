@@ -43,6 +43,12 @@ public final class KeyboardSessionClient {
     /// long one that ended with nothing to insert, unwaited for, still has the words typed live
     /// for it taken out of the field.
     public static let awayInsertWindow: TimeInterval = 600
+    /// How long after the keyboard comes on screen nothing is typed live for a dictation it
+    /// joins there (`attachToPendingStart`): the first second after the trip to the app. A field
+    /// that is not ready yet would drop the insertion while the keyboard's own copy of the text
+    /// shows it, and the final text's replacement would then delete the person's own text in
+    /// place of the words.
+    static let attachSettle: TimeInterval = 1
 
     public enum Phase: Equatable, Sendable {
         case idle
@@ -94,9 +100,14 @@ public final class KeyboardSessionClient {
     /// The free words are used up (`SharedSettings.wordsUsedUp`): the mic shows the way to Pro
     /// instead of recording.
     private let wordsUsedUp: () -> Bool
-    /// "Type as I speak": types the settled words of a dictation this keyboard started on a live
-    /// session, and has its final text replace them. Nil types nothing.
+    /// "Type as I speak": types the settled words of a dictation this keyboard follows from its
+    /// start, and has its final text replace them. That is one the mic began on a live session,
+    /// and one the app began for the keyboard, which joins it when it is back on screen
+    /// (`typingOffer`); never one the keyboard left and came back to. Nil types nothing.
     private let liveTyping: LiveTyping?
+    /// The keyboard's log: how a dictation started, whether its words are typed live and why
+    /// not, in fixed words. Never any of the dictation's or the field's text.
+    private let trace: (String) -> Void
     private var observations: [IPCObservation] = []
     private var ackTask: Task<Void, Never>?
     private var listenTask: Task<Void, Never>?
@@ -118,6 +129,14 @@ public final class KeyboardSessionClient {
     /// The last start command and when it was sent: the tap, should the app have to be opened for
     /// that dictation after all.
     private var startSent: (requestId: UUID, at: Date)?
+    /// The dictation "Type as I speak" may still be armed for, with the options it was begun with.
+    /// The mic tap makes it, and so does joining a dictation the app began for the keyboard
+    /// (`attached`). `armLiveTyping` uses it up, armed or refused, and leaving the screen drops
+    /// it: a dictation the keyboard comes back to is never armed. It counts only while its
+    /// dictation is the one listened to.
+    private var typingOffer: (id: UUID, translating: Bool, language: String?, attached: Bool)?
+    /// When the keyboard last came on screen, for `attachSettle`.
+    private var activatedAt = Date.distantPast
 
     public init(
         transport: IPCTransport,
@@ -127,10 +146,12 @@ public final class KeyboardSessionClient {
         resultTimeout: Duration = .seconds(20),
         staleAfter: TimeInterval = 2.5,
         wordsUsedUp: @escaping () -> Bool = { false },
-        liveTyping: LiveTyping? = nil
+        liveTyping: LiveTyping? = nil,
+        trace: @escaping (String) -> Void = { _ in }
     ) {
         self.wordsUsedUp = wordsUsedUp
         self.liveTyping = liveTyping
+        self.trace = trace
         self.transport = transport
         self.clock = clock
         self.ackTimeout = ackTimeout
@@ -144,6 +165,7 @@ public final class KeyboardSessionClient {
     /// Call from `viewWillAppear`. Darwin notifications can be missed while the extension is
     /// suspended, so this re-reads everything.
     public func activate() {
+        activatedAt = clock()
         if observations.isEmpty {
             observations = [
                 transport.observe(.stateChanged) { [weak self] in
@@ -170,9 +192,17 @@ public final class KeyboardSessionClient {
     /// back (`activate`), at the 5-minute cap, or from the Lock Screen's Stop. While opening the
     /// app nothing is cancelled: the bounce is why the keyboard disappeared.
     public func deactivate() {
+        if case .listening(let id, _) = phase {
+            if liveTyping?.isTyping(id) == true { trace("typing stopped: left the screen") }
+            if typingOffer?.id == id { trace("typing not armed: left the screen") }
+        }
         // Off screen the keyboard's edits have no effect: no more words are typed for this
         // dictation, also once the keyboard is back.
         liveTyping?.suspend()
+        // Nor is the typing begun for it then: a dictation the keyboard left while its words were
+        // still on the way is never armed. (The bounce to the app drops the tap's offer here too;
+        // joining that dictation makes a new one.)
+        typingOffer = nil
         switch phase {
         case .listening(let id, let since):
             away = (id, since)
@@ -227,6 +257,8 @@ public final class KeyboardSessionClient {
         pendingResult = nil
         // Words typed live for an earlier dictation are ordinary text from here.
         liveTyping?.forget()
+        typingOffer = (requestId, translationTargetLanguage != nil, liveWordsLanguage, false)
+        trace("start tap")
         if transport.currentState().status.isLive {
             sendStart(requestId)
         } else {
@@ -345,38 +377,85 @@ public final class KeyboardSessionClient {
         if state.status == .recording, state.requestTag == requestId.tag16 {
             ackTask?.cancel()
             setPhase(.listening(requestId, since: clock()))
-            beginLiveTyping(requestId)
+            // The app's preview, empty until its first word, is there before it reports `recording`.
+            if let preview = livePreview { typeLive(preview) } else { dropOfferWithoutWords(requestId) }
             startListeningLoop(requestId)
             return true
         }
         return false
     }
 
-    /// "Type as I speak" for a dictation that began listening on the tap itself, with a preview,
-    /// in the field the mic was tapped in. Not for one the app was opened for (the keyboard was
-    /// away while it began) nor one come back to: those are never typed live.
-    private func beginLiveTyping(_ requestId: UUID) {
-        guard let liveTyping, let preview = livePreview, requestId != resumedRequestId,
-              host?.currentDocumentIdentifier == activeDocumentIdentifier else { return }
-        liveTyping.begin(requestId, translating: translationTargetLanguage != nil, language: liveWordsLanguage)
-        typeLive(preview)
+    /// Decides, once, whether "Type as I speak" types the dictation `preview` is of. It is asked
+    /// with every preview the app published for the dictation being listened to (`typeLive`), and
+    /// does something only while `typingOffer` names that dictation: one the mic began on a live
+    /// session, decided as it begins to listen, in the field the mic was tapped in; or one the
+    /// app began for the keyboard, decided once the keyboard has been on screen for
+    /// `attachSettle`, in the field that has the focus then (iOS gives the field a new
+    /// identifier after the trip to the app). The second kind has been recorded for a while by
+    /// then, and its first words may come seconds later, many of them at once: they are typed as
+    /// any are.
+    ///
+    /// Whatever the decision, the offer is used up: a dictation refused here is not typed later,
+    /// when the field or the switch has changed. Never armed: a dictation the keyboard left and
+    /// came back to (leaving dropped the offer), and one the app begins while words typed for an
+    /// earlier dictation still wait in a field for their text (a tap on the mic makes those
+    /// ordinary text first; nobody tapped for this one).
+    private func armLiveTyping(for preview: LivePreview) {
+        guard let offer = typingOffer, offer.id == preview.requestId else { return }
+        // Not yet, and the offer stays: the next words ask again, and the listening loop within a second.
+        if offer.attached, clock().timeIntervalSince(activatedAt) < Self.attachSettle { return }
+        typingOffer = nil
+        guard let liveTyping else { return trace("typing not armed: off") }
+        // `begin` replaces the record: never over words that are still in a field.
+        guard liveTyping.typedRequestId == nil else { return trace("typing not armed: earlier words") }
+        // The field the keyboard came back to, as iOS names it now.
+        if offer.attached { activeDocumentIdentifier = host?.currentDocumentIdentifier }
+        guard host?.currentDocumentIdentifier == activeDocumentIdentifier else {
+            return trace("typing not armed: other field")
+        }
+        liveTyping.begin(offer.id, translating: offer.translating, language: offer.language)
+        if liveTyping.isTyping(offer.id) {
+            trace("typing armed")
+        } else {
+            trace("typing not armed: \(liveTyping.refusal(translating: offer.translating) ?? "refused")")
+        }
+    }
+
+    /// A dictation that began without a preview never gets one (`refreshLivePreview`): there
+    /// will be no words to type, so the offer goes.
+    private func dropOfferWithoutWords(_ requestId: UUID) {
+        guard livePreview == nil, typingOffer?.id == requestId else { return }
+        typingOffer = nil
+        trace("typing not armed: no words")
     }
 
     /// The language whose rules join a dictation's words while they are typed live: the one the
     /// pill names, and otherwise the primary language. That is also the choice for Auto-detect,
     /// whose language is known only when the final text comes, which is joined by its own.
     public var liveWordsLanguage: String? {
-        if let languageOverride, !DictationLanguage(tag: languageOverride).isAutomatic { return languageOverride }
-        return primaryLanguage
+        Self.liveWordsLanguage(override: languageOverride, primary: primaryLanguage)
     }
 
-    /// Hands "Type as I speak" the words the app published. Once the focus is in another field
-    /// than the one the mic was tapped in, no more are typed: the final text wouldn't go there
-    /// unasked either.
+    /// `liveWordsLanguage` for a dictation begun with the language `override` (nil: the primary one).
+    static func liveWordsLanguage(override: String?, primary: String?) -> String? {
+        if let override, !DictationLanguage(tag: override).isAutomatic { return override }
+        return primary
+    }
+
+    /// Hands "Type as I speak" the words the app published: never the keyboard's own empty
+    /// stand-in for them, which would read as the dictation starting over. The first of them
+    /// settle whether the dictation is typed at all (`armLiveTyping`). Once the focus is in
+    /// another field than the one the typing began in, no more are typed: the final text
+    /// wouldn't go there unasked either.
     private func typeLive(_ preview: LivePreview) {
+        armLiveTyping(for: preview)
         guard let liveTyping, liveTyping.isTyping(preview.requestId) else { return }
-        guard host?.currentDocumentIdentifier == activeDocumentIdentifier else { return liveTyping.suspend() }
+        guard host?.currentDocumentIdentifier == activeDocumentIdentifier else {
+            liveTyping.suspend()
+            return trace("typing stopped: other field")
+        }
         liveTyping.apply(preview)
+        if !liveTyping.isTyping(preview.requestId) { trace("typing stopped") }
     }
 
     private func openApp(for requestId: UUID) {
@@ -429,17 +508,31 @@ public final class KeyboardSessionClient {
         // user came back to, and its result follows the request.
         activeDocumentIdentifier = host?.currentDocumentIdentifier ?? pending.documentIdentifier
         resumedRequestId = pending.requestId
+        if state.status != .processing {
+            // Followed from here to its end, so its words may be typed live. By the request's
+            // options, which the app begins it with, not this keyboard's own: a shortcut's
+            // request carries the app's, and a keyboard iOS made anew has only what its settings
+            // say by now. (An app that hasn't begun it gets this keyboard's start below, whose
+            // options are the request's unless a setting changed on the way.)
+            typingOffer = (pending.requestId, pending.translationTargetLanguage != nil,
+                           Self.liveWordsLanguage(override: pending.languageOverride, primary: primaryLanguage), true)
+        }
         switch state.status {
         case .recording:
+            trace("start attach")
             // As in `resumeAwayDictation`: the app may have died since it began recording this.
             unconfirmedResume = pending.requestId
+            // The preview read here is the keyboard's stand-in until the app shows that it is
+            // there: nothing is typed, or decided about typing, on that.
             setPhase(.listening(pending.requestId, since: clock()))
+            dropOfferWithoutWords(pending.requestId)
             startListeningLoop(pending.requestId)
         case .processing:
             setPhase(.processing(pending.requestId))
             waitForResult(pending.requestId)
             checkForResult()
         default:
+            trace("start attach-ready")
             sendStart(pending.requestId)
         }
     }
@@ -454,6 +547,8 @@ public final class KeyboardSessionClient {
         away = nil
         guard let left else { return }
         resumedRequestId = left.requestId
+        // Left and come back to: "Type as I speak" is never armed for it (again).
+        typingOffer = nil
         let state = transport.currentState()
         if state.status == .recording, state.requestTag == left.requestId.tag16 {
             activeDocumentIdentifier = host?.currentDocumentIdentifier
@@ -489,8 +584,9 @@ public final class KeyboardSessionClient {
                 guard case .listening(requestId, _) = self.phase else { return }
                 self.pollListening(requestId)
                 tick += 1
-                // Once a second; the preview too, for a notification that was missed.
-                if tick % 20 == 0 { self.writeKeyboardStatus(); self.refreshLivePreview() }
+                // Once a second; the preview too, for a notification that was missed, and for
+                // words "Type as I speak" was shown before it could be armed.
+                if tick % 20 == 0 { self.writeKeyboardStatus(); self.refreshLivePreview(offeringAgain: true) }
             }
         }
     }
@@ -688,6 +784,7 @@ public final class KeyboardSessionClient {
         // typed live, the final text isn't put beside them unasked, and waits as "Insert last
         // dictation".
         let replaces = liveTyping?.canPlace(result.requestId) ?? true
+        trace(replaces ? "deliver: can place" : "deliver: cannot place")
         if sameField, fresh, replaces, transport.payloads.claim(result.requestId) {
             host?.insertDictation(result)
             host?.dictationDidFinish(.ready)
@@ -801,11 +898,15 @@ public final class KeyboardSessionClient {
     /// layout stays. The 20 Hz poll hands the change to the host, so nothing is notified here (a
     /// notification would also shift the rings' level history). "Type as I speak" gets the words
     /// the app published, never the empty stand-in for words that are gone or withheld.
-    private func refreshLivePreview() {
+    ///
+    /// `offeringAgain`, once a second: while "Type as I speak" still waits to be armed for this
+    /// dictation (`attachSettle`), it gets the app's words also when they are no news, so words
+    /// that came during that second are typed though no newer ones follow.
+    private func refreshLivePreview(offeringAgain: Bool = false) {
         guard case .listening(let id, _) = phase, livePreview != nil else { return }
         let stored = storedLivePreview(for: id)
         let latest = stored ?? LivePreview(requestId: id)
-        guard latest != livePreview else { return }
+        guard latest != livePreview || (offeringAgain && typingOffer?.id == id) else { return }
         livePreview = latest
         if let stored, unconfirmedResume != id { typeLive(stored) }
     }

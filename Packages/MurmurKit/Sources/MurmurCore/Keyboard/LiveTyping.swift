@@ -96,15 +96,30 @@ public final class LiveTyping {
 
     // MARK: While the dictation is recorded
 
-    /// Arms live typing for a dictation this keyboard started itself and is listening to from its
-    /// first word. Nothing is typed or written yet. It does nothing when the feature is off, for
-    /// a translation (its words are in the wrong language), without a field, in a single-line
-    /// field, or while text is selected.
+    /// Arms live typing for a dictation this keyboard follows from its start: one it started
+    /// itself and listens to from its first word, or one the app began for it, whose first words
+    /// it may be shown seconds in and all at once (`apply` types them as it does any, in one
+    /// insertion). Nothing is typed or written yet. Whatever this keyboard held of another
+    /// dictation is replaced, so the keyboard doesn't ask while words typed for one still wait in
+    /// a field. It does nothing when the feature is off, for a translation (its words are in the
+    /// wrong language), without a field, in a single-line field, or while text is selected
+    /// (`refusal`).
     public func begin(_ requestId: UUID, translating: Bool, language: String?) {
-        guard isEnabled(), !translating, let field, !field.isSingleLine, !Self.hasSelection(field) else { return }
+        guard refusal(translating: translating) == nil else { return }
         record = LiveTypedRecord(requestId: requestId, language: language, updatedAt: clock())
         appends = true
         askedStore = true
+    }
+
+    /// Why `begin` would arm nothing here and now, in a word for the keyboard's log (never any of
+    /// the field's text). Nil when it would arm.
+    func refusal(translating: Bool) -> String? {
+        guard isEnabled() else { return "off" }
+        guard !translating else { return "translation" }
+        guard let field else { return "no field" }
+        guard !field.isSingleLine else { return "single line" }
+        guard !Self.hasSelection(field) else { return "selection" }
+        return nil
     }
 
     /// The dictation's words so far: types the settled ones that are new. Only for the dictation

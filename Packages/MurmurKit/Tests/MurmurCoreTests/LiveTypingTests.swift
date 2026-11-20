@@ -215,6 +215,72 @@ struct LiveTypingTests {
         #expect(!record.frozen)
     }
 
+    /// A dictation the app began for the keyboard has been recorded for a while when its first
+    /// words come: the recognizer is given the audio so far once it is ready, and the first
+    /// preview with words then holds many settled ones. They go in whole, in one insertion,
+    /// joined to the text before them as it is then, and the typing goes on from there.
+    @Test func theFirstPreviewSeenLateIsTypedWhole() throws {
+        let heard = "So I was thinking we could meet on Thursday afternoon instead"
+        let dictation = Dictation("Let's see.", after: "\nBest, A.")
+        dictation.begin()
+        // Words will come: the preview is empty for now.
+        dictation.hear("")
+        dictation.hear("", "So I")
+        #expect(dictation.field.insertions.isEmpty)
+        #expect(dictation.record == nil)
+        #expect(dictation.typing.isTyping(dictation.id))
+
+        dictation.hear(heard, " because the")
+        #expect(dictation.field.text == "Let's see. " + heard + "\nBest, A.")
+        #expect(dictation.field.insertions == [" " + heard])
+        let record = try #require(dictation.record)
+        #expect(record.typed == " " + heard)
+        #expect(record.settledText == heard)
+        #expect(record.settledConsumed == heard.unicodeScalars.count)
+        #expect(record.contextTail == ".")
+        dictation.hear(heard + " because the morning", " is full")
+        #expect(dictation.field.insertions == [" " + heard, " because the morning"])
+        #expect(dictation.typing.isTyping(dictation.id))
+
+        // And the final text replaces all of it: a deletion for each character, one insertion.
+        let final = "So I was thinking we could meet on Thursday afternoon instead, because the morning is full."
+        #expect(dictation.typing.place(dictation.result(final)) == " " + final)
+        #expect(dictation.field.text == "Let's see. " + final + "\nBest, A.")
+        #expect(dictation.field.deletions == (" " + heard + " because the morning").count)
+        #expect(dictation.record == nil)
+
+        // The field as it is when they come, not as it was when the typing was armed.
+        let moved = Dictation("Dear Anna,")
+        moved.begin()
+        moved.field.hostInserts(" as promised:")
+        moved.hear("Here is the list")
+        #expect(moved.field.text == "Dear Anna, as promised: Here is the list")
+        #expect(moved.record?.contextTail == ":")
+
+        // More than is ever typed live, all at once: none of it goes in.
+        let long = Dictation("Hi. ")
+        long.begin()
+        long.hear(Array(repeating: "word", count: 60).joined(separator: " "))
+        #expect(long.field.text == "Hi. ")
+        #expect(!long.typing.isTyping(long.id))
+        #expect(long.record == nil)
+        #expect(long.typing.canPlace(long.id))
+        #expect(long.typing.place(long.result("Word word.")) == nil)
+
+        // Or only its end, the beginning having left the preview before this keyboard saw any.
+        let cut = Dictation("Hi. ")
+        cut.begin()
+        let late = LivePreview.tail(requestId: cut.id,
+                                    settled: Array(repeating: "word", count: 100).joined(separator: " "),
+                                    unsettled: " and")
+        #expect(late.settledStart > 0 && !late.settled.isEmpty)
+        cut.typing.apply(late)
+        #expect(cut.field.text == "Hi. ")
+        #expect(!cut.typing.isTyping(cut.id))
+        #expect(cut.record == nil)
+        #expect(cut.typing.place(cut.result("Word word.")) == nil)
+    }
+
     /// The words are fitted to the text before them as a finished dictation is: a space after a
     /// word, and no capital on a common word that continues a sentence.
     @Test func theWordsAreJoinedToTheTextBeforeThem() {
@@ -571,30 +637,37 @@ struct LiveTypingTests {
             #expect(dictation.typing.place(dictation.result("Hello there.")) == nil, why)
         }
 
+        // Each with the word the keyboard's log has for it (`refusal`).
         let translating = Dictation()
         translating.begin(translating: true)
         typesNothing(translating, "Translate")
+        #expect(translating.typing.refusal(translating: true) == "translation")
+        #expect(translating.typing.refusal(translating: false) == nil)
 
         let search = Dictation()
         search.field.isSingleLine = true
         search.begin()
         typesNothing(search, "a search or address bar")
+        #expect(search.typing.refusal(translating: false) == "single line")
 
         let selected = Dictation("Replace this")
         selected.field.selectLast(4)
         selected.begin()
         typesNothing(selected, "text is selected")
         #expect(selected.field.selectedText == "this")
+        #expect(selected.typing.refusal(translating: false) == "selection")
 
         let off = Dictation()
         off.enabled.on = false
         off.begin()
         typesNothing(off, "the feature is off")
+        #expect(off.typing.refusal(translating: false) == "off")
 
         let noField = Dictation()
         noField.typing.field = nil
         noField.begin()
         typesNothing(noField, "no field")
+        #expect(noField.typing.refusal(translating: false) == "no field")
 
         // Never begun (a dictation the keyboard came back to): previews alone type nothing.
         let unarmed = Dictation()

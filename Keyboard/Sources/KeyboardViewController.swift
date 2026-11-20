@@ -99,8 +99,12 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         liveTyping.field = typedField
         self.typedField = typedField
         self.liveTyping = liveTyping
+        // The client's log: how each dictation started and whether its words were typed live, in
+        // its own fixed words, never any of the text. So it is public, and readable from a phone.
+        let log = Logger(subsystem: "Murmur", category: "Keyboard")
         let client = KeyboardSessionClient(transport: transport, wordsUsedUp: { SharedSettings.shared.wordsUsedUp() },
-                                           liveTyping: liveTyping)
+                                           liveTyping: liveTyping,
+                                           trace: { log.notice("\($0, privacy: .public)") })
         client.host = self
         self.client = client
 
