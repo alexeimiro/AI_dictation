@@ -11,8 +11,10 @@ import Speech
 /// the model stays loaded for the session. Mic audio is converted to the analyzer's format with
 /// `AVAudioConverter` on the audio thread and fed through an `AsyncStream`. The engine
 /// (SpeechTranscriber or DictationTranscriber) is chosen per language by `SpeechAssetManager`;
-/// switching languages prepares a new analyzer in the background while audio is buffered.
-final class AppleSpeechTranscriber: Transcriber, LiveWordsProviding, @unchecked Sendable {
+/// switching languages prepares a new analyzer in the background while audio is buffered. A
+/// dictation already under way can be taken up too (`appendRecorded`): what it recorded so far
+/// goes in first.
+final class AppleSpeechTranscriber: Transcriber, LiveWordsProviding, ReplayableTranscriber, @unchecked Sendable {
     enum Kind: String, Sendable, CaseIterable {
         /// `SpeechTranscriber`: the iOS 26 model, punctuates automatically.
         case speech
@@ -45,6 +47,8 @@ final class AppleSpeechTranscriber: Transcriber, LiveWordsProviding, @unchecked 
     private var isShutDown = false
     /// The live-words handler of a dictation that began before its analyzer was ready; `adopt` hands it over.
     private var waitingHandler: LiveWordsHandler?
+    /// Moves on with every dictation begun or ended, so a buffer copied for one never reaches the next.
+    private var utteranceNumber: UInt64 = 0
 
     private final class Utterance: @unchecked Sendable {
         let analyzer: SpeechAnalyzer
@@ -135,6 +139,7 @@ final class AppleSpeechTranscriber: Transcriber, LiveWordsProviding, @unchecked 
     private func begin(liveWords handler: LiveWordsHandler?) {
         let needsAnalyzer = lock.withLock { () -> Bool in
             backlog.removeAll()
+            utteranceNumber &+= 1
             current?.live.set(nil)          // one the caller never ended keeps no handler
             if let prepared {
                 prepared.live.set(handler)
@@ -153,8 +158,8 @@ final class AppleSpeechTranscriber: Transcriber, LiveWordsProviding, @unchecked 
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
-        let (utterance, converter, format, waiting) = lock.withLock {
-            (current, self.converter, analyzerFormat, waitingForAnalyzer && current == nil)
+        let (utterance, converter, format, waiting, number) = lock.withLock {
+            (current, self.converter, analyzerFormat, waitingForAnalyzer && current == nil, utteranceNumber)
         }
         if let utterance, let converter, let format {
             if let converted = Self.convert(buffer, with: converter, to: format) {
@@ -162,9 +167,49 @@ final class AppleSpeechTranscriber: Transcriber, LiveWordsProviding, @unchecked 
             }
         } else if waiting, let copy = Self.copy(buffer) {
             lock.withLock {
-                if waitingForAnalyzer, current == nil, backlog.count < 500 { backlog.append(copy) }
+                guard utteranceNumber == number else { return }
+                if waitingForAnalyzer, current == nil {
+                    if backlog.count < 500 { backlog.append(copy) }
+                } else if let current, let converter = self.converter, let format = analyzerFormat,
+                          let converted = Self.convert(copy, with: converter, to: format) {
+                    // The analyzer was adopted while this buffer was copied: it follows the kept
+                    // ones, inside the lock as they were fed, instead of being lost between them
+                    // and the next buffer.
+                    current.continuation.yield(AnalyzerInput(buffer: converted))
+                }
             }
         }
+    }
+
+    /// The audio a dictation recorded before this transcriber took it up (`OpenAITranscriber`'s
+    /// late join): converted to the analyzer's format with a converter of its own, about a second
+    /// at a time, and fed before the microphone's buffers. Nothing else feeds the analyzer while
+    /// this runs: the caller sends the microphone's buffers only afterwards.
+    func appendRecorded(_ samples: ArraySlice<Float>, sampleRate: Double) -> Bool {
+        let (utterance, format) = lock.withLock { (current, analyzerFormat) }
+        guard let utterance, let format else { return false }
+        guard !samples.isEmpty else { return true }
+        guard let source = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1,
+                                         interleaved: false),
+              let converter = AVAudioConverter(from: source, to: format) else { return false }
+        converter.primeMethod = .none
+        let step = max(1, Int(sampleRate))
+        var start = samples.startIndex
+        while start < samples.endIndex {
+            let end = min(start + step, samples.endIndex)
+            let count = end - start
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: source, frameCapacity: AVAudioFrameCount(count)),
+                  let channel = buffer.floatChannelData?[0] else { return false }
+            samples[start..<end].withUnsafeBufferPointer { piece in
+                if let base = piece.baseAddress { channel.update(from: base, count: count) }
+            }
+            buffer.frameLength = AVAudioFrameCount(count)
+            if let converted = Self.convert(buffer, with: converter, to: format) {
+                utterance.continuation.yield(AnalyzerInput(buffer: converted))
+            }
+            start = end
+        }
+        return true
     }
 
     func finishUtterance() async throws -> String {
@@ -175,6 +220,7 @@ final class AppleSpeechTranscriber: Transcriber, LiveWordsProviding, @unchecked 
                 waitingForAnalyzer = false
                 waitingHandler = nil
                 backlog.removeAll()
+                utteranceNumber &+= 1
             }
             return current
         }
@@ -201,6 +247,7 @@ final class AppleSpeechTranscriber: Transcriber, LiveWordsProviding, @unchecked 
                 waitingForAnalyzer = false
                 waitingHandler = nil
                 backlog.removeAll()
+                utteranceNumber &+= 1
             }
             return current
         }
@@ -219,6 +266,7 @@ final class AppleSpeechTranscriber: Transcriber, LiveWordsProviding, @unchecked 
                 waitingForAnalyzer = false
                 waitingHandler = nil
                 backlog.removeAll()
+                utteranceNumber &+= 1
             }
             return current
         }
@@ -368,28 +416,32 @@ final class AppleSpeechTranscriber: Transcriber, LiveWordsProviding, @unchecked 
     /// A newly prepared analyzer becomes current if a dictation is waiting for one; the buffered
     /// audio is converted with the (possibly new) converter and fed in.
     private func adopt(_ utterance: Utterance) {
-        let (buffers, converter, format, stale) = lock.withLock {
-            () -> ([AVAudioPCMBuffer], AVAudioConverter?, AVAudioFormat?, Utterance?) in
+        let stale = lock.withLock { () -> Utterance? in
             // Ready only after `shutdown`: discarded like a stale one.
-            if isShutDown { return ([], nil, nil, utterance) }
+            if isShutDown { return utterance }
             if waitingForAnalyzer, current == nil {
                 utterance.live.set(waitingHandler)
                 waitingHandler = nil
+                // Inside the lock and before `current` is published: the audio thread converts
+                // with this same converter once it sees `current`, and would otherwise convert
+                // beside this loop and get ahead of the kept audio. It waits here instead, once,
+                // for a few milliseconds (at most 500 buffers).
+                if let converter, let format = analyzerFormat {
+                    for buffer in backlog {
+                        if let converted = Self.convert(buffer, with: converter, to: format) {
+                            utterance.continuation.yield(AnalyzerInput(buffer: converted))
+                        }
+                    }
+                }
+                backlog.removeAll()
                 current = utterance
                 waitingForAnalyzer = false
-                defer { backlog.removeAll() }
-                return (backlog, self.converter, analyzerFormat, nil)
+                return nil
             }
             defer { prepared = utterance }
-            return ([], nil, nil, prepared)
+            return prepared
         }
         if let stale { Task { await Self.discard(stale) } }
-        guard let converter, let format else { return }
-        for buffer in buffers {
-            if let converted = Self.convert(buffer, with: converter, to: format) {
-                utterance.continuation.yield(AnalyzerInput(buffer: converted))
-            }
-        }
     }
 
     private func discardPreparedAnalyzer() async {

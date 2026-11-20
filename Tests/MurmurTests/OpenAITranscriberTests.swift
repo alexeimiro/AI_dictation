@@ -116,13 +116,25 @@ private final class RefusingCleanup: Cleaning {
 }
 
 /// Stands in for the on-device transcriber. It has words for a dictation begun with live words,
-/// which the test speaks (`say`).
-private final class FakeOnDevice: Transcriber, LiveWordsProviding, @unchecked Sendable {
+/// which the test speaks (`say`), and takes up a dictation under way (`appendRecorded`).
+private final class FakeOnDevice: Transcriber, LiveWordsProviding, ReplayableTranscriber, @unchecked Sendable {
+    struct ModelDidNotLoad: Error {}
+
     let displayName = "On-device"
     /// How long ending a dictation takes; an analyzer can take a while to finish.
     private let teardownDelay: Duration
     private let lock = NSLock()
     private var _preparedTag: String?
+    private var _language: ResolvedLanguage?
+    private var _prepares = 0
+    private var _preparing = false
+    private var _holdsPrepare = false
+    private var heldPrepares: [CheckedContinuation<Void, Never>] = []
+    private var _prepareFails = false
+    private var _refusesRecorded = false
+    private var _holdsBegin = false
+    private var _insideBegin = false
+    private let beginGate = DispatchSemaphore(value: 0)
     private var _begun = 0
     private var _liveBegun = 0
     /// The handler the dictation was begun with, kept after it ended, as a recognizer still at
@@ -132,13 +144,43 @@ private final class FakeOnDevice: Transcriber, LiveWordsProviding, @unchecked Se
     private var _finished = 0
     private var _cancelled = 0
     private var _abandoned = 0
+    private var _events: [String] = []
+    private var _recorded: [Float] = []
+    private var _direct: [Float] = []
 
     init(teardownDelay: Duration = .zero) {
         self.teardownDelay = teardownDelay
     }
 
-    var currentLanguage: ResolvedLanguage? { nil }
+    /// The language it was last prepared for or switched to.
+    var currentLanguage: ResolvedLanguage? { lock.withLock { _language } }
     var preparedTag: String? { lock.withLock { _preparedTag } }
+    /// How often it was asked to prepare.
+    var prepares: Int { lock.withLock { _prepares } }
+    /// A preparation is under way (held by `holdsPrepare`).
+    var isPreparing: Bool { lock.withLock { _preparing } }
+    /// `prepare` waits for `releasePrepare()`, like a model that takes its time to load.
+    var holdsPrepare: Bool {
+        get { lock.withLock { _holdsPrepare } }
+        set { lock.withLock { _holdsPrepare = newValue } }
+    }
+    /// `prepare` throws: the model doesn't load.
+    var prepareFails: Bool {
+        get { lock.withLock { _prepareFails } }
+        set { lock.withLock { _prepareFails = newValue } }
+    }
+    /// `appendRecorded` refuses, as an analyzer that isn't ready does.
+    var refusesRecorded: Bool {
+        get { lock.withLock { _refusesRecorded } }
+        set { lock.withLock { _refusesRecorded = newValue } }
+    }
+    /// `beginUtterance(liveWords:)` waits for `releaseBegin()`, so a test can act while a
+    /// dictation is being taken up.
+    var holdsBegin: Bool {
+        get { lock.withLock { _holdsBegin } }
+        set { lock.withLock { _holdsBegin = newValue } }
+    }
+    var isInsideBegin: Bool { lock.withLock { _insideBegin } }
     /// The dictations begun without live words.
     var begun: Int { lock.withLock { _begun } }
     /// The dictations begun with live words.
@@ -147,45 +189,137 @@ private final class FakeOnDevice: Transcriber, LiveWordsProviding, @unchecked Se
     var finished: Int { lock.withLock { _finished } }
     var cancelled: Int { lock.withLock { _cancelled } }
     var abandoned: Int { lock.withLock { _abandoned } }
+    /// Everything asked of it, in order: "prepare ru-RU", "language en-US", "begin", "live",
+    /// "recorded", "append", "finish", "cancel", "abandon".
+    var events: [String] { lock.withLock { _events } }
+    /// The samples it was handed for a dictation it took up late.
+    var recorded: [Float] { lock.withLock { _recorded } }
+    /// The first sample of each buffer that came straight from the microphone.
+    var direct: [Float] { lock.withLock { _direct } }
 
     func prepare(micFormat: AVAudioFormat, language: ResolvedLanguage) async throws {
-        lock.withLock { _preparedTag = language.tag }
+        lock.withLock {
+            _prepares += 1
+            _preparing = true
+        }
+        await withCheckedContinuation { continuation in
+            let held = lock.withLock { () -> Bool in
+                if _holdsPrepare { heldPrepares.append(continuation) }
+                return _holdsPrepare
+            }
+            if !held { continuation.resume() }
+        }
+        let fails = lock.withLock { () -> Bool in
+            _preparing = false
+            return _prepareFails
+        }
+        if fails { throw ModelDidNotLoad() }
+        lock.withLock {
+            _preparedTag = language.tag
+            _language = language
+            _events.append("prepare \(language.tag)")
+        }
     }
-    func setLanguage(_ language: ResolvedLanguage) {}
+    func releasePrepare() {
+        let held = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            _holdsPrepare = false
+            defer { heldPrepares = [] }
+            return heldPrepares
+        }
+        held.forEach { $0.resume() }
+    }
+    func setLanguage(_ language: ResolvedLanguage) {
+        lock.withLock {
+            _language = language
+            _events.append("language \(language.tag)")
+        }
+    }
     func beginUtterance() {
         lock.withLock {
             _begun += 1
             handler = nil
+            _events.append("begin")
         }
     }
     func beginUtterance(liveWords handler: @escaping LiveWordsHandler) -> Bool {
-        lock.withLock {
+        let holds = lock.withLock { () -> Bool in
             _liveBegun += 1
             self.handler = handler
+            _events.append("live")
+            _insideBegin = _holdsBegin
+            return _holdsBegin
+        }
+        if holds {
+            beginGate.wait()
+            lock.withLock { _insideBegin = false }
         }
         return true
+    }
+    func releaseBegin() {
+        lock.withLock { _holdsBegin = false }
+        beginGate.signal()
     }
     /// The words recognized so far, to whoever began the dictation with live words.
     func say(_ settled: String, _ unsettled: String = "") {
         lock.withLock { handler }?(settled, unsettled)
     }
-    func append(_ buffer: AVAudioPCMBuffer) { lock.withLock { _appended += 1 } }
+    func append(_ buffer: AVAudioPCMBuffer) {
+        lock.withLock {
+            _appended += 1
+            _direct.append(buffer.floatChannelData?[0][0] ?? 0)
+            _events.append("append")
+        }
+    }
+    func appendRecorded(_ samples: ArraySlice<Float>, sampleRate: Double) -> Bool {
+        lock.withLock {
+            guard !_refusesRecorded else { return false }
+            _recorded.append(contentsOf: samples)
+            _events.append("recorded")
+            return true
+        }
+    }
     func finishUtterance() async throws -> String {
-        lock.withLock { _finished += 1 }
+        lock.withLock {
+            _finished += 1
+            _events.append("finish")
+        }
         return "Recognized on the iPhone."
     }
     func finishUtterance(model request: ModelRequest?) async throws -> UtteranceOutput {
         UtteranceOutput(transcript: try await finishUtterance())
     }
     func cancelUtterance() async {
-        lock.withLock { _cancelled += 1 }
+        lock.withLock {
+            _cancelled += 1
+            _events.append("cancel")
+        }
         try? await Task.sleep(for: teardownDelay)
     }
     func abandonUtterance() {
-        lock.withLock { _abandoned += 1 }
+        lock.withLock {
+            _abandoned += 1
+            _events.append("abandon")
+        }
         Task { [teardownDelay] in try? await Task.sleep(for: teardownDelay) }
     }
     func shutdown() async {}
+}
+
+/// Microphone buffers made on the main actor and fed from another thread, as the audio thread feeds them.
+private final class Buffers: @unchecked Sendable {
+    let all: [AVAudioPCMBuffer]
+    init(_ all: [AVAudioPCMBuffer]) { self.all = all }
+}
+
+/// A value a `@Sendable` closure reads while the test changes it.
+private final class Shared<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: Value
+    init(_ value: Value) { _value = value }
+    var value: Value {
+        get { lock.withLock { _value } }
+        set { lock.withLock { _value = newValue } }
+    }
 }
 
 /// The live words a transcriber reported, in order.
@@ -1071,25 +1205,28 @@ struct OpenAITranscriberTests {
         #expect(heard.all.count == 2)
     }
 
-    /// No on-device model listens to the dictation (the fallback isn't prepared yet, there is
-    /// none, or it doesn't know the language): there are no live words, the fallback isn't begun,
-    /// and the dictation has begun all the same.
-    @Test func withoutAPreparedFallbackThereAreNoLiveWords() async throws {
+    /// No on-device model can listen to the dictation (there is none, or none that knows the
+    /// language): there are no live words, the fallback isn't begun, and the dictation has begun
+    /// all the same.
+    @Test func withoutAnOnDeviceModelForItADictationHasNoLiveWords() async throws {
         let cloud = FakeCloud()
         let onDevice = FakeOnDevice()
         let heard = HeardWords()
-        let unprepared = OpenAITranscriber(client: cloud, fallback: onDevice, fallbackLanguages: ["ru-RU": russian])
-        try await unprepared.prepare(micFormat: micFormat, language: russian)
-        #expect(!unprepared.beginUtterance(liveWords: heard.handler))
-        #expect(onDevice.begun == 0 && onDevice.liveBegun == 0)
-        feed(unprepared, seconds: 1)
-        #expect(try await unprepared.finishUtterance() == "Hello from OpenAI.")
 
         let alone = OpenAITranscriber(client: cloud)
         try await alone.prepare(micFormat: micFormat, language: russian)
         #expect(!alone.beginUtterance(liveWords: heard.handler))
         feed(alone, seconds: 1)
         #expect(try await alone.finishUtterance() == "Hello from OpenAI.")
+
+        // Nothing is known of a Russian model, before the fallback is prepared or after.
+        let unknown = OpenAITranscriber(client: cloud, fallback: onDevice)
+        try await unknown.prepare(micFormat: micFormat, language: russian)
+        #expect(!unknown.beginUtterance(liveWords: heard.handler))
+        unknown.abandonUtterance()
+        await unknown.prepareFallback()
+        #expect(!unknown.beginUtterance(liveWords: heard.handler))
+        unknown.abandonUtterance()
 
         // Only English is installed on the device; this dictation is in Russian.
         let english = ResolvedLanguage(tag: "en-US", locale: Locale(identifier: "en-US"), engine: .speech)
@@ -1099,6 +1236,462 @@ struct OpenAITranscriberTests {
         #expect(!other.beginUtterance(liveWords: heard.handler))
         #expect(onDevice.begun == 0 && onDevice.liveBegun == 0)
         #expect(heard.all.isEmpty)
+    }
+
+    // MARK: A dictation that begins before the fallback is ready
+
+    private func marked(_ index: Int, frames: Int = 480) -> AVAudioPCMBuffer {
+        let buffer = AVAudioPCMBuffer(pcmFormat: micFormat, frameCapacity: AVAudioFrameCount(frames))!
+        buffer.frameLength = AVAudioFrameCount(frames)
+        for frame in 0..<frames { buffer.floatChannelData![0][frame] = Float(index) / 1000 }
+        return buffer
+    }
+
+    /// The buffers a level in the audio stands for: `marked(7)` reads 0.007.
+    private func marks(_ samples: [Float]) -> [Int] {
+        samples.map { Int(($0 * 1000).rounded()) }.filter { $0 > 0 }
+    }
+
+    /// A transcriber whose fallback is being prepared (and waits for `onDevice.releasePrepare()`).
+    private func preparing(_ onDevice: FakeOnDevice, cloud: FakeCloud = FakeCloud(),
+                           wordsUsedUpUntil: @escaping @Sendable () -> Date? = { nil },
+                           lateJoinLimit: Duration = .seconds(60)) async throws -> (OpenAITranscriber, Task<Void, Never>) {
+        onDevice.holdsPrepare = true
+        let transcriber = OpenAITranscriber(client: cloud, fallback: onDevice, fallbackLanguages: ["ru-RU": russian],
+                                            wordsUsedUpUntil: wordsUsedUpUntil, lateJoinLimit: lateJoinLimit)
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        let preparation = Task { await transcriber.prepareFallback() }
+        #expect(await waitUntil { onDevice.isPreparing })
+        return (transcriber, preparation)
+    }
+
+    /// The first dictation after the microphone turns on begins while the on-device model is
+    /// still loading. It is promised its words, and when the model is ready the fallback takes it
+    /// up: everything recorded so far first, then the microphone's buffers as they come.
+    @Test func aDictationBegunBeforeTheFallbackIsReadyIsTakenUpWhenItIs() async throws {
+        let onDevice = FakeOnDevice()
+        let (transcriber, preparation) = try await preparing(onDevice)
+        let heard = HeardWords()
+
+        #expect(transcriber.beginUtterance(liveWords: heard.handler))
+        #expect(onDevice.liveBegun == 0)
+        feed(transcriber, seconds: 1)
+        #expect(onDevice.appended == 0 && onDevice.recorded.isEmpty)
+
+        onDevice.releasePrepare()
+        await preparation.value
+
+        #expect(onDevice.liveBegun == 1 && onDevice.begun == 0)
+        // A second of the microphone's 48 kHz is a second at 16 kHz.
+        #expect(abs(onDevice.recorded.count - 16_000) < 400)
+        #expect(onDevice.appended == 0)
+        onDevice.say("Привет,", " как")
+        #expect(heard.all == ["Привет, как"])
+
+        // From here it is fed like any other dictation's fallback.
+        feed(transcriber, seconds: 0.5)
+        #expect(onDevice.appended > 0)
+        #expect(abs(onDevice.recorded.count - 16_000) < 400)
+        let events = onDevice.events
+        #expect(try #require(events.firstIndex(of: "live")) < #require(events.firstIndex(of: "recorded")))
+        #expect(try #require(events.lastIndex(of: "recorded")) < #require(events.firstIndex(of: "append")))
+
+        #expect(try await transcriber.finishUtterance() == "Hello from OpenAI.")
+        #expect(onDevice.abandoned == 1 && onDevice.finished == 0)
+    }
+
+    /// Buffers go on arriving while the fallback is handed the recording: each reaches it once,
+    /// in the recording or straight from the microphone, and in the order it was spoken.
+    @Test func whileADictationIsTakenUpNothingIsLostRepeatedOrOutOfOrder() async throws {
+        let onDevice = FakeOnDevice()
+        let (transcriber, preparation) = try await preparing(onDevice)
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        let count = 400
+        let fed = Shared(0)
+        let buffers = Buffers((1...count).map { marked($0) })
+        let feeder = Task.detached {
+            for (index, buffer) in buffers.all.enumerated() {
+                transcriber.append(buffer)
+                fed.value = index + 1
+                if index % 4 == 0 { try? await Task.sleep(for: .microseconds(300)) }
+            }
+        }
+        #expect(await waitUntil { fed.value >= count / 4 })
+        onDevice.releasePrepare()
+        await feeder.value
+        await preparation.value
+
+        let recorded = marks(onDevice.recorded), direct = marks(onDevice.direct)
+        #expect(!recorded.isEmpty && !direct.isEmpty)
+        #expect(Set(recorded).union(direct) == Set(1...count))
+        #expect(Set(recorded).isDisjoint(with: direct))
+        #expect(direct == Array((direct.first ?? 0)...(direct.last ?? 0)))
+        #expect((recorded.max() ?? 0) + 1 == direct.first)
+        // What was handed over reads in the order it was spoken (a resampler rings a little at each step).
+        let samples = onDevice.recorded
+        #expect(zip(samples, samples.dropFirst()).allSatisfy { $1 >= $0 - 0.0005 })
+        transcriber.abandonUtterance()
+    }
+
+    /// A dictation that ended before the model was ready is never taken up, and nothing of the
+    /// fallback is begun or ended for it.
+    @Test func aDictationThatEndsBeforeTheFallbackIsReadyIsNeverTakenUp() async throws {
+        let onDevice = FakeOnDevice()
+        let (transcriber, preparation) = try await preparing(onDevice)
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        feed(transcriber, seconds: 1)
+        #expect(try await transcriber.finishUtterance() == "Hello from OpenAI.")
+
+        // And one that was dropped.
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        feed(transcriber, seconds: 1)
+        transcriber.abandonUtterance()
+
+        onDevice.releasePrepare()
+        await preparation.value
+        #expect(onDevice.liveBegun == 0 && onDevice.begun == 0)
+        #expect(onDevice.abandoned == 0 && onDevice.recorded.isEmpty)
+        #expect(transcriber.displayName == "OpenAI (on-device fallback)")
+    }
+
+    /// The dictation ends at the moment the fallback takes it up: the end waits for the hand-over,
+    /// and the fallback's part is ended once.
+    @Test func aDictationEndingWhileItIsTakenUpEndsTheFallbacksPartOnce() async throws {
+        let onDevice = FakeOnDevice()
+        let (transcriber, preparation) = try await preparing(onDevice)
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        feed(transcriber, seconds: 1)
+        onDevice.holdsBegin = true
+        onDevice.releasePrepare()
+        #expect(await waitUntil { onDevice.isInsideBegin })
+        Task.detached {
+            try? await Task.sleep(for: .milliseconds(100))
+            onDevice.releaseBegin()
+        }
+
+        #expect(try await transcriber.finishUtterance() == "Hello from OpenAI.")
+        await preparation.value
+
+        #expect(onDevice.liveBegun == 1 && onDevice.abandoned == 1 && onDevice.finished == 0)
+        // It had the whole recording before the dictation's end took it away.
+        #expect(abs(onDevice.recorded.count - 16_000) < 400)
+        let events = onDevice.events
+        #expect(try #require(events.lastIndex(of: "recorded")) < #require(events.firstIndex(of: "abandon")))
+    }
+
+    /// The dictation is dropped and the next begins while the first is being taken up: the first's
+    /// part is ended, once, and the next one's is its own.
+    @Test func aDictationDroppedWhileItIsTakenUpLeavesTheNextOneAlone() async throws {
+        let onDevice = FakeOnDevice()
+        let (transcriber, preparation) = try await preparing(onDevice)
+        let first = HeardWords(), second = HeardWords()
+        #expect(transcriber.beginUtterance(liveWords: first.handler))
+        feed(transcriber, seconds: 1)
+        onDevice.holdsBegin = true
+        onDevice.releasePrepare()
+        #expect(await waitUntil { onDevice.isInsideBegin })
+        let next = Task.detached { () -> Bool in
+            transcriber.abandonUtterance()
+            return transcriber.beginUtterance(liveWords: second.handler)
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        onDevice.releaseBegin()
+
+        #expect(await next.value)
+        await preparation.value
+        #expect(onDevice.liveBegun == 2 && onDevice.abandoned == 1)
+        #expect(onDevice.events.filter { $0 == "live" || $0 == "abandon" } == ["live", "abandon", "live"])
+        feed(transcriber, seconds: 0.5)
+        #expect(onDevice.appended > 0)
+        onDevice.say("вторая")
+        #expect(second.all == ["вторая"] && first.all.isEmpty)
+        transcriber.abandonUtterance()
+        #expect(onDevice.abandoned == 2)
+    }
+
+    /// The request fails for a dictation the fallback took up late: its transcript is the whole
+    /// dictation's, since it was handed the recording from the start.
+    @Test func aFailedRequestAfterTheFallbackJoinedIsCoveredByIt() async throws {
+        let cloud = FakeCloud()
+        cloud.result = .failure(.unavailable("offline"))
+        let onDevice = FakeOnDevice()
+        let (transcriber, preparation) = try await preparing(onDevice, cloud: cloud)
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        feed(transcriber, seconds: 1)
+        onDevice.releasePrepare()
+        await preparation.value
+        feed(transcriber, seconds: 1)
+
+        #expect(try await transcriber.finishUtterance() == "Recognized on the iPhone.")
+        #expect(onDevice.finished == 1 && onDevice.abandoned == 0)
+        #expect(abs(onDevice.recorded.count - 16_000) < 400)
+    }
+
+    /// Before the fallback joined there is none, as ever: the request's failure is the dictation's.
+    @Test func aFailedRequestBeforeTheFallbackJoinedIsNotCovered() async throws {
+        let cloud = FakeCloud()
+        cloud.result = .failure(.unavailable("offline"))
+        let onDevice = FakeOnDevice()
+        let (transcriber, preparation) = try await preparing(onDevice, cloud: cloud)
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        feed(transcriber, seconds: 1)
+        await #expect(throws: CloudTranscriptionError.self) { try await transcriber.finishUtterance() }
+        onDevice.releasePrepare()
+        await preparation.value
+        #expect(onDevice.finished == 0 && onDevice.liveBegun == 0)
+    }
+
+    /// The server refuses the account for a dictation the fallback took up late: the iPhone's own
+    /// recognition still doesn't stand in.
+    @Test func aRefusedDictationIsNotRecognizedAfterTheFallbackJoinedEither() async throws {
+        let cloud = FakeCloud()
+        cloud.result = .failure(.limitReached)
+        let onDevice = FakeOnDevice()
+        let (transcriber, preparation) = try await preparing(onDevice, cloud: cloud)
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        feed(transcriber, seconds: 1)
+        onDevice.releasePrepare()
+        await preparation.value
+        #expect(onDevice.liveBegun == 1)
+
+        await #expect(throws: CloudTranscriptionError.limitReached) { try await transcriber.finishUtterance() }
+        #expect(onDevice.finished == 0 && onDevice.abandoned == 1)
+    }
+
+    /// While the week's words wait for the server nothing is promised, and a dictation promised
+    /// its words just before they ran out is not taken up.
+    @Test func noDictationIsTakenUpWhileTheWeeksWordsWaitForTheServer() async throws {
+        let until = Shared<Date?>(Date().addingTimeInterval(3_600))
+        let onDevice = FakeOnDevice()
+        let (transcriber, preparation) = try await preparing(onDevice, wordsUsedUpUntil: { until.value })
+        #expect(!transcriber.beginUtterance(liveWords: HeardWords().handler))
+        transcriber.abandonUtterance()
+
+        until.value = nil
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        feed(transcriber, seconds: 1)
+        until.value = Date().addingTimeInterval(3_600)
+        onDevice.releasePrepare()
+        await preparation.value
+
+        #expect(onDevice.liveBegun == 0 && onDevice.begun == 0 && onDevice.recorded.isEmpty)
+        feed(transcriber, seconds: 0.5)
+        #expect(onDevice.appended == 0)
+    }
+
+    /// A dictation begun without live words (a note's own mic) is left as it began.
+    @Test func aDictationWithoutLiveWordsIsNotTakenUp() async throws {
+        let onDevice = FakeOnDevice()
+        let (transcriber, preparation) = try await preparing(onDevice)
+        transcriber.beginUtterance()
+        feed(transcriber, seconds: 1)
+        onDevice.releasePrepare()
+        await preparation.value
+        #expect(onDevice.liveBegun == 0 && onDevice.begun == 0 && onDevice.recorded.isEmpty)
+        feed(transcriber, seconds: 0.5)
+        #expect(onDevice.appended == 0)
+    }
+
+    /// A dictation that has run for longer than the limit is left alone: the recognizer would be
+    /// busy with the past.
+    @Test func aDictationThatHasRunTooLongIsNotTakenUp() async throws {
+        let onDevice = FakeOnDevice()
+        let (transcriber, preparation) = try await preparing(onDevice, lateJoinLimit: .milliseconds(50))
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        feed(transcriber, seconds: 1)
+        try await Task.sleep(for: .milliseconds(120))
+        onDevice.releasePrepare()
+        await preparation.value
+        #expect(onDevice.liveBegun == 0 && onDevice.recorded.isEmpty)
+    }
+
+    /// The fallback can't take the recording after all: its part is ended at once, so a request
+    /// that fails later is not answered with a part of the dictation.
+    @Test func aFallbackThatCannotTakeTheRecordingGivesItsPartBack() async throws {
+        let cloud = FakeCloud()
+        cloud.result = .failure(.unavailable("offline"))
+        let onDevice = FakeOnDevice()
+        onDevice.refusesRecorded = true
+        let (transcriber, preparation) = try await preparing(onDevice, cloud: cloud)
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        feed(transcriber, seconds: 1)
+        onDevice.releasePrepare()
+        await preparation.value
+        #expect(onDevice.liveBegun == 1 && onDevice.abandoned == 1)
+        feed(transcriber, seconds: 0.5)
+        #expect(onDevice.appended == 0)
+
+        await #expect(throws: CloudTranscriptionError.self) { try await transcriber.finishUtterance() }
+        #expect(onDevice.finished == 0 && onDevice.abandoned == 1)
+    }
+
+    /// The session knows of a verified model before the transcriber has heard of any language: the
+    /// dictation is promised its words on that, and taken up once the language turns up.
+    @Test func aDictationIsPromisedItsWordsOnAModelTheSessionKnowsOf() async throws {
+        let onDevice = FakeOnDevice()
+        let expected = OpenAITranscriber(client: FakeCloud(), fallback: onDevice, expectsOnDevice: { _ in true })
+        try await expected.prepare(micFormat: micFormat, language: russian)
+        let heard = HeardWords()
+        #expect(expected.beginUtterance(liveWords: heard.handler))
+        feed(expected, seconds: 1)
+
+        expected.addFallbackLanguage(russian)
+        await expected.prepareFallback()
+        #expect(onDevice.liveBegun == 1 && abs(onDevice.recorded.count - 16_000) < 400)
+        onDevice.say("слова")
+        #expect(heard.all == ["слова"])
+        expected.abandonUtterance()
+
+        let unexpected = OpenAITranscriber(client: FakeCloud(), fallback: FakeOnDevice())
+        try await unexpected.prepare(micFormat: micFormat, language: russian)
+        #expect(!unexpected.beginUtterance(liveWords: heard.handler))
+    }
+
+    // MARK: Getting the fallback ready
+
+    /// A language whose model turns up after the session asked for the fallback (its check was
+    /// slower than the rest) is prepared at once, without the session asking again. Before the
+    /// session has asked, nothing is prepared: the start of the microphone comes first.
+    @Test func aLanguageThatTurnsUpLaterIsPreparedWithoutBeingAskedAgain() async throws {
+        let onDevice = FakeOnDevice()
+        let transcriber = OpenAITranscriber(client: FakeCloud(), fallback: onDevice)
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        let english = ResolvedLanguage(tag: "en-US", locale: Locale(identifier: "en-US"), engine: .speech)
+        transcriber.addFallbackLanguage(english)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(onDevice.prepares == 0)
+
+        await transcriber.prepareFallback()
+        #expect(onDevice.prepares == 0 && transcriber.displayName == "OpenAI")
+
+        transcriber.addFallbackLanguage(russian)
+        #expect(await waitUntil { onDevice.preparedTag == "ru-RU" })
+        #expect(await waitUntil { transcriber.displayName == "OpenAI (on-device fallback)" })
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        #expect(onDevice.liveBegun == 1)
+    }
+
+    /// The same under Auto-detect, where the model is the session's guess, and for a language the
+    /// keyboard switches to.
+    @Test func aGuessOrALanguageThatGetsAModelIsPreparedToo() async throws {
+        let onDevice = FakeOnDevice()
+        let transcriber = OpenAITranscriber(client: FakeCloud(), fallback: onDevice)
+        try await transcriber.prepare(micFormat: micFormat, language: automatic)
+        await transcriber.prepareFallback()
+        #expect(onDevice.prepares == 0)
+        transcriber.addFallbackLanguage(russian)
+        transcriber.setAutomaticFallback(russian)
+        #expect(await waitUntil { onDevice.preparedTag == "ru-RU" })
+
+        let other = FakeOnDevice()
+        let english = ResolvedLanguage(tag: "en-US", locale: Locale(identifier: "en-US"), engine: .speech)
+        let switched = OpenAITranscriber(client: FakeCloud(), fallback: other, fallbackLanguages: ["en-US": english])
+        try await switched.prepare(micFormat: micFormat, language: russian)
+        await switched.prepareFallback()
+        #expect(other.prepares == 0)
+        switched.setLanguage(english)
+        #expect(await waitUntil { other.preparedTag == "en-US" })
+    }
+
+    /// Only one preparation runs at a time, however many ask.
+    @Test func onlyOnePreparationRunsAtATime() async throws {
+        let onDevice = FakeOnDevice()
+        let (transcriber, preparation) = try await preparing(onDevice)
+        let second = Task { await transcriber.prepareFallback() }
+        transcriber.addFallbackLanguage(russian)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(onDevice.prepares == 1)
+        onDevice.releasePrepare()
+        await preparation.value
+        await second.value
+        #expect(onDevice.prepares == 1)
+        #expect(transcriber.displayName == "OpenAI (on-device fallback)")
+    }
+
+    /// The model doesn't load: nothing is promised after that, and it is tried again as a
+    /// dictation begins once the pause is over.
+    @Test func afterAFailedPreparationNothingIsPromisedUntilItSucceeds() async throws {
+        let onDevice = FakeOnDevice()
+        onDevice.prepareFails = true
+        let transcriber = OpenAITranscriber(client: FakeCloud(), fallback: onDevice, fallbackLanguages: ["ru-RU": russian],
+                                            fallbackRetryPause: 0.2)
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        // Before any attempt the model can be expected.
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        transcriber.abandonUtterance()
+
+        await transcriber.prepareFallback()
+        #expect(onDevice.prepares == 1 && transcriber.displayName == "OpenAI")
+        #expect(!transcriber.beginUtterance(liveWords: HeardWords().handler))
+        transcriber.abandonUtterance()
+        try await Task.sleep(for: .milliseconds(50))
+        // Not at every dictation.
+        #expect(onDevice.prepares == 1)
+
+        onDevice.prepareFails = false
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(!transcriber.beginUtterance(liveWords: HeardWords().handler))
+        #expect(await waitUntil { transcriber.displayName == "OpenAI (on-device fallback)" })
+        #expect(onDevice.prepares == 2)
+        transcriber.abandonUtterance()
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        #expect(onDevice.liveBegun == 1)
+    }
+
+    /// A reconnect replaces the microphone format while the model loads for the old one: that
+    /// preparation doesn't count, and the next one does.
+    @Test func aReconnectDuringThePreparationLeavesTheFallbackUnprepared() async throws {
+        let onDevice = FakeOnDevice()
+        let (transcriber, preparation) = try await preparing(onDevice)
+        try await transcriber.prepare(micFormat: AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!,
+                                      language: russian)
+        onDevice.releasePrepare()
+        await preparation.value
+        #expect(transcriber.displayName == "OpenAI")
+        await transcriber.prepareFallback()
+        #expect(onDevice.prepares == 2 && transcriber.displayName == "OpenAI (on-device fallback)")
+    }
+
+    /// "en-US" is asked for and the iPhone holds the British model: it listens.
+    @Test func aModelOfTheSameLanguageForAnotherRegionListens() async throws {
+        let onDevice = FakeOnDevice()
+        let british = ResolvedLanguage(tag: "en-GB", locale: Locale(identifier: "en-GB"), engine: .speech)
+        let american = ResolvedLanguage(tag: "en-US", locale: Locale(identifier: "en-US"), engine: .speech)
+        let transcriber = OpenAITranscriber(client: FakeCloud(), fallback: onDevice,
+                                            fallbackLanguages: ["en-GB": british, "ru-RU": russian])
+        try await transcriber.prepare(micFormat: micFormat, language: american)
+        await transcriber.prepareFallback()
+        #expect(onDevice.preparedTag == "en-GB")
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        #expect(onDevice.liveBegun == 1)
+    }
+
+    /// The guess changes while a dictation listens (the other language's model was found): the
+    /// recognizer is left alone under it, the dictation's transcript stays in the language it
+    /// listened in, and the next dictation begins in the new one.
+    @Test func aGuessThatChangesDuringADictationIsTakenUpByTheNextOne() async throws {
+        let cloud = FakeCloud()
+        cloud.result = .failure(.unavailable("offline"))
+        let onDevice = FakeOnDevice()
+        let english = ResolvedLanguage(tag: "en-US", locale: Locale(identifier: "en-US"), engine: .speech)
+        let transcriber = OpenAITranscriber(client: cloud, fallback: onDevice,
+                                            fallbackLanguages: ["ru-RU": russian, "en-US": english])
+        try await transcriber.prepare(micFormat: micFormat, language: automatic)
+        transcriber.setAutomaticFallback(russian)
+        await transcriber.prepareFallback()
+        #expect(onDevice.preparedTag == "ru-RU")
+
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        feed(transcriber, seconds: 1)
+        transcriber.setAutomaticFallback(english)
+        #expect(!onDevice.events.contains("language en-US"))
+        let output = try await transcriber.finishUtterance(model: nil)
+        #expect(output.detectedLanguage == "ru-RU")
+
+        #expect(transcriber.beginUtterance(liveWords: HeardWords().handler))
+        let events = onDevice.events
+        #expect(try #require(events.firstIndex(of: "language en-US")) < #require(events.lastIndex(of: "live")))
+        transcriber.abandonUtterance()
     }
 
     /// Under Auto-detect the words come in the installed language the session guesses; without a

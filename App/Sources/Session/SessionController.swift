@@ -210,6 +210,11 @@ final class SessionController {
             markJump(\.readyMs)
             startHeartbeat()
             scheduleIdleStop()
+            // Not waited for: the on-device model loads beside the rest of the start, for the
+            // language the first dictation will be in, and takes that dictation up when it is
+            // ready (`OpenAITranscriber`).
+            presetDictationLanguage()
+            prepareFallbackInBackground()
             if settings.liveActivities {
                 await liveActivity.start()
                 markJump(\.liveActivityMs)
@@ -217,7 +222,6 @@ final class SessionController {
             logger.info("Session started with \(transcriber.displayName, privacy: .public) in \(DictationPipeline.milliseconds(since: startedAt)) ms")
             beginQueuedStart()
             beginRequestedStart()
-            prepareFallbackInBackground()
         } catch {
             tearDownAudio()
             failStart(error)
@@ -344,7 +348,48 @@ final class SessionController {
         guard usesCloud, let transcription else { return AppleSpeechTranscriber() }
         return OpenAITranscriber(client: transcription, dictation: dictate, fallback: AppleSpeechTranscriber(),
                                  fallbackLanguages: onDeviceFallbacks,
-                                 wordsUsedUpUntil: { [settings] in settings.wordsUsedUpUntil })
+                                 wordsUsedUpUntil: { [settings] in settings.wordsUsedUpUntil },
+                                 expectsOnDevice: { [settings] language in
+                                     Self.expectsOnDeviceModel(
+                                         for: language.language, verified: Array(settings.verifiedEngines.keys),
+                                         guesses: Self.automaticGuesses(settings: settings, primaryTag: settings.primaryLanguage))
+                                 })
+    }
+
+    /// A verified on-device model is on the iPhone for a dictation in `language`, as the settings
+    /// remember it: its own language's, or under Auto-detect that of a language the dictation
+    /// may be guessed to be in. Known without asking Apple's framework, so a dictation that
+    /// begins before the session's own look at the models is done can be promised its words
+    /// (`OpenAITranscriber.expectsOnDevice`). A model the system has since removed is found out
+    /// when the fallback is prepared, and nothing is promised after that.
+    nonisolated static func expectsOnDeviceModel(for language: DictationLanguage, verified: [String],
+                                                 guesses: [String]) -> Bool {
+        let codes = Set(verified.map { DictationLanguage(normalizing: $0).languageCode })
+        guard language.isAutomatic else { return codes.contains(language.languageCode) }
+        return guesses.contains { codes.contains(DictationLanguage(normalizing: $0).languageCode) }
+    }
+
+    /// The languages an Auto-detect dictation is most likely in, the likeliest first: the last
+    /// one detected, the ones picked in Settings, the iPhone's, the primary.
+    nonisolated static func automaticGuesses(settings: SharedSettings, primaryTag: String?) -> [String] {
+        [settings.lastDetectedLanguage].compactMap { $0 } + settings.dictationLanguages
+            + [Locale.preferredLanguages.first, primaryTag].compactMap { $0 }
+    }
+
+    /// The language the next dictation will be in, as far as the session can tell before it is
+    /// asked for: that of the dictation the keyboard opened the app for, else the keyboard's
+    /// Speak language (Auto-detect until one is picked there). The transcriber is set to it as the
+    /// session starts, so the fallback is prepared for it and not for the primary language, which
+    /// the first dictation may not be in.
+    private func presetDictationLanguage() {
+        guard usesCloud, let transcriber else { return }
+        let tag = requestedStart?.languageOverride ?? queuedStart?.languageOverride
+            ?? KeyboardLanguageDefaults.source(saved: settings.translationSourceLanguage,
+                                              autoDetectApplied: settings.autoDetectDefaultApplied).tag
+        guard tag != primaryTag else { return }
+        let language = DictationLanguage(tag: tag).isAutomatic ? cloudLanguage(tag) : languages[tag] ?? cloudLanguage(tag)
+        if transcriber.currentLanguage != language { transcriber.setLanguage(language) }
+        if language.language.isAutomatic { updateAutomaticFallback() }
     }
 
     /// Resolves the primary language and makes its model ready, reporting the first-run
@@ -405,8 +450,7 @@ final class SessionController {
     /// has an installed model. None installed: no fallback under Auto.
     private func updateAutomaticFallback() {
         guard let cloud = transcriber as? OpenAITranscriber else { return }
-        let guesses = [settings.lastDetectedLanguage].compactMap { $0 } + settings.dictationLanguages
-            + [Locale.preferredLanguages.first, primaryTag].compactMap { $0 }
+        let guesses = Self.automaticGuesses(settings: settings, primaryTag: primaryTag)
         let installed = guesses.lazy.compactMap { tag in
             let code = DictationLanguage(normalizing: tag).languageCode
             return self.onDeviceFallbacks.values.first { $0.language.languageCode == code }
@@ -414,24 +458,50 @@ final class SessionController {
         cloud.setAutomaticFallback(installed)
     }
 
-    /// In the cloud, the installed on-device model covers failed requests. Finding and preparing
-    /// it takes a while, so it runs after the session is ready (and after a reconnect, when the
-    /// mic format may have changed); the first dictation may go without it.
+    /// In the cloud, the installed on-device model covers failed requests and gives the keyboard
+    /// the words of a dictation while it is spoken. Finding and preparing it takes a while, so it
+    /// runs beside the session's start (and after a reconnect, when the mic format may have
+    /// changed) and is never waited for; a dictation that begins meanwhile is taken up when the
+    /// model is ready (`OpenAITranscriber`). The language most likely spoken is looked at first,
+    /// so the fallback is prepared for it before the other is even checked.
     private func prepareFallbackInBackground() {
         guard usesCloud, let cloud = transcriber as? OpenAITranscriber else { return }
         let previous = fallbackTask
         fallbackTask = Task { [weak self] in
             await previous?.value
             guard let self, !Task.isCancelled, self.transcriber === cloud else { return }
-            let tag = primaryTag
-            if onDeviceFallbacks[tag] == nil, let onDevice = await installedOnDeviceLanguage(tag) {
+            for tag in fallbackCandidates() where onDeviceFallbacks[tag] == nil {
+                guard let onDevice = await installedOnDeviceLanguage(tag) else { continue }
+                guard !Task.isCancelled, self.transcriber === cloud else { return }
                 addFallback(onDevice)
+                await cloud.prepareFallback()
+                guard !Task.isCancelled, self.transcriber === cloud else { return }
             }
-            guard !Task.isCancelled, self.transcriber === cloud else { return }
             updateAutomaticFallback()
             await cloud.prepareFallback()
             engineName = cloud.displayName
         }
+    }
+
+    /// The languages whose on-device model may be on the iPhone, the one the next dictation is
+    /// most likely in first: the primary and the secondary, led by the one the transcriber is set
+    /// to, or under Auto-detect by the one the last dictation was in.
+    private func fallbackCandidates() -> [String] {
+        let current = transcriber?.currentLanguage?.language
+        let likely = current.flatMap { $0.isAutomatic ? nil : $0.languageCode }
+            ?? settings.lastDetectedLanguage.map { DictationLanguage(normalizing: $0).languageCode }
+        return Self.fallbackCandidates(primary: primaryTag, secondary: settings.secondaryLanguage, likely: likely)
+    }
+
+    nonisolated static func fallbackCandidates(primary: String, secondary: String?, likely: String?) -> [String] {
+        var tags: [String] = []
+        for tag in [primary, secondary].compactMap({ $0 })
+        where !DictationLanguage(tag: tag).isAutomatic && !tags.contains(tag) {
+            tags.append(tag)
+        }
+        guard let likely else { return tags }
+        return tags.filter { DictationLanguage(tag: $0).languageCode == likely }
+            + tags.filter { DictationLanguage(tag: $0).languageCode != likely }
     }
 
     private static func detail(for event: SpeechAssetManager.InstallEvent, language name: String) -> String? {
@@ -727,6 +797,7 @@ final class SessionController {
             // Whatever might still be published is not this dictation's.
             liveWords.close()
             transcriber.beginUtterance()
+            if source == .keyboard { logger.info("Live words: none, the week's words wait for the server") }
         }
         audio.openGate()
         active = ActiveDictation(requestId: requestId, documentIdentifier: documentIdentifier,

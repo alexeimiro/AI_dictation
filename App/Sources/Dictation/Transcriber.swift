@@ -127,12 +127,26 @@ typealias LiveWordsHandler = @Sendable (_ settled: String, _ unsettled: String) 
 /// and `OpenAITranscriber` through the on-device model that listens beside the cloud.
 protocol LiveWordsProviding: AnyObject {
     /// `beginUtterance()` for a dictation whose words are shown as they are recognized. True when
-    /// `handler` will hear them. False when this dictation has none (no on-device model is
-    /// listening to it, or the week's words wait for the server): `handler` is then never called.
+    /// `handler` will hear them: at once, or some seconds in, when the on-device model is still
+    /// being prepared as the dictation begins (`OpenAITranscriber` then has it take the dictation
+    /// up with everything said so far; should the model not come after all, `handler` is never
+    /// called). False when this dictation has none (no on-device model can listen to it, or the
+    /// week's words wait for the server): `handler` is then never called.
     /// Either way the dictation has begun exactly as `beginUtterance()` begins it. The handler is
     /// dropped when the dictation ends (finish, cancel, abandon, shutdown); a call already on its
     /// way can still arrive, so the receiver tells dictations apart itself.
     func beginUtterance(liveWords handler: @escaping LiveWordsHandler) -> Bool
+}
+
+/// A transcriber that can take up a dictation already under way: it is handed what was recorded so
+/// far, then the microphone's buffers as they come (`AppleSpeechTranscriber`, for the dictation
+/// that began before `OpenAITranscriber` had it prepared).
+protocol ReplayableTranscriber: Transcriber {
+    /// The dictation's audio from its start, mono at `sampleRate`, after `beginUtterance` and
+    /// before any buffer through `append`. May be called more than once, each call going on from
+    /// the one before. False when nothing took it (no analyzer has the dictation): the caller
+    /// then ends the dictation's part here, as it would not be whole.
+    func appendRecorded(_ samples: ArraySlice<Float>, sampleRate: Double) -> Bool
 }
 
 enum TranscriberEngine: String, CaseIterable, Identifiable {
