@@ -60,8 +60,8 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
     private var language: ResolvedLanguage?
     private var converter: AVAudioConverter?
     private var micFormat: AVAudioFormat?
-    /// Bumped by every `prepare`, so a fallback preparation for an older mic format that finishes
-    /// late doesn't mark the fallback ready.
+    /// Bumped by every `prepare` for another mic format, so a fallback preparation for the format
+    /// before it that finishes late doesn't mark the fallback ready.
     private var generation = 0
     private var samples: [Float] = []
     private var capturing = false
@@ -205,7 +205,8 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
     // MARK: Transcriber
 
     /// Only what the cloud needs, so the session is ready quickly; the on-device fallback is
-    /// prepared separately (`prepareFallback`).
+    /// prepared separately (`prepareFallback`), and again only when the microphone's format is
+    /// another one.
     func prepare(micFormat: AVAudioFormat, language: ResolvedLanguage) async throws {
         guard let converter = AVAudioConverter(from: micFormat, to: targetFormat) else {
             throw CloudTranscriptionError.unavailable("Unsupported microphone format")
@@ -213,7 +214,12 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
         lock.withLock {
             self.converter = converter
             self.language = language
+            // The same microphone as before: the route was only rebuilt (another app took the
+            // audio for a moment, a call ended). The fallback is prepared for this format, so it
+            // stays prepared, and a dictation that begins right after has its words as ever.
+            let sameMicrophone = self.micFormat == micFormat
             self.micFormat = micFormat
+            guard !sameMicrophone else { return }
             generation += 1
             fallbackPrepared = false
             fallbackFailedAt = nil

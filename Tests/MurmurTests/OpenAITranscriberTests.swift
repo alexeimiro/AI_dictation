@@ -357,21 +357,25 @@ private func seconds(of audio: Data, format: EncodedAudio.Format) throws -> Doub
 @MainActor
 struct OpenAITranscriberTests {
     private let micFormat = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+    /// What a reconnect can bring: another route records at another rate.
+    private let otherMicFormat = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
     private let russian = ResolvedLanguage(tag: "ru-RU", locale: Locale(identifier: "ru-RU"), engine: .speech,
                                            contextualStrings: ["Окафор", "Valerio"])
     /// The keyboard's Auto-detect, as the session hands it over.
     private let automatic = ResolvedLanguage(tag: "und", locale: Locale(identifier: "und"), engine: .speech)
 
     /// `seconds` of a 440 Hz tone in 4096-frame buffers, like the mic tap delivers.
-    private func feed(_ transcriber: OpenAITranscriber, seconds: Double) {
-        let total = Int(48_000 * seconds)
+    private func feed(_ transcriber: OpenAITranscriber, seconds: Double, format: AVAudioFormat? = nil) {
+        let format = format ?? micFormat
+        let rate = Float(format.sampleRate)
+        let total = Int(format.sampleRate * seconds)
         var written = 0
         while written < total {
             let frames = min(4096, total - written)
-            let buffer = AVAudioPCMBuffer(pcmFormat: micFormat, frameCapacity: AVAudioFrameCount(frames))!
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames))!
             buffer.frameLength = AVAudioFrameCount(frames)
             for index in 0..<frames {
-                buffer.floatChannelData![0][index] = 0.3 * sin(2 * .pi * 440 * Float(written + index) / 48_000)
+                buffer.floatChannelData![0][index] = 0.3 * sin(2 * .pi * 440 * Float(written + index) / rate)
             }
             transcriber.append(buffer)
             written += frames
@@ -803,9 +807,44 @@ struct OpenAITranscriberTests {
         feed(transcriber, seconds: 1)
         #expect(try await transcriber.finishUtterance() == "Recognized on the iPhone.")
 
-        // A reconnect (new mic format) needs it prepared again.
-        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        // A reconnect with another mic format needs it prepared again.
+        try await transcriber.prepare(micFormat: otherMicFormat, language: russian)
         #expect(transcriber.displayName == "OpenAI")
+    }
+
+    /// Most reconnects leave the microphone as it was (another app took the audio for a moment, a
+    /// call ended): the fallback stays prepared, and the dictation that begins right after has
+    /// its words and its cover like any other.
+    @Test func aReconnectWithTheSameMicrophoneKeepsTheFallback() async throws {
+        let cloud = FakeCloud()
+        cloud.result = .failure(.unavailable("offline"))
+        let onDevice = FakeOnDevice()
+        let transcriber = OpenAITranscriber(client: cloud, fallback: onDevice, fallbackLanguages: ["ru-RU": russian])
+        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        await transcriber.prepareFallback()
+
+        try await transcriber.prepare(micFormat: AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!,
+                                      language: russian)
+        #expect(transcriber.displayName == "OpenAI (on-device fallback)")
+        #expect(onDevice.prepares == 1)
+        let heard = HeardWords()
+        #expect(transcriber.beginUtterance(liveWords: heard.handler))
+        #expect(onDevice.liveBegun == 1)
+        feed(transcriber, seconds: 1)
+        #expect(onDevice.appended > 0)
+        #expect(try await transcriber.finishUtterance() == "Recognized on the iPhone.")
+
+        // A preparation still under way when such a reconnect comes counts as well.
+        let slow = FakeOnDevice()
+        slow.holdsPrepare = true
+        let second = OpenAITranscriber(client: FakeCloud(), fallback: slow, fallbackLanguages: ["ru-RU": russian])
+        try await second.prepare(micFormat: micFormat, language: russian)
+        let preparation = Task { await second.prepareFallback() }
+        #expect(await waitUntil { slow.isPreparing })
+        try await second.prepare(micFormat: micFormat, language: russian)
+        slow.releasePrepare()
+        await preparation.value
+        #expect(second.displayName == "OpenAI (on-device fallback)")
     }
 
     @Test func afterAConnectionFailureTheFallbackIsUsedDirectly() async throws {
@@ -908,8 +947,9 @@ struct OpenAITranscriberTests {
         let uploading = Task { try await transcriber.finishUtterance() }
         #expect(await waitUntil { cloud.calls.count == 1 })
 
-        // The reconnect prepares the cloud again; the fallback isn't ready for the next dictation.
-        try await transcriber.prepare(micFormat: micFormat, language: russian)
+        // The reconnect prepares the cloud again, for another microphone format: the fallback
+        // isn't ready for the next dictation.
+        try await transcriber.prepare(micFormat: otherMicFormat, language: russian)
         transcriber.beginUtterance()
         #expect(onDevice.abandoned == 1)
         #expect(onDevice.begun == 1)
@@ -923,7 +963,7 @@ struct OpenAITranscriberTests {
         // With the fallback ready again, the next dictation's part is ended once, by its finish.
         await transcriber.prepareFallback()
         transcriber.beginUtterance()
-        feed(transcriber, seconds: 1)
+        feed(transcriber, seconds: 1, format: otherMicFormat)
         _ = try await transcriber.finishUtterance()
         #expect(onDevice.begun == 2)
         #expect(onDevice.abandoned == 2)
@@ -1643,8 +1683,7 @@ struct OpenAITranscriberTests {
     @Test func aReconnectDuringThePreparationLeavesTheFallbackUnprepared() async throws {
         let onDevice = FakeOnDevice()
         let (transcriber, preparation) = try await preparing(onDevice)
-        try await transcriber.prepare(micFormat: AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!,
-                                      language: russian)
+        try await transcriber.prepare(micFormat: otherMicFormat, language: russian)
         onDevice.releasePrepare()
         await preparation.value
         #expect(transcriber.displayName == "OpenAI")
