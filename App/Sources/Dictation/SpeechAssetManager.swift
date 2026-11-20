@@ -269,6 +269,16 @@ actor SpeechAssetManager {
         }
     }
 
+    /// How the engine's preset reports, for the log: whether results come before they are final
+    /// (the keyboard's live words are made of those) and how often it settles them.
+    nonisolated static func reporting(of engine: Engine) -> String {
+        let options: [String] = switch engine {
+        case .speech: SpeechTranscriber.Preset.progressiveTranscription.reportingOptions.map { String(describing: $0) }
+        case .dictation: DictationTranscriber.Preset.progressiveLongDictation.reportingOptions.map { String(describing: $0) }
+        }
+        return options.isEmpty ? "final results only" : options.sorted().joined(separator: "+")
+    }
+
     nonisolated static func supportedLocale(for engine: Engine, equivalentTo tag: String) async -> Locale? {
         let locale = Locale(identifier: tag)
         switch engine {

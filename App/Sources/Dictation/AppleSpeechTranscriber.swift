@@ -69,14 +69,44 @@ final class AppleSpeechTranscriber: Transcriber, LiveWordsProviding, ReplayableT
     /// before any dictation exists; the dictation that takes the analyzer sets its handler, and
     /// ending the dictation takes it away.
     private final class LiveWordsSink: @unchecked Sendable {
+        private static let logger = Logger(subsystem: "Murmur", category: "ASR")
         private let lock = NSLock()
         private var handler: LiveWordsHandler?
-        func set(_ handler: LiveWordsHandler?) { lock.withLock { self.handler = handler } }
+        /// When the dictation took the analyzer, and which of its firsts the log has had.
+        private var since: ContinuousClock.Instant?
+        private var loggedWords = false
+        private var loggedSettled = false
+
+        func set(_ handler: LiveWordsHandler?) {
+            lock.withLock {
+                self.handler = handler
+                since = handler == nil ? nil : .now
+                loggedWords = false
+                loggedSettled = false
+            }
+        }
+
         /// The results task. The newest words are formatted only when somebody listens (the fold keeps
-        /// the settled ones up to date either way); the handler runs outside the lock.
+        /// the settled ones up to date either way); the handler runs outside the lock. The log
+        /// gets how long the first words took, and the first settled ones ("Type as I speak" types
+        /// only those): times, never words.
         func report(_ fold: LiveWordsFold) {
-            guard let handler = lock.withLock({ handler }) else { return }
-            handler(fold.settled, fold.unsettled)
+            let (listener, firstWords, firstSettled) = lock.withLock { () -> (LiveWordsHandler?, Int?, Int?) in
+                guard let listener = self.handler, let since = self.since else { return (self.handler, nil, nil) }
+                var firstWords: Int?, firstSettled: Int?
+                if !loggedWords, !(fold.settled.isEmpty && fold.unsettled.isEmpty) {
+                    loggedWords = true
+                    firstWords = since.elapsedMilliseconds
+                }
+                if !loggedSettled, !fold.settled.isEmpty {
+                    loggedSettled = true
+                    firstSettled = since.elapsedMilliseconds
+                }
+                return (listener, firstWords, firstSettled)
+            }
+            if let firstWords { Self.logger.info("Live words: the first came after \(firstWords) ms") }
+            if let firstSettled { Self.logger.info("Live words: the first settled after \(firstSettled) ms") }
+            listener?(fold.settled, fold.unsettled)
         }
     }
 
@@ -106,7 +136,7 @@ final class AppleSpeechTranscriber: Transcriber, LiveWordsProviding, ReplayableT
             self.analyzerFormat = format
             self.converter = converter
         }
-        logger.info("Prepared \(language.engine.displayName, privacy: .public) for \(language.tag, privacy: .public) at \(format.sampleRate, privacy: .public) Hz")
+        logger.info("Prepared \(language.engine.displayName, privacy: .public) for \(language.tag, privacy: .public) at \(format.sampleRate, privacy: .public) Hz, reports \(SpeechAssetManager.reporting(of: language.engine), privacy: .public)")
         let utterance = try await makeUtterance(language: language, format: format)
         adopt(utterance)
     }

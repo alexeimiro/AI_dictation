@@ -291,13 +291,14 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
         }
         guard current else { return }
         logger.info("On-device fallback ready for \(onDevice.tag, privacy: .public) in \(started.elapsedMilliseconds) ms")
-        if let wanted, wanted != onDevice {
-            // The language moved on while the model loaded (a guess that changed): the fallback
-            // follows it for the next dictation. The one under way is not taken up in a language
-            // it isn't in, so its promise goes.
+        guard wanted == onDevice else {
+            // The language moved on while the model loaded (a guess that changed, a language the
+            // keyboard switched to). The dictation under way is not taken up in a language it
+            // isn't in, so its promise goes; the fallback follows the new language, when it has a
+            // model, for the next dictation.
             lock.withLock { lateJoin = nil }
-            fallback.setLanguage(wanted)
-            logger.info("On-device fallback switched to \(wanted.tag, privacy: .public) before its first dictation")
+            if let wanted { fallback.setLanguage(wanted) }
+            logger.info("On-device fallback: the language is now \(wanted?.tag ?? "one without a model", privacy: .public)")
             return
         }
         joinDictationUnderWay(in: onDevice)
