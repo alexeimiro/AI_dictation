@@ -89,6 +89,16 @@ public final class LiveTyping {
         return record.requestId
     }
 
+    /// Words typed live for some dictation are still in a field unreplaced, as this keyboard or
+    /// the shared container knows it. The container is read each time: another keyboard object
+    /// may have typed them since this one last looked (`typedRequestId` remembers one look).
+    /// `begin` must not be called while this holds: it replaces the record those words are
+    /// replaced by.
+    public var hasTypedWords: Bool {
+        if let record, !record.typed.isEmpty { return true }
+        return store.readLiveTyped().map { !$0.typed.isEmpty } ?? false
+    }
+
     /// Words may still be typed for `requestId`: `begin` armed it and nothing has frozen it.
     public func isTyping(_ requestId: UUID) -> Bool {
         appends && record?.requestId == requestId

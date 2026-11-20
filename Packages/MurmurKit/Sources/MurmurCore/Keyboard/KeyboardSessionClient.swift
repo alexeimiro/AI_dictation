@@ -133,8 +133,9 @@ public final class KeyboardSessionClient {
     /// The mic tap makes it, and so does joining a dictation the app began for the keyboard
     /// (`attached`). `armLiveTyping` uses it up, armed or refused, and leaving the screen drops
     /// it: a dictation the keyboard comes back to is never armed. It counts only while its
-    /// dictation is the one listened to.
-    private var typingOffer: (id: UUID, translating: Bool, language: String?, attached: Bool)?
+    /// dictation is the one listened to. `since`: when a join on the trip to the app made it,
+    /// which `attachSettle` counts from as well (the far past for the others).
+    private var typingOffer: (id: UUID, translating: Bool, language: String?, attached: Bool, since: Date)?
     /// When the keyboard last came on screen, for `attachSettle`.
     private var activatedAt = Date.distantPast
 
@@ -257,7 +258,7 @@ public final class KeyboardSessionClient {
         pendingResult = nil
         // Words typed live for an earlier dictation are ordinary text from here.
         liveTyping?.forget()
-        typingOffer = (requestId, translationTargetLanguage != nil, liveWordsLanguage, false)
+        typingOffer = (requestId, translationTargetLanguage != nil, liveWordsLanguage, false, .distantPast)
         trace("start tap")
         if transport.currentState().status.isLive {
             sendStart(requestId)
@@ -402,12 +403,22 @@ public final class KeyboardSessionClient {
     /// ordinary text first; nobody tapped for this one).
     private func armLiveTyping(for preview: LivePreview) {
         guard let offer = typingOffer, offer.id == preview.requestId else { return }
-        // Not yet, and the offer stays: the next words ask again, and the listening loop within a second.
-        if offer.attached, clock().timeIntervalSince(activatedAt) < Self.attachSettle { return }
+        if offer.attached {
+            // Not yet, and the offer stays: the next words ask again, and the listening loop
+            // within a second. The second counts from when the keyboard came on screen and from
+            // the join itself: a keyboard that joins before it has been told it left (Murmur is
+            // in front, the old keyboard still runs) came on screen long ago.
+            if clock().timeIntervalSince(max(activatedAt, offer.since)) < Self.attachSettle { return }
+            // Nor while no field holds the keyboard (it has let go, or isn't back yet): what would
+            // be typed would go nowhere, and count as typed.
+            if host?.currentDocumentIdentifier == nil { return }
+        }
         typingOffer = nil
         guard let liveTyping else { return trace("typing not armed: off") }
-        // `begin` replaces the record: never over words that are still in a field.
-        guard liveTyping.typedRequestId == nil else { return trace("typing not armed: earlier words") }
+        // `begin` replaces the record: never over words that are still in a field. Asked of the
+        // shared container now, not of what this keyboard read when it was made: another
+        // keyboard object may have typed them since.
+        guard !liveTyping.hasTypedWords else { return trace("typing not armed: earlier words") }
         // The field the keyboard came back to, as iOS names it now.
         if offer.attached { activeDocumentIdentifier = host?.currentDocumentIdentifier }
         guard host?.currentDocumentIdentifier == activeDocumentIdentifier else {
@@ -503,6 +514,7 @@ public final class KeyboardSessionClient {
         }
         transport.payloads.clearPendingStart()
         if case .listening = phase { return }
+        let onTheTrip = if case .openingApp = phase { true } else { false }
         // The field can't be recognized by its documentIdentifier: iOS gives it a new one after the
         // trip to the app (seen on the iPhone, iOS 26.6). The dictation goes into the field the
         // user came back to, and its result follows the request.
@@ -512,10 +524,11 @@ public final class KeyboardSessionClient {
             // Followed from here to its end, so its words may be typed live. By the request's
             // options, which the app begins it with, not this keyboard's own: a shortcut's
             // request carries the app's, and a keyboard iOS made anew has only what its settings
-            // say by now. (An app that hasn't begun it gets this keyboard's start below, whose
-            // options are the request's unless a setting changed on the way.)
+            // say by now. Joined on the trip to the app (this keyboard opened it), the second of
+            // `attachSettle` counts from here too.
             typingOffer = (pending.requestId, pending.translationTargetLanguage != nil,
-                           Self.liveWordsLanguage(override: pending.languageOverride, primary: primaryLanguage), true)
+                           Self.liveWordsLanguage(override: pending.languageOverride, primary: primaryLanguage), true,
+                           onTheTrip ? clock() : .distantPast)
         }
         switch state.status {
         case .recording:
@@ -532,8 +545,24 @@ public final class KeyboardSessionClient {
             waitForResult(pending.requestId)
             checkForResult()
         default:
-            trace("start attach-ready")
-            sendStart(pending.requestId)
+            if transport.payloads.readResult(pending.requestId) != nil {
+                // Recorded and written while the keyboard was away (something else stopped it on
+                // the way): its text is there. Starting the request again would record a second
+                // dictation under its name, whose words would be typed and then replaced by the
+                // first one's text.
+                trace("start attach-written")
+                typingOffer = nil
+                setPhase(.processing(pending.requestId))
+                waitForResult(pending.requestId)
+                checkForResult()
+            } else {
+                // The app hasn't begun it, so this keyboard's start does, with this keyboard's
+                // options as they are now: the typing goes by the same.
+                typingOffer?.translating = translationTargetLanguage != nil
+                typingOffer?.language = liveWordsLanguage
+                trace("start attach-ready")
+                sendStart(pending.requestId)
+            }
         }
     }
 
