@@ -49,6 +49,9 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
     /// A dictation that has run this long is not taken up by a fallback that is only ready now:
     /// the recognizer would be busy with the past for too long to show anything of the present.
     private let lateJoinLimit: Duration
+    /// A preparation that has run this long may never end (a model that doesn't load): the
+    /// dictations that begin from then on are promised nothing on it.
+    private let preparationPatience: TimeInterval
     private let lock = NSLock()
     /// Held by whoever begins, ends or joins the fallback's part of a dictation, so a join never
     /// begins a part that was just ended, nor ends the next dictation's. Taken before `lock`,
@@ -80,9 +83,16 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
     /// Something the preparation under way may have missed has changed (a language turned up, the
     /// guess changed): if it comes to nothing, it looks once more before it ends.
     private var looksAgain = false
-    /// When the last preparation since `prepare` came to nothing. While it is set no dictation is
-    /// promised words it may not get.
-    private var fallbackFailedAt: Date?
+    /// The last preparation since `prepare` that came to nothing: when, and for which on-device
+    /// language (nil: there was no model for the language then). A dictation that would listen
+    /// in that same language is promised no words it may not get; another language is another
+    /// matter.
+    private var fallbackFailure: (at: Date, language: ResolvedLanguage?)?
+    /// When the preparation under way began its attempt: one that has taken too long is no
+    /// longer counted on (`preparationPatience`).
+    private var attemptBegan: Date?
+    /// `shutdown` was called: the session is over, and nothing prepares the fallback again.
+    private var isShutDown = false
     /// The fallback has a part in the current dictation, which whoever ends the dictation ends,
     /// exactly once (`claimFallback`, `abandonUtterance`, the next `begin`).
     private var fallbackListening = false
@@ -111,14 +121,15 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
     /// take isn't recognized on the iPhone either. `expectsOnDevice`: the iPhone holds a verified
     /// model for a dictation in that language, as far as the session knows without asking Apple's
     /// framework; a dictation that begins before the fallback is prepared is promised its words
-    /// on that (or on a language already in `fallbackLanguages`). `fallbackRetryPause` and
-    /// `lateJoinLimit`: tests shorten them.
+    /// on that (or on a language already in `fallbackLanguages`). `fallbackRetryPause`,
+    /// `lateJoinLimit` and `preparationPatience`: tests shorten them.
     init(client: any CloudTranscribing, dictation: (any Dictating)? = nil, fallback: (any Transcriber)? = nil,
          fallbackLanguages: [String: ResolvedLanguage] = [:],
          savesData: @escaping @Sendable () -> Bool = { NetworkConditions.shared.savesData() },
          wordsUsedUpUntil: @escaping @Sendable () -> Date? = { nil },
          expectsOnDevice: @escaping @Sendable (ResolvedLanguage) -> Bool = { _ in false },
-         fallbackRetryPause: TimeInterval = 30, lateJoinLimit: Duration = .seconds(60)) {
+         fallbackRetryPause: TimeInterval = 30, lateJoinLimit: Duration = .seconds(60),
+         preparationPatience: TimeInterval = 15) {
         self.client = client
         self.dictation = dictation
         self.fallback = fallback
@@ -128,6 +139,7 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
         self.expectsOnDevice = expectsOnDevice
         self.fallbackRetryPause = fallbackRetryPause
         self.lateJoinLimit = lateJoinLimit
+        self.preparationPatience = preparationPatience
     }
 
     var displayName: String {
@@ -222,7 +234,7 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
             guard !sameMicrophone else { return }
             generation += 1
             fallbackPrepared = false
-            fallbackFailedAt = nil
+            fallbackFailure = nil
         }
     }
 
@@ -232,13 +244,15 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
     /// at a time: a second caller waits for it, then looks again.
     func prepareFallback() async {
         while true {
-            let (task, own) = lock.withLock { () -> (Task<Void, Never>, Bool) in
+            let (running, own) = lock.withLock { () -> (Task<Void, Never>?, Bool) in
+                guard !isShutDown else { return (nil, true) }
                 fallbackWanted = true
                 if let preparing { return (preparing, false) }
                 let task = Task { await self.runFallbackPreparation() }
                 preparing = task
                 return (task, true)
             }
+            guard let task = running else { return }
             await task.value
             // The attempt waited for was begun for a format or a language that may have been
             // replaced since: this caller makes its own, which returns at once when nothing is
@@ -253,8 +267,9 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
             // The hold that finds nothing more to look at is the one that ends the preparation:
             // whoever turns up after it starts the next one.
             let again = lock.withLock { () -> Bool in
-                let again = looksAgain && !fallbackPrepared
+                let again = looksAgain && !fallbackPrepared && !isShutDown
                 looksAgain = false
+                attemptBegan = nil
                 if !again { preparing = nil }
                 return again
             }
@@ -263,14 +278,17 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
     }
 
     private func attemptFallbackPreparation() async {
-        let (micFormat, onDevice, generation, prepared) = lock.withLock {
-            (self.micFormat, language.flatMap(onDeviceLanguage(for:)), self.generation, fallbackPrepared)
+        let (micFormat, onDevice, generation, skips) = lock.withLock {
+            () -> (AVAudioFormat?, ResolvedLanguage?, Int, Bool) in
+            attemptBegan = Date()
+            return (self.micFormat, language.flatMap(onDeviceLanguage(for:)), self.generation,
+                    fallbackPrepared || isShutDown)
         }
-        guard !prepared, let fallback, let micFormat else { return }
+        guard !skips, let fallback, let micFormat else { return }
         guard let onDevice else {
             // No model for the language (yet). `addFallbackLanguage` and `setAutomaticFallback`
             // bring the next attempt when one turns up.
-            lock.withLock { if self.generation == generation { fallbackFailedAt = Date() } }
+            lock.withLock { if self.generation == generation { fallbackFailure = (Date(), nil) } }
             logger.info("On-device fallback: no model for the language yet")
             return
         }
@@ -278,7 +296,7 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
         do {
             try await fallback.prepare(micFormat: micFormat, language: onDevice)
         } catch {
-            lock.withLock { if self.generation == generation { fallbackFailedAt = Date() } }
+            lock.withLock { if self.generation == generation { fallbackFailure = (Date(), onDevice) } }
             logger.notice("On-device fallback unavailable: \(error.localizedDescription, privacy: .public)")
             return
         }
@@ -286,7 +304,7 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
         let (current, wanted) = lock.withLock { () -> (Bool, ResolvedLanguage?) in
             guard self.generation == generation else { return (false, nil) }
             fallbackPrepared = true
-            fallbackFailedAt = nil
+            fallbackFailure = nil
             return (true, language.flatMap(onDeviceLanguage(for:)))
         }
         guard current else { return }
@@ -295,9 +313,15 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
             // The language moved on while the model loaded (a guess that changed, a language the
             // keyboard switched to). The dictation under way is not taken up in a language it
             // isn't in, so its promise goes; the fallback follows the new language, when it has a
-            // model, for the next dictation.
-            lock.withLock { lateJoin = nil }
-            if let wanted { fallback.setLanguage(wanted) }
+            // model, for the next dictation. Inside the gate, and not under a dictation that has
+            // begun to listen meanwhile (its `begin` has set the language already).
+            fallbackGate.withLock {
+                let switches = lock.withLock { () -> Bool in
+                    lateJoin = nil
+                    return !fallbackListening
+                }
+                if switches, let wanted { fallback.setLanguage(wanted) }
+            }
             logger.info("On-device fallback: the language is now \(wanted?.tag ?? "one without a model", privacy: .public)")
             return
         }
@@ -405,15 +429,20 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
                 fallbackFeeding = fallbackListening
                 listeningLanguage = fallbackListening ? wanted : nil
                 guard !fallbackPrepared else { return (unended, wanted, fallbackListening, false, false) }
-                // Not prepared yet. When it can be expected (no attempt has come to nothing since
-                // `prepare`, and a model is known for the language), the dictation is promised
-                // its words and taken up when the fallback is ready.
+                // Not prepared yet. When it can be expected (no attempt for this language has come
+                // to nothing since `prepare`, none is hanging, and a model is known for the
+                // language), the dictation is promised its words and taken up when the fallback
+                // is ready.
                 var promised = false
-                if shown, joins, fallbackFailedAt == nil, wanted != nil || expected, let handler {
+                // A failure counts against the language it was about: a model that has turned up
+                // for this dictation's language since is being prepared now.
+                let failed = fallbackFailure.map { $0.language == wanted } ?? false
+                let hangs = attemptBegan.map { now.timeIntervalSince($0) > preparationPatience } ?? false
+                if shown, joins, !failed, !hangs, wanted != nil || expected, let handler {
                     lateJoin = (utteranceNumber, handler, .now)
                     promised = true
                 }
-                let due = fallbackFailedAt.map { now.timeIntervalSince($0) >= fallbackRetryPause } ?? true
+                let due = fallbackFailure.map { now.timeIntervalSince($0.at) >= fallbackRetryPause } ?? true
                 return (unended, wanted, false, promised, needsPreparation && due)
             }
             if plan.unended { fallback?.abandonUtterance() }
@@ -492,17 +521,17 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
         // Under Auto-detect the fallback's transcript is in the language it listened in.
         let fallbackDetected = automatic ? onDevice?.tag : nil
         guard Double(pcm.count) >= Self.sampleRate * Self.minimumSeconds else {
-            if claimFallback(of: utterance) { fallback?.abandonUtterance() }
+            abandonFallback(of: utterance)
             return UtteranceOutput(transcript: "")
         }
-        if paused, claimFallback(of: utterance), let fallback {
-            // Offline with the week's words used up: nothing stands in for the cloud.
+        if paused {
             if let refusal = refusalWhileWordsAwaitServer(
                 otherwise: CloudTranscriptionError.unavailable("The cloud is paused after a failure.")) {
-                fallback.abandonUtterance()
-                throw refusal
+                // Offline with the week's words used up: nothing stands in for the cloud.
+                if abandonFallback(of: utterance) { throw refusal }
+            } else if claimFallback(of: utterance), let fallback {
+                return UtteranceOutput(transcript: try await fallback.finishUtterance(), detectedLanguage: fallbackDetected)
             }
-            return UtteranceOutput(transcript: try await fallback.finishUtterance(), detectedLanguage: fallbackDetected)
         }
         do {
             let encodeStarted = ContinuousClock.now
@@ -546,31 +575,43 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
             measured.cloudTranscript = true
             record(measured, for: utterance)
             lock.withLock { cloudPausedUntil = nil }
-            if claimFallback(of: utterance) { fallback?.abandonUtterance() }
+            abandonFallback(of: utterance)
             return output
         } catch CloudTranscriptionError.cancelled {
             // The dictation is being dropped, or another path already answered: the service isn't
             // at fault, and nobody is waiting for an on-device transcript.
-            if claimFallback(of: utterance) { fallback?.abandonUtterance() }
+            abandonFallback(of: utterance)
             throw CloudTranscriptionError.cancelled
         } catch {
             if case .unavailable = error as? CloudTranscriptionError {
                 lock.withLock { cloudPausedUntil = Date().addingTimeInterval(Self.cloudPause) }
             }
             recordFailure(error, for: utterance)
-            guard claimFallback(of: utterance), let fallback else { throw error }
             // The server refused the account, or the week's words were used up and it hasn't said
-            // they're back: the iPhone's own recognition doesn't stand in, or the limit would mean nothing.
-            if (error as? CloudTranscriptionError)?.refusesAccount == true {
-                fallback.abandonUtterance()
-                throw error
+            // they're back: the iPhone's own recognition doesn't stand in, or the limit would mean
+            // nothing. Decided before the fallback's part is claimed, so that part is ended in the
+            // step that claims it. Without a part the failure is the cloud's own, as ever.
+            let refusal = (error as? CloudTranscriptionError)?.refusesAccount == true
+                ? error : refusalWhileWordsAwaitServer(otherwise: error)
+            if let refusal {
+                throw abandonFallback(of: utterance) ? refusal : error
             }
-            if let refusal = refusalWhileWordsAwaitServer(otherwise: error) {
-                fallback.abandonUtterance()
-                throw refusal
-            }
+            guard claimFallback(of: utterance), let fallback else { throw error }
             logger.notice("Cloud transcription failed, using on-device: \(error.localizedDescription, privacy: .public)")
             return UtteranceOutput(transcript: try await fallback.finishUtterance(), detectedLanguage: fallbackDetected)
+        }
+    }
+
+    /// Ends the fallback's part of `utterance`, if it still has one, and says whether it had. It is
+    /// claimed and ended in one hold of the gate: the next dictation, which a reconnect can let
+    /// begin while this one is still being written, can't begin its own part in between and have
+    /// that ended here.
+    @discardableResult
+    private func abandonFallback(of utterance: Int) -> Bool {
+        fallbackGate.withLock {
+            guard claimFallback(of: utterance) else { return false }
+            fallback?.abandonUtterance()
+            return true
         }
     }
 
@@ -643,7 +684,11 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
         }
     }
 
+    /// The session is over. Nothing prepares the fallback after this: a preparation that was
+    /// still waiting its turn would bring the recognizer, and its model, back for the rest of
+    /// the process.
     func shutdown() async {
+        lock.withLock { isShutDown = true }
         await fallback?.shutdown()
     }
 

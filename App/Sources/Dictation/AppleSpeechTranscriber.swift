@@ -454,8 +454,9 @@ final class AppleSpeechTranscriber: Transcriber, LiveWordsProviding, ReplayableT
                 waitingHandler = nil
                 // Inside the lock and before `current` is published: the audio thread converts
                 // with this same converter once it sees `current`, and would otherwise convert
-                // beside this loop and get ahead of the kept audio. It waits here instead, once,
-                // for a few milliseconds (at most 500 buffers).
+                // beside this loop and get ahead of the kept audio. It waits here instead, once:
+                // a few milliseconds for the usual second or two of audio, some tens for the
+                // 500 buffers the backlog holds at most.
                 if let converter, let format = analyzerFormat {
                     for buffer in backlog {
                         if let converted = Self.convert(buffer, with: converter, to: format) {
