@@ -20,8 +20,8 @@ struct DictateControl: ControlWidget {
                 Label("Dictate", systemImage: "waveform")
             }
         }
-        .displayName("Dictate with Murmur")
-        .description("Start or stop a dictation. With the Murmur keyboard open, the text is typed where you're writing.")
+        .displayName("Dictate with Redmic")
+        .description("Start or stop a dictation. With the Redmic keyboard open, the text is typed where you're writing.")
     }
 }
 
@@ -42,7 +42,7 @@ struct SessionLiveActivity: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    ActivityMark()
+                    ActivityMark(state: context.state)
                         .frame(width: 28, height: 28)
                         .padding(.leading, 6)
                 }
@@ -53,11 +53,11 @@ struct SessionLiveActivity: Widget {
                     SessionButtons(state: context.state)
                 }
             } compactLeading: {
-                ActivityMark().frame(width: 18, height: 18)
+                ActivityMark(state: context.state).frame(width: 18, height: 18)
             } compactTrailing: {
                 CompactStatus(state: context.state)
             } minimal: {
-                ActivityMark().frame(width: 16, height: 16)
+                ActivityMark(state: context.state).frame(width: 16, height: 16)
             }
         }
     }
@@ -74,10 +74,15 @@ private enum ActivityColor {
     static let onLive = Color(rgb: BrandToken.onLive.dark)
 }
 
-/// Murmur's mark with a red dot: the microphone is open for as long as the activity shows.
+/// Redmic's mark: a white ring and the red dot (the logo's own dot), and all red while a dictation
+/// is heard. The red dot alone no longer means "listening", and the smallest island shows nothing
+/// else, so the ring says it.
 private struct ActivityMark: View {
+    let state: SessionActivityAttributes.ContentState
+
     var body: some View {
-        BrandMark(ring: ActivityColor.label, dot: ActivityColor.live)
+        BrandMark(ring: state.phase == .recording ? ActivityColor.live : ActivityColor.label,
+                  dot: ActivityColor.live)
             .accessibilityHidden(true)
     }
 }
@@ -87,10 +92,10 @@ private struct LockScreenSessionView: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            ActivityMark()
+            ActivityMark(state: state)
                 .frame(width: 30, height: 30)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Murmur")
+                Text("Redmic")
                     .font(.headline)
                     .foregroundStyle(ActivityColor.label)
                 StatusText(state: state, stacked: false)

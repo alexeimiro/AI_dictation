@@ -168,13 +168,13 @@ struct SyncedNote: View {
     }
 }
 
-/// The ring-and-dot mark.
+/// Redmic's mark: the ring in `color` and the red dot.
 struct MarkView: View {
     var size: CGFloat = 20
     var color: Color = Mac.Palette.ink
 
     var body: some View {
-        LogoMarkShape().fill(color).frame(width: size, height: size)
+        BrandMark(ring: color).frame(width: size, height: size)
     }
 }
 

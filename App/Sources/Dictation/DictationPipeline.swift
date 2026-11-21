@@ -364,7 +364,7 @@ final class DictationPipeline {
 
     /// What the keyboard shows while the account is signed out (`BackendError.signedOut`): the
     /// cloud stays closed until the user signs in again in Murmur.
-    static let signedOutMessage = "You're signed out. Open Murmur to sign in again."
+    static let signedOutMessage = "You're signed out. Open Redmic to sign in again."
 
     /// What the keyboard shows when no text came back.
     static func transcriptionMessage(for error: Error) -> String {

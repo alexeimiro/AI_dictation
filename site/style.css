@@ -1,5 +1,5 @@
-/* Murmur's website. The colours are the app's (MurmurBrand's tokens) and the type is the system
-   font, as in the app. Red is left out: in Murmur it means an open microphone and nothing else. */
+/* Redmic's website. The colours are the app's (MurmurBrand's tokens) and the type is the system
+   font, as in the app. Red appears only in the logo: the mark's dot and the r and m of "redmic". */
 
 :root {
   --canvas: #ffffff;
@@ -9,6 +9,7 @@
   --on-ink: #ffffff;
   --second: #5d5d5d;
   --third: #6b6b6b;
+  --live: #d92d20;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -20,6 +21,7 @@
     --on-ink: #0d0d0d;
     --second: #c7c7cc;
     --third: #a0a0a6;
+    --live: #ff5247;
   }
 }
 
@@ -41,6 +43,8 @@ main { padding-bottom: 48px; }
 /* The wordmark: the mark (a dot in a ring) and the name in lowercase, as in the app. */
 .brand { display: inline-flex; align-items: center; gap: 7px; color: var(--ink); text-decoration: none; font-size: 20px; font-weight: 600; letter-spacing: -0.02em; line-height: 1; }
 .brand svg { width: 22px; height: 22px; flex: none; }
+.mark-dot { fill: var(--live); }
+.brand .red, .gift-word .red { color: var(--live); }
 
 h1 { font-size: clamp(32px, 8vw, 44px); line-height: 1.1; font-weight: 700; letter-spacing: -0.025em; margin: 40px 0 14px; }
 h2 { font-size: 22px; line-height: 1.25; font-weight: 700; letter-spacing: -0.015em; margin: 40px 0 8px; }

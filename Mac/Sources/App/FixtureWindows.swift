@@ -11,7 +11,7 @@ enum FixtureWindows {
 
     static func present(_ model: MacAppModel, options: MacLaunchOptions) {
         if let step = options.onboardingStep {
-            show(OnboardingWindow(model: model, fixtureStep: step), size: CGSize(width: 960, height: 640), title: "Welcome to Murmur")
+            show(OnboardingWindow(model: model, fixtureStep: step), size: CGSize(width: 960, height: 640), title: "Welcome to Redmic")
         } else if let tab = options.settingsTab.flatMap(SettingsRouter.Tab.init(rawValue:)) {
             SettingsRouter.shared.tab = tab
             show(SettingsWindow(model: model), size: CGSize(width: 680, height: 620), title: tab.title, titled: true)
@@ -28,7 +28,7 @@ enum FixtureWindows {
             case "paywall": model.sheet = .paywall
             default: break
             }
-            show(MainWindow(model: model), size: Mac.Metric.windowSize, title: "Murmur")
+            show(MainWindow(model: model), size: Mac.Metric.windowSize, title: "Redmic")
         }
     }
 

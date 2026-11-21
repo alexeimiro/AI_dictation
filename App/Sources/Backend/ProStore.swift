@@ -112,7 +112,7 @@ final class ProStore {
             return "Couldn't reach the App Store. Check your connection and try again."
         }
         if let failure = await refresh(force: true) { return failure }
-        return isSubscribed ? nil : "There's no Murmur Pro subscription on this Apple Account."
+        return isSubscribed ? nil : "There's no Redmic Pro subscription on this Apple Account."
     }
 
     /// Another account signed in, or a guest's session started: the subscription is sent again,
@@ -159,11 +159,11 @@ final class ProStore {
         do {
             try await send(result.jwsRepresentation)
         } catch .httpError(code: 409) {
-            syncMessage = "This subscription belongs to another Murmur account. Sign in with that account to use it."
+            syncMessage = "This subscription belongs to another Redmic account. Sign in with that account to use it."
             return syncMessage
         } catch {
             logger.error("verify-purchase failed: \(error.localizedDescription, privacy: .public)")
-            syncMessage = "Your purchase went through, but Murmur couldn't confirm it yet. It tries again on its own, or tap Restore purchase."
+            syncMessage = "Your purchase went through, but Redmic couldn't confirm it yet. It tries again on its own, or tap Restore purchase."
             return syncMessage
         }
         syncMessage = nil

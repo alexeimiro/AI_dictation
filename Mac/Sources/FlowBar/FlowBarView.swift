@@ -90,11 +90,11 @@ struct FlowBarView: View {
                     }
                     .padding(.leading, 6).padding(.trailing, 4)
                 }
-                .accessibilityLabel("Murmur is listening")
+                .accessibilityLabel("Redmic is listening")
             }
         case .processing:
             pill(width: 100) { WritingDots() }
-                .accessibilityLabel("Murmur is writing your text")
+                .accessibilityLabel("Redmic is writing your text")
         }
     }
 

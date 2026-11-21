@@ -14,43 +14,43 @@ const out = path.join(root, "build/site");
 
 const PAGES = [
   {
-    file: "index.html", source: "site/home.html", title: "Murmur: talk instead of typing",
-    description: "Murmur is a keyboard for iPhone that writes what you say, in any text field.",
+    file: "index.html", source: "site/home.html", title: "Redmic: talk instead of typing",
+    description: "Redmic is a keyboard for iPhone that writes what you say, in any text field.",
     appStoreBanner: true,
   },
   {
-    file: "privacy/index.html", source: "docs/legal/privacy-policy.md", title: "Privacy Policy · Murmur",
-    description: "What Murmur collects, why, and the choices you have.",
+    file: "privacy/index.html", source: "docs/legal/privacy-policy.md", title: "Privacy Policy · Redmic",
+    description: "What Redmic collects, why, and the choices you have.",
   },
   {
-    file: "terms/index.html", source: "docs/legal/terms-of-use.md", title: "Terms of Use · Murmur",
-    description: "The terms for using Murmur and Murmur Pro.",
+    file: "terms/index.html", source: "docs/legal/terms-of-use.md", title: "Terms of Use · Redmic",
+    description: "The terms for using Redmic and Redmic Pro.",
   },
   {
-    file: "support/index.html", source: "site/support.md", title: "Support · Murmur",
-    description: "Help with Murmur, and how to reach us.",
+    file: "support/index.html", source: "site/support.md", title: "Support · Redmic",
+    description: "Help with Redmic, and how to reach us.",
   },
   {
-    file: "invite/index.html", source: "site/invite.html", title: "Your invite to Murmur",
-    description: "A month of Murmur Pro, from a friend.",
+    file: "invite/index.html", source: "site/invite.html", title: "Your invite to Redmic",
+    description: "A month of Redmic Pro, from a friend.",
   },
   // Where the lifecycle emails' links go (supabase/functions/_shared/lifecycle_emails.ts).
   {
-    file: "open/index.html", source: "site/open.html", title: "Open Murmur",
-    description: "Opens Murmur on your iPhone.",
+    file: "open/index.html", source: "site/open.html", title: "Open Redmic",
+    description: "Opens Redmic on your iPhone.",
   },
   {
-    file: "unsubscribe/index.html", source: "site/unsubscribe.html", title: "Unsubscribe · Murmur",
-    description: "Stop Murmur's tips and reminders.",
+    file: "unsubscribe/index.html", source: "site/unsubscribe.html", title: "Unsubscribe · Redmic",
+    description: "Stop Redmic's tips and reminders.",
   },
   {
-    file: "score/index.html", source: "site/score.html", title: "Thanks for answering · Murmur",
-    description: "How likely are you to recommend Murmur to a friend?",
+    file: "score/index.html", source: "site/score.html", title: "Thanks for answering · Redmic",
+    description: "How likely are you to recommend Redmic to a friend?",
   },
 ];
 
-// Murmur's mark, a dot in a ring, on the app's 24-unit grid (MarkGeometry in MurmurBrand).
-const MARK = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" fill="currentColor"/>`
+// Redmic's mark, the red dot in a ring, on the app's 24-unit grid (MarkGeometry in MurmurBrand).
+const MARK = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle class="mark-dot" cx="12" cy="12" r="4.2"/>`
   + `<circle cx="12" cy="12" r="9.2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>`;
 
 const escape = (text) =>
@@ -129,7 +129,7 @@ function page({ file, title, description, appStoreBanner }, body) {
 ${appStoreBanner ? `<meta name="apple-itunes-app" content="app-id=${APP_STORE_ID}">\n` : ""}<link rel="stylesheet" href="${up}style.css">
 </head>
 <body>
-<header class="site"><a class="brand" href="${up}" aria-label="Murmur">${MARK}<span>murmur</span></a></header>
+<header class="site"><a class="brand" href="${up}" aria-label="Redmic">${MARK}<span><span class="red">r</span>ed<span class="red">m</span>ic</span></a></header>
 <main>
 ${body.trim()}
 </main>

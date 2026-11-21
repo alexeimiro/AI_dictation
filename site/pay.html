@@ -1,12 +1,12 @@
-<h1>Murmur Pro</h1>
-<p id="pay-status" class="lede">Checkout opens on this page. When you’re done, Murmur on your Mac switches to Pro by itself.</p>
-<p class="note">Payments are handled by Paddle, Murmur’s reseller, who also handles tax and receipts.</p>
+<h1>Redmic Pro</h1>
+<p id="pay-status" class="lede">Checkout opens on this page. When you’re done, Redmic on your Mac switches to Pro by itself.</p>
+<p class="note">Payments are handled by Paddle, Redmic’s reseller, who also handles tax and receipts.</p>
 
 <!-- Paddle's default payment link for Murmur (set it to https://simplymurmur.com/pay/ in Paddle):
      the Mac app's checkout link is this page with ?_ptxn=…, which Paddle.js opens by itself.
      Build entry for scripts/build_site.mjs, added when the site is next published:
-       { file: "pay/index.html", source: "site/pay.html", title: "Murmur Pro checkout",
-         description: "Buy Murmur Pro for your Mac and iPhone." }
+       { file: "pay/index.html", source: "site/pay.html", title: "Redmic Pro checkout",
+         description: "Buy Redmic Pro for your Mac and iPhone." }
      PADDLE_CLIENT_TOKEN below is Paddle's client-side token (public by design; test_… for the sandbox). -->
 <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
 <script>
@@ -25,7 +25,7 @@
       ...(email ? { pwCustomer: { email } } : {}),
       eventCallback(event) {
         if (event.name === "checkout.completed") {
-          status.textContent = "You’re Pro. Go back to Murmur: it switches by itself in a few seconds.";
+          status.textContent = "You’re Pro. Go back to Redmic: it switches by itself in a few seconds.";
         }
       },
     });

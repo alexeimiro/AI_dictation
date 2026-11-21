@@ -10,7 +10,7 @@ struct LanguagesView: View {
         let languages = model.languages
         List {
             Group {
-                SettingPicker("Primary", detail: "The language Murmur listens for unless you switch on the keyboard.",
+                SettingPicker("Primary", detail: "The language Redmic listens for unless you switch on the keyboard.",
                               selection: Binding(get: { languages.primary },
                                                  set: { tag in Task { await languages.setPrimary(tag) } }),
                               value: DictationLanguage(tag: languages.primary).localizedFullName) {

@@ -13,7 +13,7 @@ struct SignedOutPage: View {
                 Text(verbatim: "❗ You are logged out")
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(KeyboardChrome.primary)
-                Text("You must be logged in to use Murmur")
+                Text("You must be logged in to use Redmic")
                     .font(.system(size: 15))
                     .foregroundStyle(KeyboardChrome.muted)
             }
@@ -22,7 +22,7 @@ struct SignedOutPage: View {
             .minimumScaleFactor(0.8)
             // One element without the emoji, which VoiceOver would read out.
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("You are logged out. You must be logged in to use Murmur.")
+            .accessibilityLabel("You are logged out. You must be logged in to use Redmic.")
             .accessibilityAddTraits(.isHeader)
             Button(action: model.actions.logIn) {
                 Text("Log in")
@@ -33,7 +33,7 @@ struct SignedOutPage: View {
                     .contentShape(Capsule(style: .circular))
             }
             .buttonStyle(.keyboardPress)
-            .accessibilityHint("Opens Murmur to sign in")
+            .accessibilityHint("Opens Redmic to sign in")
             .padding(.top, 24)
         }
         .padding(.horizontal, 24)

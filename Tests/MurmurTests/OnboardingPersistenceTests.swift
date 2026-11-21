@@ -260,7 +260,7 @@ struct OnboardingHelperTests {
         #expect(options.onboardingVariant == "listening")
         #expect(options.permissionFixtures?.microphone == .granted)
         #expect(options.isOnboardingScreenshot && options.usesOnboardingFixtures)
-        #expect(LaunchOptions(arguments: ["Murmur", "-onboarding-step", "nope"]).onboardingStep == nil)
+        #expect(LaunchOptions(arguments: ["Redmic", "-onboarding-step", "nope"]).onboardingStep == nil)
         let journey = LaunchOptions(arguments: ["Murmur", "-onboarding-fixtures", "-onboarding-reset"])
         #expect(journey.usesOnboardingFixtures && journey.resetOnboarding && !journey.isOnboardingScreenshot)
     }

@@ -550,7 +550,7 @@ final class AppleSpeechTranscriber: Transcriber, LiveWordsProviding, ReplayableT
         var errorDescription: String? {
             switch self {
             case .assetsMissing(let tag):
-                "The \(DictationLanguage(tag: tag).localizedName) speech model isn't installed. Open Murmur › Languages to download it."
+                "The \(DictationLanguage(tag: tag).localizedName) speech model isn't installed. Open Redmic › Languages to download it."
             case .noCompatibleFormat:
                 "Couldn't configure audio for speech recognition."
             }

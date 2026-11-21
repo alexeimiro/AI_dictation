@@ -80,7 +80,7 @@ struct VoicePad: View {
                        dismiss: model.actions.dismissPending)
         } else if case .notice(let message) = model.phase, message == Brand.limitReachedMessage {
             NoticeCard(symbol: "gauge.with.needle", title: "This week’s words are used up",
-                       detail: "Tap to see Murmur Pro.",
+                       detail: "Tap to see Redmic Pro.",
                        action: model.actions.openPro, dismiss: model.actions.dismissNotice)
         } else if case .notice(let message) = model.phase {
             let parts = KeyboardNotice.parts(of: message)
@@ -88,7 +88,7 @@ struct VoicePad: View {
                        dismiss: model.actions.dismissNotice)
         } else {
             NoticeCard(symbol: "lock", title: "One switch left",
-                       detail: "Turn on Allow Full Access in Settings › Murmur › Keyboards.",
+                       detail: "Turn on Allow Full Access in Settings › Redmic › Keyboards.",
                        dismiss: model.actions.dismissNotice)
         }
     }

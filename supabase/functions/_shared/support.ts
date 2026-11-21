@@ -6,7 +6,7 @@
 // 24 hours: Resend's free plan sends 100 emails a day, and the sign-in codes need them. A guest
 // account costs nothing to make, so a guest's message is only saved.
 // Env: RESEND_API_KEY, SUPPORT_EMAIL_TO (one address, or several separated by commas),
-// SUPPORT_EMAIL_FROM (default "Murmur <no-reply@simplymurmur.com>") and SUPPORT_EMAIL_DAILY_LIMIT
+// SUPPORT_EMAIL_FROM (default "Redmic <no-reply@simplymurmur.com>") and SUPPORT_EMAIL_DAILY_LIMIT
 // (0 emails none). Without the key or an address nothing is emailed.
 import { background, type Caller, corsHeaders, json } from "./http.ts";
 
@@ -30,7 +30,7 @@ export function mailConfig(env: { get(name: string): string | undefined } = Deno
   return {
     apiKey,
     to,
-    from: env.get("SUPPORT_EMAIL_FROM") || "Murmur <no-reply@simplymurmur.com>",
+    from: env.get("SUPPORT_EMAIL_FROM") || "Redmic <no-reply@simplymurmur.com>",
     dailyLimit: Number.isInteger(limit) && limit >= 0 ? limit : DEFAULT_DAILY_LIMIT,
   };
 }
@@ -97,7 +97,7 @@ export function supportEmail(message: SupportMessage, account: { id: string; ema
     from: config.from,
     to: config.to,
     ...(account.email ? { reply_to: account.email } : {}),
-    subject: `Murmur ${kind.toLowerCase()}${topic}: ${oneLine(message.message, 60)}`,
+    subject: `Redmic ${kind.toLowerCase()}${topic}: ${oneLine(message.message, 60)}`,
     text: lines.join("\n"),
   };
 }

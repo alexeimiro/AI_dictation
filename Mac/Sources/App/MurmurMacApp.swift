@@ -10,7 +10,7 @@ struct MurmurMacApp: App {
     private let onboarded = UserDefaults.standard.bool(forKey: "macOnboardingComplete")
 
     var body: some Scene {
-        Window("Murmur", id: "main") {
+        Window("Redmic", id: "main") {
             MainWindow(model: delegate.model)
         }
         .windowStyle(.hiddenTitleBar)
@@ -22,7 +22,7 @@ struct MurmurMacApp: App {
             SettingsWindow(model: delegate.model)
         }
 
-        Window("Welcome to Murmur", id: "onboarding") {
+        Window("Welcome to Redmic", id: "onboarding") {
             OnboardingWindow(model: delegate.model)
         }
         .windowStyle(.hiddenTitleBar)

@@ -22,7 +22,7 @@ struct QuickNoteWindow: View {
                     onTop.toggle()
                     window?.level = onTop ? .floating : .normal
                 }
-                IconButton(symbol: "arrow.up.right.square", label: "Open in Murmur", iconSize: 14) {
+                IconButton(symbol: "arrow.up.right.square", label: "Open in Redmic", iconSize: 14) {
                     save()
                     model.selectedNoteID = noteID
                     model.openMainWindow(page: .notes)

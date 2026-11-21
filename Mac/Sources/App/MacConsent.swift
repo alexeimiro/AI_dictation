@@ -18,15 +18,15 @@ enum MacConsent {
         if isGranted { return true }
         NSApp.activate()
         let alert = NSAlert()
-        alert.messageText = "Before Murmur listens"
+        alert.messageText = "Before Redmic listens"
         alert.informativeText = """
-            Murmur writes what you say with two AI services. Here’s what each one gets.
+            Redmic writes what you say with two AI services. Here’s what each one gets.
 
             OpenAI gets your recording. It turns what you said into text.
 
             Anthropic gets the text. When it needs tidying or translating, Claude rewrites it.
 
-            Only to write your text. Neither service trains its models on your recordings or text, and Murmur’s servers don’t keep them.
+            Only to write your text. Neither service trains its models on your recordings or text, and Redmic’s servers don’t keep them.
 
             You can change this in Settings › Data and privacy.
             """

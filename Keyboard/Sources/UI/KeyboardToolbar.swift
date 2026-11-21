@@ -79,7 +79,7 @@ struct KeyboardToolbar: View {
             switch model.phase {
             case .needsFullAccess:
                 banner(title: "One switch left",
-                       detail: "Turn on Allow Full Access in Settings › Murmur › Keyboards",
+                       detail: "Turn on Allow Full Access in Settings › Redmic › Keyboards",
                        dismiss: model.actions.dismissNotice)
             case .notice(let message):
                 // Whole, on two lines: beside the pill and the mic a title would be cut short.
@@ -87,7 +87,7 @@ struct KeyboardToolbar: View {
             case .needsReconnect:
                 caption("Tap Start to reconnect")
             case .openingApp:
-                caption("Opening Murmur…")
+                caption("Opening Redmic…")
             case .starting:
                 caption("Starting…")
             case .idle, .listening, .processing:
@@ -107,7 +107,7 @@ struct KeyboardToolbar: View {
                              action: model.actions.showLetters) {
                     Text("ABC").font(.system(size: 12, weight: .bold))
                 }
-                OutlinedDisc(size: metrics.disc, target: metrics.control, label: "Murmur settings",
+                OutlinedDisc(size: metrics.disc, target: metrics.control, label: "Redmic settings",
                              action: model.actions.openApp) {
                     Image(systemName: "slider.horizontal.3").font(.system(size: 16, weight: .medium))
                 }
@@ -265,8 +265,8 @@ private struct StartPill: View {
             .contentShape(.rect)
         }
         .buttonStyle(.keyboardPress)
-        .accessibilityLabel("Start Murmur")
-        .accessibilityHint("Opens Murmur to start listening")
+        .accessibilityLabel("Start Redmic")
+        .accessibilityHint("Opens Redmic to start listening")
         .accessibilityAddTraits(.startsMediaSession)
     }
 }

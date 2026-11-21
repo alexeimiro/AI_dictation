@@ -173,7 +173,7 @@ final class HistoryStore: TranscriptSink {
             var transcript = record.snapshot
             transcript.cleanedText = LocalFormatter(language: transcript.language).format(transcript.rawText)
             transcript.status = transcript.rawText.isEmpty ? .failed : .raw
-            transcript.errorReason = "Murmur closed before the cleanup finished."
+            transcript.errorReason = "Redmic closed before the cleanup finished."
             record.apply(transcript)
             recovered.append(transcript)
         }

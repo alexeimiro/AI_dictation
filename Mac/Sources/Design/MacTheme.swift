@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Murmur for Mac's Signal look, as the approved mock draws it (2026-11-16): white canvas, ink
-/// text, greys, one fill and one line colour, and red only while the microphone is open.
+/// text, greys, one fill and one line colour, and red for the logo and while the microphone is open.
 /// Light only for now (the user's choice), so these are fixed values rather than dynamic colours.
 enum Mac {
     enum Palette {

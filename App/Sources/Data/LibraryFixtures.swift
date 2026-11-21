@@ -8,7 +8,7 @@ enum LibraryFixtures {
         try? library.saveEntry(term: "Anton", misspelling: nil)
         try? library.saveEntry(term: "Kubernetes", misspelling: "cooper netties")
         try? library.saveEntry(term: "by the way", misspelling: "btw")
-        try? library.saveEntry(term: "Murmur", misspelling: nil)
+        try? library.saveEntry(term: "Redmic", misspelling: nil)
         try? library.saveSnippet(trigger: "my calendar link", expansion: "https://cal.com/anton/30min")
         try? library.saveSnippet(trigger: "my email address", expansion: "anton@example.com")
         try? library.saveSnippet(

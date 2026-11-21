@@ -110,8 +110,8 @@ const greeting = (facts: EmailFacts) => facts.firstName ? `Hi ${facts.firstName}
 
 const FIRST_DICTATION = [
   "Open any app where you type: Messages, Mail, Notes, ChatGPT.",
-  "Tap a text field, then hold the globe key and pick Murmur.",
-  "On the keyboard, tap to start Murmur. The app opens for a moment to switch on the microphone; then head back to your app.",
+  "Tap a text field, then hold the globe key and pick Redmic.",
+  "On the keyboard, tap to start Redmic. The app opens for a moment to switch on the microphone; then head back to your app.",
   "Tap to speak, and talk. Tap again when you’re done, and your words appear.",
 ];
 
@@ -129,24 +129,24 @@ function trialBanner(facts: EmailFacts, context: EmailContext): Block[] {
 function welcome(facts: EmailFacts, context: EmailContext): Email {
   const plan = facts.plan;
   const planLine = plan.kind === "trial"
-    ? `You have ${plural(daysLeft(plan.endsAt, facts.now), "day")} of Murmur Pro, on us: unlimited words, no card needed.`
+    ? `You have ${plural(daysLeft(plan.endsAt, facts.now), "day")} of Redmic Pro, on us: unlimited words, no card needed.`
     : plan.kind === "paid"
-    ? "Your Murmur Pro subscription is active: no weekly word limit."
+    ? "Your Redmic Pro subscription is active: no weekly word limit."
     : "Basic gives you 1,000 words of dictation every week, free.";
   return {
     kind: "welcome",
-    subject: "Welcome to Murmur",
+    subject: "Welcome to Redmic",
     preheader: plan.kind === "trial" ? "Two weeks of Pro, on us. Here’s how to start." : "Here’s how to start talking instead of typing.",
     blocks: [
-      { type: "heading", text: "Welcome to Murmur" },
+      { type: "heading", text: "Welcome to Redmic" },
       { type: "paragraph", text: greeting(facts) },
-      { type: "paragraph", text: `Murmur writes what you say, in any app where you can type. ${planLine}` },
+      { type: "paragraph", text: `Redmic writes what you say, in any app where you can type. ${planLine}` },
       { type: "heading", text: "Your first dictation" },
       { type: "steps", items: FIRST_DICTATION },
-      { type: "button", link: { label: "Open Murmur", href: openLink(context) } },
+      { type: "button", link: { label: "Open Redmic", href: openLink(context) } },
       {
         type: "tip",
-        text: "Talk the way you talk. Change your mind halfway (“Friday at 3… actually 4”) and Murmur writes what you meant: “Friday at 4.”",
+        text: "Talk the way you talk. Change your mind halfway (“Friday at 3… actually 4”) and Redmic writes what you meant: “Friday at 4.”",
       },
       { type: "paragraph", text: "Questions or stuck? Reply to this email. A person reads every one." },
     ],
@@ -156,27 +156,27 @@ function welcome(facts: EmailFacts, context: EmailContext): Email {
 function setup(facts: EmailFacts, context: EmailContext): Email {
   return {
     kind: "setup",
-    subject: "One minute left to set up Murmur",
+    subject: "One minute left to set up Redmic",
     preheader: "Add the keyboard, then try your first dictation.",
     blocks: [
-      { type: "heading", text: "Finish setting up Murmur" },
+      { type: "heading", text: "Finish setting up Redmic" },
       { type: "paragraph", text: greeting(facts) },
       {
         type: "paragraph",
-        text: "Your Murmur account is ready, but you haven’t dictated yet. Setting up takes about a minute:",
+        text: "Your Redmic account is ready, but you haven’t dictated yet. Setting up takes about a minute:",
       },
       {
         type: "steps",
         items: [
-          "In Settings, open Murmur, tap Keyboards, and turn on Murmur and Allow Full Access.",
-          "In any app, tap a text field, hold the globe key and pick Murmur.",
-          "Tap to start Murmur, then tap to speak and say something.",
+          "In Settings, open Redmic, tap Keyboards, and turn on Redmic and Allow Full Access.",
+          "In any app, tap a text field, hold the globe key and pick Redmic.",
+          "Tap to start Redmic, then tap to speak and say something.",
         ],
       },
-      { type: "button", link: { label: "Finish setup in Murmur", href: openLink(context) } },
+      { type: "button", link: { label: "Finish setup in Redmic", href: openLink(context) } },
       {
         type: "paragraph",
-        text: "Full Access lets the keyboard talk to the Murmur app. Murmur only listens while the mic is on, and never sells what you say.",
+        text: "Full Access lets the keyboard talk to the Redmic app. Redmic only listens while the mic is on, and never sells what you say.",
       },
       { type: "paragraph", text: "Something not working? Reply to this email and we’ll help." },
     ],
@@ -186,7 +186,7 @@ function setup(facts: EmailFacts, context: EmailContext): Email {
 function founder(facts: EmailFacts, context: EmailContext): Email {
   return {
     kind: "founder",
-    subject: context.founder ? `A note from ${context.founder} at Murmur` : "Three places to try Murmur today",
+    subject: context.founder ? `A note from ${context.founder} at Redmic` : "Three places to try Redmic today",
     preheader: "Messages, email and AI chats: where talking beats typing.",
     blocks: [
       { type: "heading", text: "Talk where you type the most" },
@@ -194,21 +194,21 @@ function founder(facts: EmailFacts, context: EmailContext): Email {
       {
         type: "paragraph",
         text: context.founder
-          ? `I’m ${context.founder}, and I make Murmur. I built it because thumbs are slow and thoughts are fast: most people talk about three times faster than they type on a phone. Three places to feel the difference today:`
-          : "We made Murmur because thumbs are slow and thoughts are fast: most people talk about three times faster than they type on a phone. Three places to feel the difference today:",
+          ? `I’m ${context.founder}, and I make Redmic. I built it because thumbs are slow and thoughts are fast: most people talk about three times faster than they type on a phone. Three places to feel the difference today:`
+          : "We made Redmic because thumbs are slow and thoughts are fast: most people talk about three times faster than they type on a phone. Three places to feel the difference today:",
       },
       {
         type: "cards",
         items: [
           { title: "Messages", text: "Answer friends and family in full sentences, not just “ok”." },
-          { title: "Email", text: "Say what you mean. Murmur adds the punctuation and leaves out the “um”s." },
+          { title: "Email", text: "Say what you mean. Redmic adds the punctuation and leaves out the “um”s." },
           {
             title: "AI chats",
             text: "Give ChatGPT or Claude the whole picture. A long prompt is easy when you can just say it.",
           },
         ],
       },
-      { type: "button", link: { label: "Open Murmur", href: openLink(context) } },
+      { type: "button", link: { label: "Open Redmic", href: openLink(context) } },
       {
         type: "paragraph",
         text: "What you say stays yours. Our server doesn’t keep your recordings or their text, and your transcripts stay on your iPhone.",
@@ -219,7 +219,7 @@ function founder(facts: EmailFacts, context: EmailContext): Email {
           ? "If anything gets in the way, reply to this email. I read every one."
           : "If anything gets in the way, reply to this email. We read every one.",
       },
-      { type: "signature", lines: context.founder ? [context.founder, "Founder of Murmur"] : ["The Murmur team"] },
+      { type: "signature", lines: context.founder ? [context.founder, "Founder of Redmic"] : ["The Redmic team"] },
     ],
   };
 }
@@ -227,12 +227,12 @@ function founder(facts: EmailFacts, context: EmailContext): Email {
 function personalize(facts: EmailFacts, context: EmailContext): Email {
   return {
     kind: "personalize",
-    subject: "Make Murmur write like you",
+    subject: "Make Redmic write like you",
     preheader: "Styles, your Dictionary and Snippets.",
     blocks: [
       ...trialBanner(facts, context),
       { type: "heading", text: "Make it yours" },
-      { type: "paragraph", text: "The more Murmur knows about how you write, the less you fix. Three places to start:" },
+      { type: "paragraph", text: "The more Redmic knows about how you write, the less you fix. Three places to start:" },
       {
         type: "cards",
         items: [
@@ -242,18 +242,18 @@ function personalize(facts: EmailFacts, context: EmailContext): Email {
           },
           {
             title: "Dictionary",
-            text: "Teach Murmur the names and words it gets wrong, like a colleague’s name or your company’s product.",
+            text: "Teach Redmic the names and words it gets wrong, like a colleague’s name or your company’s product.",
           },
           {
             title: "Snippets",
-            text: "Save text you use often, like your address or a booking link. Say the snippet while dictating, and Murmur types the text in its place.",
+            text: "Save text you use often, like your address or a booking link. Say the snippet while dictating, and Redmic types the text in its place.",
           },
         ],
       },
-      { type: "button", link: { label: "Open Murmur", href: openLink(context) } },
+      { type: "button", link: { label: "Open Redmic", href: openLink(context) } },
       {
         type: "tip",
-        text: "Speak two languages? Murmur dictates in up to two and switches between them from the keyboard. Pick them in Settings › Languages.",
+        text: "Speak two languages? Redmic dictates in up to two and switches between them from the keyboard. Pick them in Settings › Languages.",
       },
     ],
   };
@@ -263,7 +263,7 @@ function weekOne(facts: EmailFacts, context: EmailContext): Email {
   if (facts.dictations === 0) {
     return {
       kind: "week_one",
-      subject: "Your first week with Murmur",
+      subject: "Your first week with Redmic",
       preheader: "One dictation is all it takes to see the difference.",
       blocks: [
         ...trialBanner(facts, context),
@@ -271,10 +271,10 @@ function weekOne(facts: EmailFacts, context: EmailContext): Email {
         { type: "paragraph", text: greeting(facts) },
         {
           type: "paragraph",
-          text: "You haven’t dictated with Murmur yet. Give it one minute today: reply to a message by talking instead of typing.",
+          text: "You haven’t dictated with Redmic yet. Give it one minute today: reply to a message by talking instead of typing.",
         },
         { type: "steps", items: FIRST_DICTATION },
-        { type: "button", link: { label: "Open Murmur", href: openLink(context) } },
+        { type: "button", link: { label: "Open Redmic", href: openLink(context) } },
         { type: "paragraph", text: "If something stopped you, reply and tell us what. We’ll help." },
       ],
     };
@@ -282,7 +282,7 @@ function weekOne(facts: EmailFacts, context: EmailContext): Email {
   const saved = minutesSaved(facts.words);
   const stats = [
     { value: facts.words.toLocaleString("en-US"), label: facts.words === 1 ? "word dictated" : "words dictated" },
-    { value: String(facts.daysUsed), label: facts.daysUsed === 1 ? "day with Murmur" : "days with Murmur" },
+    { value: String(facts.daysUsed), label: facts.daysUsed === 1 ? "day with Redmic" : "days with Redmic" },
     { value: plural(facts.longestStreak, "day"), label: "longest streak" },
   ];
   if (saved >= 1) stats.push({ value: `${saved} min`, label: "time saved" });
@@ -296,11 +296,11 @@ function weekOne(facts: EmailFacts, context: EmailContext): Email {
     : [];
   return {
     kind: "week_one",
-    subject: "Your first week with Murmur",
+    subject: "Your first week with Redmic",
     preheader: `${plural(facts.words, "word")} in your first week.`,
     blocks: [
       { type: "heading", text: "Your first week" },
-      { type: "paragraph", text: `${greeting(facts)} here’s your first week with Murmur:` },
+      { type: "paragraph", text: `${greeting(facts)} here’s your first week with Redmic:` },
       { type: "stats", items: stats },
       ...(saved >= 1
         ? [{
@@ -311,13 +311,13 @@ function weekOne(facts: EmailFacts, context: EmailContext): Email {
       ...planLine,
       {
         type: "paragraph",
-        text: "This week, try Murmur in one app you haven’t used it in yet. Long emails and notes to yourself are good places to start.",
+        text: "This week, try Redmic in one app you haven’t used it in yet. Long emails and notes to yourself are good places to start.",
       },
       {
         type: "button",
         link: facts.plan.kind === "trial"
-          ? { label: "See Murmur Pro", href: openLink(context, "pro") }
-          : { label: "Open Murmur", href: openLink(context) },
+          ? { label: "See Redmic Pro", href: openLink(context, "pro") }
+          : { label: "Open Redmic", href: openLink(context) },
       },
     ],
   };
@@ -326,7 +326,7 @@ function weekOne(facts: EmailFacts, context: EmailContext): Email {
 function beyond(facts: EmailFacts, context: EmailContext): Email {
   return {
     kind: "beyond",
-    subject: "Murmur without the keyboard",
+    subject: "Redmic without the keyboard",
     preheader: "Notes, the Action Button and Siri.",
     blocks: [
       ...trialBanner(facts, context),
@@ -341,12 +341,12 @@ function beyond(facts: EmailFacts, context: EmailContext): Email {
           },
           {
             title: "Action Button",
-            text: "On an iPhone with an Action Button, open Settings › Action Button, choose Shortcut, then Murmur’s Dictate. One press and you’re talking.",
+            text: "On an iPhone with an Action Button, open Settings › Action Button, choose Shortcut, then Redmic’s Dictate. One press and you’re talking.",
           },
-          { title: "Siri", text: "Say “Dictate with Murmur” or “New Murmur note”." },
+          { title: "Siri", text: "Say “Dictate with Redmic” or “New Redmic note”." },
         ],
       },
-      { type: "button", link: { label: "Open Murmur", href: openLink(context) } },
+      { type: "button", link: { label: "Open Redmic", href: openLink(context) } },
     ],
   };
 }
@@ -355,9 +355,9 @@ function score(_facts: EmailFacts, context: EmailContext): Email {
   return {
     kind: "score",
     subject: "One quick question",
-    preheader: "How likely are you to recommend Murmur to a friend?",
+    preheader: "How likely are you to recommend Redmic to a friend?",
     blocks: [
-      { type: "heading", text: "How likely are you to recommend Murmur to a friend?" },
+      { type: "heading", text: "How likely are you to recommend Redmic to a friend?" },
       { type: "paragraph", text: "Tap a number. It takes a second, and it tells us what to fix next." },
       {
         type: "scale",
@@ -380,14 +380,14 @@ function trialEnding(facts: EmailFacts, context: EmailContext): Email {
       { type: "paragraph", text: greeting(facts) },
       {
         type: "paragraph",
-        text: "Your free Murmur Pro trial ends within the next day. There’s nothing to cancel and nothing to pay: if you do nothing, your account moves to Basic.",
+        text: "Your free Redmic Pro trial ends within the next day. There’s nothing to cancel and nothing to pay: if you do nothing, your account moves to Basic.",
       },
       {
         type: "cards",
         items: [
           { title: "Basic, free", text: "1,000 words of dictation a week. They come back every week." },
           {
-            title: "Murmur Pro",
+            title: "Redmic Pro",
             text: "Unlimited words, every week, and translate and polish as much as you like.",
           },
           {
@@ -426,6 +426,8 @@ export function buildEmail(kind: Kind, facts: EmailFacts, context: EmailContext)
 
 const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif";
 const INK = "#0D0D0D";
+// The logo's red: the mark's dot and the r and m of "redmic" (#FF5247 in dark mode, by class).
+const RED = "#D92D20";
 const SECOND = "#5D5D5D";
 const THIRD = "#6B6B6B";
 const FILL = "#F4F4F4";
@@ -572,8 +574,8 @@ function blockText(block: Block): string {
 
 function footerLines(context: EmailContext): string[] {
   return [
-    "You’re getting this because you created a Murmur account.",
-    ["Murmur · OKNENOR L.L.C-FZ", context.postalAddress].filter(Boolean).join(" · "),
+    "You’re getting this because you created a Redmic account.",
+    ["Redmic · OKNENOR L.L.C-FZ", context.postalAddress].filter(Boolean).join(" · "),
   ];
 }
 
@@ -607,7 +609,8 @@ export function renderEmail(email: Email, context: EmailContext): RenderedEmail 
     .m-ink { color: #FFFFFF !important; }
     .m-line { border-color: #3A3A3C !important; }
     .m-ring { border-color: #FFFFFF !important; }
-    .m-dot { background-color: #FFFFFF !important; }
+    .m-dot { background-color: #FF5247 !important; }
+    .m-red { color: #FF5247 !important; }
     .m-button { background-color: #FFFFFF !important; }
     .m-button-text { color: #0D0D0D !important; }
   }
@@ -625,10 +628,10 @@ export function renderEmail(email: Email, context: EmailContext): RenderedEmail 
               <tr>
                 <td valign="middle" style="padding:0 8px 0 0;">
                   <div class="m-ring" style="width:16px;height:16px;border:2px solid ${INK};border-radius:50%;">
-                    <div class="m-dot" style="width:8px;height:8px;margin:4px;border-radius:50%;background-color:${INK};font-size:0;line-height:0;">&nbsp;</div>
+                    <div class="m-dot" style="width:8px;height:8px;margin:4px;border-radius:50%;background-color:${RED};font-size:0;line-height:0;">&nbsp;</div>
                   </div>
                 </td>
-                <td valign="middle" class="m-ink" style="font-family:${FONT};font-size:20px;line-height:20px;font-weight:600;letter-spacing:-0.4px;color:${INK};">murmur</td>
+                <td valign="middle" class="m-ink" style="font-family:${FONT};font-size:20px;line-height:20px;font-weight:600;letter-spacing:-0.4px;color:${INK};"><span class="m-red" style="color:${RED};">r</span>ed<span class="m-red" style="color:${RED};">m</span>ic</td>
               </tr>
             </table>
           </td>

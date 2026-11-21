@@ -3,8 +3,8 @@ import Foundation
 
 /// "New Murmur Note": Notes on a new note, optionally dictating into it.
 struct NewNoteIntent: AppIntent {
-    static let title: LocalizedStringResource = "New Murmur Note"
-    static let description = IntentDescription("Opens Murmur on a new note.")
+    static let title: LocalizedStringResource = "New Redmic Note"
+    static let description = IntentDescription("Opens Redmic on a new note.")
     static let supportedModes: IntentModes = .foreground(.immediate)
 
     @Parameter(title: "Start Dictating", default: false)

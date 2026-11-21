@@ -68,15 +68,15 @@ enum AIConsentCopy {
         var id: String { title }
     }
 
-    static let title = "Before Murmur listens"
-    static let line = "Murmur writes what you say with two AI services. Here’s what each one gets."
+    static let title = "Before Redmic listens"
+    static let line = "Redmic writes what you say with two AI services. Here’s what each one gets."
     static let points = [
         Point(symbol: "waveform", title: "OpenAI gets your recording",
               detail: "It turns what you said into text."),
         Point(symbol: "text.alignleft", title: "Anthropic gets the text",
               detail: "When it needs tidying or translating, Claude rewrites it."),
         Point(symbol: "hand.raised", title: "Only to write your text",
-              detail: "Neither service trains its models on your recordings or text, and Murmur’s servers don’t keep them."),
+              detail: "Neither service trains its models on your recordings or text, and Redmic’s servers don’t keep them."),
     ]
     static let allow = "Allow"
     static let notNow = "Not now"
@@ -85,7 +85,7 @@ enum AIConsentCopy {
 
     /// Settings' switch for the same permission.
     static let settingTitle = "Write with AI services"
-    static let settingDetail = "Send your recordings to OpenAI and their text to Anthropic, which write what you say. Murmur can’t dictate without them."
+    static let settingDetail = "Send your recordings to OpenAI and their text to Anthropic, which write what you say. Redmic can’t dictate without them."
 }
 
 /// The question, in a window of its own above whatever is on screen: a sheet, the paywall,

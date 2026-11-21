@@ -1,4 +1,5 @@
 import AppKit
+import MurmurBrand
 import MurmurCore
 import SwiftUI
 
@@ -106,12 +107,12 @@ struct OnboardingWindow: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 MarkView(size: 24)
-                Text("murmur").font(.system(size: 22, weight: .semibold)).tracking(-0.5)
+                wordmarkName().font(.system(size: 22, weight: .semibold)).tracking(-0.5)
             }
             Text("Talk instead of typing.")
                 .font(.system(size: 40, weight: .bold)).tracking(-1.2)
                 .padding(.top, 28).padding(.bottom, 14)
-            Text("Murmur writes what you say into any app on your Mac. Hold \(keyName), talk, and let go.")
+            Text("Redmic writes what you say into any app on your Mac. Hold \(keyName), talk, and let go.")
                 .font(.system(size: 16)).foregroundStyle(Mac.Palette.second).lineSpacing(4)
             Spacer(minLength: 20)
             Button { step = model.isSignedIn ? .permissions : .signIn } label: {
@@ -119,7 +120,7 @@ struct OnboardingWindow: View {
             }
             .buttonStyle(InkButtonStyle(height: 44))
             .font(.system(size: 15, weight: .semibold))
-            Text("Use Murmur on your iPhone? Sign in with the same account and your words come with you.")
+            Text("Use Redmic on your iPhone? Sign in with the same account and your words come with you.")
                 .font(Mac.Font.small).foregroundStyle(Mac.Palette.third)
                 .multilineTextAlignment(.center).frame(maxWidth: .infinity)
                 .padding(.top, 14)
@@ -170,7 +171,7 @@ struct OnboardingWindow: View {
     private var permissions: some View {
         VStack(alignment: .leading, spacing: 0) {
             title("Two permissions")
-            lede("Murmur needs to hear you and to type for you. The mic only opens while you hold the key.")
+            lede("Redmic needs to hear you and to type for you. The mic only opens while you hold the key.")
                 .padding(.bottom, 22)
             VStack(spacing: 0) {
                 permissionRow(symbol: "mic", title: "Microphone", detail: "To hear you while you hold the key",
@@ -209,8 +210,8 @@ struct OnboardingWindow: View {
         VStack(alignment: .leading, spacing: 0) {
             title("Hold \(keyName) to talk")
             lede(MacSettings.shared.trigger == .function
-                 ? "The fn key is bottom left on your keyboard. Murmur listens while you hold it and writes when you let go. Try it now: hold fn, or press and hold the key on the right."
-                 : "Murmur listens while you hold \(MacSettings.shared.trigger.name) and writes when you let go. Try it now, or press and hold the key on the right.")
+                 ? "The fn key is bottom left on your keyboard. Redmic listens while you hold it and writes when you let go. Try it now: hold fn, or press and hold the key on the right."
+                 : "Redmic listens while you hold \(MacSettings.shared.trigger.name) and writes when you let go. Try it now, or press and hold the key on the right.")
                 .padding(.bottom, 18)
             if showKeys {
                 FlowChips(selection: Binding(get: { MacSettings.shared.trigger },
@@ -263,7 +264,7 @@ struct OnboardingWindow: View {
         VStack(alignment: .leading, spacing: 0) {
             MarkView(size: 40)
             title("You’re set").padding(.top, 22)
-            lede("Murmur lives in the menu bar. Hold \(keyName) in any app and talk.").padding(.bottom, 22)
+            lede("Redmic lives in the menu bar. Hold \(keyName) in any app and talk.").padding(.bottom, 22)
             VStack(spacing: 0) {
                 shortcutLine(caps: MacSettings.shared.trigger.caps, prefix: nil, text: "Hold to talk, let go to write", first: true)
                 if MacSettings.shared.handsFree {
@@ -279,7 +280,7 @@ struct OnboardingWindow: View {
             HStack(spacing: 10) {
                 Button { finish(openMain: false) } label: { Text("Close").frame(maxWidth: .infinity) }
                     .buttonStyle(OutlineButtonStyle(height: 44))
-                Button { finish(openMain: true) } label: { Text("Open Murmur").frame(maxWidth: .infinity) }
+                Button { finish(openMain: true) } label: { Text("Open Redmic").frame(maxWidth: .infinity) }
                     .buttonStyle(InkButtonStyle(height: 44))
             }
         }

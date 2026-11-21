@@ -13,7 +13,7 @@ struct KeyboardMenuPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if !model.hasFullAccess {
-                    Text("Turn on Allow Full Access in Settings › Murmur › Keyboards to change these.")
+                    Text("Turn on Allow Full Access in Settings › Redmic › Keyboards to change these.")
                         .font(.system(size: 12.5))
                         .foregroundStyle(KeyboardChrome.muted)
                         .padding(.horizontal, 4)

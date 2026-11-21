@@ -124,7 +124,7 @@ final class MacAudioCapture: @unchecked Sendable {
         case noInput
 
         var errorDescription: String? {
-            "Murmur can't find a microphone. Check Sound settings, or pick one in Murmur's settings."
+            "Redmic can't find a microphone. Check Sound settings, or pick one in Redmic's settings."
         }
     }
 }

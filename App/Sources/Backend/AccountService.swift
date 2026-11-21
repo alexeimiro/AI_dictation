@@ -180,7 +180,7 @@ final class AccountService: StyleRemote {
             case .alreadyRedeemed: "You've already used an invite code."
             case .tooLate: "Invite codes work within 14 days of creating your account."
             case .signInRequired: "Sign in to use an invite code."
-            case .deviceUsed: "Invite codes work for an iPhone’s first Murmur account. This iPhone has already had its free trial."
+            case .deviceUsed: "Invite codes work for an iPhone’s first Redmic account. This iPhone has already had its free trial."
             case .deviceCheckRequired: "Couldn’t check this iPhone yet. Try again in a minute."
             }
         }

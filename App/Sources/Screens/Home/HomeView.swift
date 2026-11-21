@@ -19,7 +19,7 @@ struct HomeView: View {
             notices
             if records.isEmpty {
                 EmptyState("Nothing dictated yet",
-                           message: "What you dictate shows up here. Open a text field, switch to Murmur and tap the mic.")
+                           message: "What you dictate shows up here. Open a text field, switch to Redmic and tap the mic.")
                     .padding(.vertical, 56)
                     .plainListRow()
             } else {
@@ -97,7 +97,7 @@ struct HomeView: View {
             if !model.setup.isComplete, records.isEmpty {
                 SetupChecklistCard()
             } else {
-                TipCard(title: "Try Murmur where you write", message: "A to-do list, a message or an email. Pick one.",
+                TipCard(title: "Try Redmic where you write", message: "A to-do list, a message or an email. Pick one.",
                         action: "Try it", dismissedKey: "intro.home.dismissed") { tryingIt = true }
             }
         }
@@ -177,7 +177,7 @@ struct HomeView: View {
 
     private func insertViaKeyboard(_ transcript: Transcript) {
         toast = model.insertViaKeyboard(transcript.id)
-            ? "Switch to the Murmur keyboard and tap “Insert last dictation”"
+            ? "Switch to the Redmic keyboard and tap “Insert last dictation”"
             : "Couldn’t hand this to the keyboard"
     }
 
@@ -207,11 +207,11 @@ struct SessionBar: View {
             .disabled(phase == .starting)
             // One switch for VoiceOver, as it was in the top bar.
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Murmur is on")
+            .accessibilityLabel("Redmic is on")
             .accessibilityValue(isOn ? "On" : "Off")
             .accessibilityAddTraits([.isButton, .isToggle])
             .accessibilityHint(Self.title(for: phase))
-            .accessibilityInputLabels(isOn ? ["Turn off Murmur", "Stop"] : ["Start Murmur", "Start"])
+            .accessibilityInputLabels(isOn ? ["Turn off Redmic", "Stop"] : ["Start Redmic", "Start"])
             .accessibilityAction { toggle() }
             .accessibilityIdentifier(AccessibilityID.sessionControl)
             .sensoryFeedback(.selection, trigger: isOn)
@@ -225,7 +225,7 @@ struct SessionBar: View {
                 HStack(spacing: 10) {
                     BrandMark(ring: Theme.onInk)
                         .frame(width: 22, height: 22)
-                    Text("Start Murmur")
+                    Text("Start Redmic")
                 }
             }
             .buttonStyle(.murmur(.primary))
@@ -294,12 +294,12 @@ struct SessionBar: View {
 
     static func title(for phase: SessionController.Phase) -> String {
         switch phase {
-        case .off: "Murmur is off"
+        case .off: "Redmic is off"
         case .starting: "Turning on…"
-        case .ready: "Murmur is on"
+        case .ready: "Redmic is on"
         case .recording: "Listening"
         case .processing: "Writing…"
-        case .needsReconnect: "Murmur lost the microphone"
+        case .needsReconnect: "Redmic lost the microphone"
         case .failed: "Couldn’t start"
         }
     }
@@ -408,7 +408,7 @@ struct SetupChecklistCard: View {
                 .font(.murmur(.headline))
                 .foregroundStyle(Theme.ink)
             VStack(alignment: .leading, spacing: 12) {
-                step("Add the Murmur keyboard", done: model.setup.keyboardAdded)
+                step("Add the Redmic keyboard", done: model.setup.keyboardAdded)
                 step("Allow Full Access", done: model.setup.fullAccessConfirmed)
                 step("Allow the microphone", done: model.setup.microphone == .granted)
             }

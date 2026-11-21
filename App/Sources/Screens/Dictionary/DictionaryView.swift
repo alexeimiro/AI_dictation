@@ -16,12 +16,12 @@ struct DictionaryView: View {
                     .padding(.top, 6)
                     .padding(.bottom, 14)
                     .accessibilityIdentifier(AccessibilityID.screen("dictionary"))
-                TipCard(title: "Teach Murmur your words",
-                        message: "Names, product terms, jargon. Add a word once and Murmur spells it right.",
+                TipCard(title: "Teach Redmic your words",
+                        message: "Names, product terms, jargon. Add a word once and Redmic spells it right.",
                         action: "Add a word", dismissedKey: "intro.dictionary.dismissed") { editing = .new }
                 if entries.isEmpty {
                     EmptyState("No words yet",
-                               message: "Add a name Murmur keeps getting wrong, or a replacement like btw → by the way.")
+                               message: "Add a name Redmic keeps getting wrong, or a replacement like btw → by the way.")
                         .padding(.vertical, 48)
                 } else {
                     SectionLabel("Your words (\(entries.count))")
@@ -135,7 +135,7 @@ struct DictionaryEditor: View {
                         .overlay(alignment: .bottom) { Hairline() }
                     if correctsMisspelling {
                         LabeledField("Misspelling") {
-                            TextField("What Murmur writes, e.g. btw", text: $misspelling)
+                            TextField("What Redmic writes, e.g. btw", text: $misspelling)
                                 .focused($focused, equals: .misspelling)
                         }
                         LabeledField("Correct spelling") {

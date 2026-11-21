@@ -98,7 +98,7 @@ final class LibrarySync {
             lastError = nil
         } catch {
             logger.error("Sync failed: \(error.localizedDescription, privacy: .public)")
-            lastError = "Couldn't sync. Check your connection; Murmur tries again on its own."
+            lastError = "Couldn't sync. Check your connection; Redmic tries again on its own."
         }
         save()
     }

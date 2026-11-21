@@ -45,6 +45,6 @@
 	<key>NSHumanReadableCopyright</key>
 	<string>© 2026 OKNENOR L.L.C-FZ</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Murmur listens only while you hold your dictation shortcut, then writes what you said.</string>
+	<string>Redmic listens only while you hold your dictation shortcut, then writes what you said.</string>
 </dict>
 </plist>

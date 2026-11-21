@@ -965,14 +965,14 @@ struct SharedSettingsTests {
         #expect(heard.detail == "Try again a little closer.")
         let limit = KeyboardNotice.parts(of: Brand.limitReachedMessage)
         #expect(limit.title == "Dictation limit reached")
-        #expect(limit.detail == "Get unlimited access in Murmur.")
+        #expect(limit.detail == "Get unlimited access in Redmic.")
         let question = KeyboardNotice.parts(of: "Still there? Tap the mic to go on.")
         #expect(question.title == "Still there?")
         #expect(question.detail == "Tap the mic to go on.")
         // One sentence stays whole, with or without its full stop.
         #expect(KeyboardNotice.parts(of: "No internet connection.").title == "No internet connection.")
         #expect(KeyboardNotice.parts(of: "No internet connection.").detail == nil)
-        #expect(KeyboardNotice.parts(of: "  Murmur 1.0 is ready  ").title == "Murmur 1.0 is ready")
+        #expect(KeyboardNotice.parts(of: "  Redmic 1.0 is ready  ").title == "Redmic 1.0 is ready")
     }
 
     @Test func keyboardDemoRoundTripsAndLapses() throws {

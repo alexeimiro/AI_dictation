@@ -34,7 +34,7 @@ struct StopDictationIntent: LiveActivityIntent {
 
 /// Power button: turns the session off and releases the microphone.
 struct EndSessionIntent: LiveActivityIntent {
-    static let title: LocalizedStringResource = "Turn Off Murmur"
+    static let title: LocalizedStringResource = "Turn Off Redmic"
     static let isDiscoverable = false
 
     init() {}

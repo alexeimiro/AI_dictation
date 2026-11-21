@@ -19,7 +19,7 @@ struct HomePage: View {
                 VStack(alignment: .leading, spacing: 18) {
                     Text(greeting).font(Mac.Font.pageTitle).tracking(-0.5)
                     if !model.homeIntroDismissed, search.isEmpty {
-                        IntroCard(title: "Try Murmur in another app",
+                        IntroCard(title: "Try Redmic in another app",
                                   text: "Click into Mail, Slack or any text box. Hold fn and talk, then let go: your words appear where the cursor is.",
                                   dismiss: { model.homeIntroDismissed = true }) {
                             FnKeycap()

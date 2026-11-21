@@ -224,7 +224,7 @@ struct TranscriptDetailView: View {
 
     private func insertViaKeyboard(_ transcript: Transcript) {
         toast = model.insertViaKeyboard(transcript.id)
-            ? "Switch to the Murmur keyboard and tap “Insert last dictation”"
+            ? "Switch to the Redmic keyboard and tap “Insert last dictation”"
             : "Couldn’t hand this to the keyboard"
     }
 }

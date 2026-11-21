@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Murmur's mark, a dot inside a ring (a voice and its echo), as numbers on a 24-unit grid. The
+/// Redmic's mark, the red dot inside a ring (a voice and its echo), as numbers on a 24-unit grid. The
 /// app, the keyboard, the widgets and the icon generator all draw it from here.
 public enum MarkGeometry {
     public static let grid: CGFloat = 24
@@ -42,14 +42,15 @@ public struct LogoMarkShape: Shape {
     }
 }
 
-/// The mark with its dot in a colour of its own: red while the microphone is open.
+/// Redmic's mark: the ring, and the red dot at its centre. `dot` gives the dot another colour, as
+/// the choice markers do (they borrow the mark's shape, not the logo).
 public struct BrandMark: View {
     let ring: Color
     let dot: Color
 
     public init(ring: Color = Theme.ink, dot: Color? = nil) {
         self.ring = ring
-        self.dot = dot ?? ring
+        self.dot = dot ?? Theme.live
     }
 
     public var body: some View {
@@ -78,29 +79,40 @@ struct MarkDotShape: Shape {
     }
 }
 
-/// The mark and the name, lowercase. A logo, not text to read: it doesn't grow with Dynamic Type.
+/// The name as the wordmark sets it: "redmic", lowercase, with its r and m in red (`accent`) and the
+/// other letters in `color`, or in the surrounding foreground style when `color` is nil. One Text,
+/// so the letters keep the font's spacing.
+public func wordmarkName(_ color: Color? = nil, accent: Color = Theme.live) -> Text {
+    func plain(_ letters: String) -> Text {
+        color.map { Text(verbatim: letters).foregroundStyle($0) } ?? Text(verbatim: letters)
+    }
+    let r = Text(verbatim: "r").foregroundStyle(accent), m = Text(verbatim: "m").foregroundStyle(accent)
+    return Text("\(r)\(plain("ed"))\(m)\(plain("ic"))")
+}
+
+/// The mark and the name. A logo, not text to read: it doesn't grow with Dynamic Type.
 public struct Wordmark: View {
     let height: CGFloat
     let color: Color
+    let accent: Color
 
-    public init(height: CGFloat = 34, color: Color = Theme.ink) {
+    public init(height: CGFloat = 34, color: Color = Theme.ink, accent: Color = Theme.live) {
         self.height = height
         self.color = color
+        self.accent = accent
     }
 
     public var body: some View {
         HStack(spacing: height * 0.32) {
-            LogoMarkShape()
-                .fill(color)
+            BrandMark(ring: color, dot: accent)
                 .frame(width: height, height: height)
-            Text(verbatim: "murmur")
+            wordmarkName(color, accent: accent)
                 .font(.system(size: height * 0.92, weight: .semibold))
                 .tracking(-height * 0.02)
-                .foregroundStyle(color)
         }
         .fixedSize()
         .accessibilityElement()
-        .accessibilityLabel("Murmur")
+        .accessibilityLabel("Redmic")
     }
 }
 

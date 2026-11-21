@@ -26,7 +26,7 @@ struct DeepLinkTests {
         #expect(DeepLink(url: Brand.signInURL) == .signIn)
         #expect(DeepLink(url: URL(string: "murmur://sign-in/")!) == .signIn)
         #expect(DeepLink(url: URL(string: "murmur://sign-in/later")!) == nil)
-        #expect(LaunchOptions(arguments: ["Murmur", "-keyboard-demo", "loggedOut"]).keyboardDemo
+        #expect(LaunchOptions(arguments: ["Redmic", "-keyboard-demo", "loggedOut"]).keyboardDemo
                 == KeyboardDemo(state: .loggedOut))
     }
 
@@ -53,12 +53,12 @@ struct DeepLinkTests {
     /// Screenshot runs and UI tests put the line that says how to swipe back under Home's session
     /// bar (DEBUG builds only).
     @Test func parsesTheReturnHint() {
-        #expect(LaunchOptions(arguments: ["Murmur", "-return-hint", "Safari"]).returnHint
+        #expect(LaunchOptions(arguments: ["Redmic", "-return-hint", "Safari"]).returnHint
                 == ReturnHint(appName: "Safari"))
-        #expect(LaunchOptions(arguments: ["Murmur", "-return-hint"]).returnHint == ReturnHint(appName: nil))
-        #expect(LaunchOptions(arguments: ["Murmur", "-return-hint", "-fixtures"]).returnHint
+        #expect(LaunchOptions(arguments: ["Redmic", "-return-hint"]).returnHint == ReturnHint(appName: nil))
+        #expect(LaunchOptions(arguments: ["Redmic", "-return-hint", "-fixtures"]).returnHint
                 == ReturnHint(appName: nil))
-        #expect(LaunchOptions(arguments: ["Murmur"]).returnHint == nil)
+        #expect(LaunchOptions(arguments: ["Redmic"]).returnHint == nil)
     }
 
     /// The keyboard's link came from another app unless Murmur was already on screen at the tap.
@@ -66,7 +66,7 @@ struct DeepLinkTests {
         let tap = Date(timeIntervalSince1970: 1_800_000_000)
         #expect(AppModel.cameFromAnotherApp(activeSince: nil, tappedAt: tap), "still coming to the front")
         #expect(AppModel.cameFromAnotherApp(activeSince: tap.addingTimeInterval(0.4), tappedAt: tap),
-                "the link brought Murmur to the front")
+                "the link brought Redmic to the front")
         #expect(AppModel.cameFromAnotherApp(activeSince: tap.addingTimeInterval(2.5), tappedAt: tap),
                 "a slow launch")
         #expect(!AppModel.cameFromAnotherApp(activeSince: tap.addingTimeInterval(-0.5), tappedAt: tap),
@@ -109,7 +109,7 @@ struct DeepLinkTests {
 
         // Not known yet: wait for the other word.
         #expect(step(owed(report: nil)) == .keep, "the keyboard is back, but UIKit hasn't said where")
-        #expect(step(owed(back: false)) == .keep, "UIKit says Safari has a keyboard, but Murmur's hasn't said it's back")
+        #expect(step(owed(back: false)) == .keep, "UIKit says Safari has a keyboard, but Redmic's hasn't said it's back")
         #expect(step(owed(onScreen: false)) == .keep, "the keyboard went away in Safari")
         // Murmur still in front: the keyboard is hiding as Murmur opens, or is in one of Murmur's
         // own fields. The user hasn't gone back yet.
@@ -121,7 +121,7 @@ struct DeepLinkTests {
         #expect(step(owed(), after: 45.1, murmurActive: true) == .drop)
         #expect(step(owed(), after: 6, phase: .recording(UUID())) == .drop,
                 "back in time: the keyboard joins the recording itself")
-        #expect(step(owed(), phase: .off) == .drop, "Murmur was turned off meanwhile")
+        #expect(step(owed(), phase: .off) == .drop, "Redmic was turned off meanwhile")
         #expect(step(owed(), phase: .needsReconnect) == .drop)
         #expect(step(owed(), generation: 4) == .drop, "the session stopped since")
         #expect(step(owed(), generation: 5) == .drop, "the session stopped and started again since")
@@ -132,7 +132,7 @@ struct DeepLinkTests {
         let options = LaunchOptions(arguments: ["Murmur", "-route", "debug", "-fixtures"])
         #expect(options.route == .debug)
         #expect(options.useFixtures)
-        #expect(!LaunchOptions(arguments: ["Murmur"]).useFixtures)
+        #expect(!LaunchOptions(arguments: ["Redmic"]).useFixtures)
     }
 
     /// Screenshot runs fake the account and open the sign-in sheet (DEBUG builds only).
@@ -148,16 +148,16 @@ struct DeepLinkTests {
         #expect(account.email == "olga@example.com")
         #expect(options.accountSheet == .options)
         #expect(options.useFixtures)
-        #expect(LaunchOptions(arguments: ["Murmur", "-account-sheet", "email"]).accountSheet == .email)
+        #expect(LaunchOptions(arguments: ["Redmic", "-account-sheet", "email"]).accountSheet == .email)
         // The sheet no longer asks about going on as a guest: its old name opens it plainly.
-        #expect(LaunchOptions(arguments: ["Murmur", "-account-sheet", "guest"]).accountSheet == .options)
-        #expect(LaunchOptions(arguments: ["Murmur", "-account-state", "guest"]).accountState?.account.email == nil)
+        #expect(LaunchOptions(arguments: ["Redmic", "-account-sheet", "guest"]).accountSheet == .options)
+        #expect(LaunchOptions(arguments: ["Redmic", "-account-state", "guest"]).accountState?.account.email == nil)
         let apple = LaunchOptions(arguments: ["Murmur", "-account-state", "guest", "-account-provider", "apple"])
         #expect(apple.accountState?.account.provider == "apple")
-        #expect(LaunchOptions(arguments: ["Murmur", "-account-state", "nope"]).accountState == nil)
+        #expect(LaunchOptions(arguments: ["Redmic", "-account-state", "nope"]).accountState == nil)
         // A signed-in account can't be faked without a session, which Auth would end at launch.
-        #expect(LaunchOptions(arguments: ["Murmur", "-account-state", "signedIn"]).accountState == nil)
-        #expect(LaunchOptions(arguments: ["Murmur"]).accountSheet == nil)
+        #expect(LaunchOptions(arguments: ["Redmic", "-account-state", "signedIn"]).accountState == nil)
+        #expect(LaunchOptions(arguments: ["Redmic"]).accountSheet == nil)
     }
 
     /// Screenshot runs pin the session's phase, so Home shows each state without a microphone
@@ -178,7 +178,7 @@ struct DeepLinkTests {
             Issue.record("failed should pin a failure")
         }
         #expect(fixture("nope") == nil)
-        #expect(LaunchOptions(arguments: ["Murmur"]).sessionFixture == nil)
+        #expect(LaunchOptions(arguments: ["Redmic"]).sessionFixture == nil)
     }
 
     /// Screenshot runs pick the plan and can leave the history empty (DEBUG builds only).
@@ -191,14 +191,14 @@ struct DeepLinkTests {
         #expect(quota("limit")?.remaining == 0)
         #expect(quota("pro")?.chip() == "Pro")
         #expect(quota("nope") == nil)
-        #expect(LaunchOptions(arguments: ["Murmur", "-fixtures"]).quotaFixture == nil)
-        #expect(LaunchOptions(arguments: ["Murmur", "-fixtures", "-history-fixture", "empty"]).emptyHistory)
-        #expect(!LaunchOptions(arguments: ["Murmur", "-fixtures"]).emptyHistory)
-        #expect(LaunchOptions(arguments: ["Murmur", "-fixtures", "-history-fixture", "showcase"]).showcaseHistory)
-        #expect(!LaunchOptions(arguments: ["Murmur", "-fixtures", "-history-fixture", "showcase"]).emptyHistory)
-        #expect(!LaunchOptions(arguments: ["Murmur", "-fixtures"]).showcaseHistory)
-        #expect(LaunchOptions(arguments: ["Murmur", "-fixtures", "-library-fixture", "empty"]).emptyLibrary)
-        #expect(!LaunchOptions(arguments: ["Murmur", "-fixtures"]).emptyLibrary)
+        #expect(LaunchOptions(arguments: ["Redmic", "-fixtures"]).quotaFixture == nil)
+        #expect(LaunchOptions(arguments: ["Redmic", "-fixtures", "-history-fixture", "empty"]).emptyHistory)
+        #expect(!LaunchOptions(arguments: ["Redmic", "-fixtures"]).emptyHistory)
+        #expect(LaunchOptions(arguments: ["Redmic", "-fixtures", "-history-fixture", "showcase"]).showcaseHistory)
+        #expect(!LaunchOptions(arguments: ["Redmic", "-fixtures", "-history-fixture", "showcase"]).emptyHistory)
+        #expect(!LaunchOptions(arguments: ["Redmic", "-fixtures"]).showcaseHistory)
+        #expect(LaunchOptions(arguments: ["Redmic", "-fixtures", "-library-fixture", "empty"]).emptyLibrary)
+        #expect(!LaunchOptions(arguments: ["Redmic", "-fixtures"]).emptyLibrary)
     }
 
     @Test @MainActor func initialPathOpensNestedScreens() {

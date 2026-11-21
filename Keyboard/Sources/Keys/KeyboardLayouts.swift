@@ -53,7 +53,7 @@ struct KeySpec {
 /// on the numbers.
 enum KeyboardLayouts {
     /// The space bar's label.
-    static let spaceTitle = "Murmur"
+    static let spaceTitle = "Redmic"
 
     /// `showsVoicePad` adds a key back to the pad, for the voice layout's full keys.
     static func rows(for plane: KeyboardPlane, shift: ShiftState, showsGlobe: Bool, showsVoicePad: Bool,

@@ -17,7 +17,7 @@ struct SnippetsView: View {
                     .padding(.bottom, 14)
                     .accessibilityIdentifier(AccessibilityID.screen("snippets"))
                 TipCard(title: "Shortcuts for text you repeat",
-                        message: "Your email, an address, a link. Say the snippet’s name and Murmur types the whole thing.",
+                        message: "Your email, an address, a link. Say the snippet’s name and Redmic types the whole thing.",
                         action: "Add a snippet", dismissedKey: "intro.snippets.dismissed") { editing = .new }
                 if snippets.isEmpty {
                     EmptyState("No snippets yet", message: "Try “my email address” → your email.")
@@ -136,7 +136,7 @@ struct SnippetEditor: View {
                                 .padding(.vertical, 6)
                                 .frame(minHeight: 160)
                         }
-                        Text("Say the snippet while dictating, and Murmur types this text in its place.")
+                        Text("Say the snippet while dictating, and Redmic types this text in its place.")
                             .font(.murmur(.footnote))
                             .foregroundStyle(Theme.third)
                     }

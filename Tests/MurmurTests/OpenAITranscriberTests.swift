@@ -1066,7 +1066,7 @@ struct OpenAITranscriberTests {
         #expect(transcriber.takeTimings()?.cloudFailure == nil)
         #expect(cloud.calls.count == 2)
         #expect(DictationPipeline.transcriptionMessage(for: CloudTranscriptionError.signedOut)
-            == "You're signed out. Open Murmur to sign in again.")
+            == "You're signed out. Open Redmic to sign in again.")
     }
 
     /// With AI cleanup off nothing else asks the cloud, so the refused transcription is the only
@@ -1093,7 +1093,7 @@ struct OpenAITranscriberTests {
 
         #expect(outcome.result.isInsertable)
         #expect(outcome.result.text.localizedCaseInsensitiveContains("recognized on the iphone"))
-        #expect(outcome.result.message == "You're signed out. Open Murmur to sign in again.")
+        #expect(outcome.result.message == "You're signed out. Open Redmic to sign in again.")
         #expect(outcome.timings?.cloudTranscript == false)
     }
 
@@ -1111,7 +1111,7 @@ struct OpenAITranscriberTests {
         feed(transcriber, seconds: 1)
         await #expect(throws: CloudTranscriptionError.limitReached) { try await transcriber.finishUtterance() }
         #expect(DictationPipeline.transcriptionMessage(for: CloudTranscriptionError.limitReached)
-            == "Dictation limit reached. Get unlimited access in Murmur.")
+            == "Dictation limit reached. Get unlimited access in Redmic.")
     }
 
     @Test func measuresTheEncodingAndKeepsTheRequestsTiming() async throws {

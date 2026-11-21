@@ -869,7 +869,7 @@ final class SessionController {
                 let name = requested.localizedName
                 logger.notice("Dictation in \(languageOverride, privacy: .public) requested before its model is ready")
                 rejectDictation(requestId: requestId, documentIdentifier: documentIdentifier, language: languageOverride,
-                                message: "\(name) is still being set up in Murmur. Try again in a moment.")
+                                message: "\(name) is still being set up in Redmic. Try again in a moment.")
                 prepareSecondaryLanguage()
                 return false
             }
@@ -1427,22 +1427,22 @@ final class SessionController {
         if let captureError = error as? AudioCapture.CaptureError { return captureError.localizedDescription }
         let nsError = error as NSError
         if nsError.domain == NSURLErrorDomain {
-            return "Murmur couldn't reach the internet to download the speech model. Check your connection and try again."
+            return "Redmic couldn't reach the internet to download the speech model. Check your connection and try again."
         }
         if nsError.domain == SFSpeechError.errorDomain {
-            return "Speech recognition failed to start (\(nsError.localizedDescription)). Open Murmur › Languages and tap Verify."
+            return "Speech recognition failed to start (\(nsError.localizedDescription)). Open Redmic › Languages and tap Verify."
         }
         if nsError.domain == NSOSStatusErrorDomain {
             switch AVAudioSession.ErrorCode(rawValue: nsError.code) {
             case .insufficientPriority:
                 return "Another app is using the microphone. Finish there, then try again."
             case .cannotStartRecording, .cannotInterruptOthers:
-                return "Couldn't start the microphone. Make sure Murmur is open, then try again."
+                return "Couldn't start the microphone. Make sure Redmic is open, then try again."
             default:
                 return "Couldn't start audio capture. Check that no other app is using the microphone."
             }
         }
-        return "Couldn't start Murmur: \(error.localizedDescription)"
+        return "Couldn't start Redmic: \(error.localizedDescription)"
     }
 
     private func tearDownAudio() {
@@ -1492,11 +1492,11 @@ final class SessionController {
 
         var errorDescription: String? {
             switch self {
-            case .microphoneDenied: "Murmur needs microphone access. Turn it on in Settings › Murmur."
+            case .microphoneDenied: "Redmic needs microphone access. Turn it on in Settings › Redmic."
             // Shown on Home over "Try again", and on the keyboard, whose mic opens Murmur again.
-            case .aiNotAllowed: "Murmur needs your OK to use its AI services. Try again to allow it."
+            case .aiNotAllowed: "Redmic needs your OK to use its AI services. Try again to allow it."
             // Shown on Home over "Sign in"; the keyboard shows "You are logged out" instead.
-            case .signedOut: "You’re signed out. Sign in to dictate with Murmur."
+            case .signedOut: "You’re signed out. Sign in to dictate with Redmic."
             }
         }
     }

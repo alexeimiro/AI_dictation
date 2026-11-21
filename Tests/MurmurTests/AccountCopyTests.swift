@@ -39,7 +39,7 @@ struct AccountCopyTests {
         #expect(SettingsView.accountFooter(phrase: "as olga@example.com", guest: false)
             == "You're signed out. Sign in again as olga@example.com to keep cloud dictation and your plan.")
         let guest = SettingsView.accountFooter(phrase: "with Google as olga@gmail.com", guest: true)
-        #expect(guest == "You're using Murmur as a guest, without your account's plan. Sign in with Google as olga@gmail.com to get it back.")
+        #expect(guest == "You're using Redmic as a guest, without your account's plan. Sign in with Google as olga@gmail.com to get it back.")
         #expect(!guest.localizedCaseInsensitiveContains("free plan"))
         #expect(TrialOfferView.signedOutDetail("with Apple") == "Sign in again with Apple to load your plan.")
         #expect(TrialOfferView.signedOutDetail(nil) == "Sign in again to load your plan.")

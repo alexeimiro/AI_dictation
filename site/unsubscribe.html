@@ -1,5 +1,5 @@
-<h1 id="unsubscribe-title">Unsubscribe from Murmur’s emails?</h1>
-<p id="unsubscribe-line">You’ll stop getting Murmur’s tips and reminders. Sign-in codes still come whenever you ask for one.</p>
+<h1 id="unsubscribe-title">Unsubscribe from Redmic’s emails?</h1>
+<p id="unsubscribe-line">You’ll stop getting Redmic’s tips and reminders. Sign-in codes still come whenever you ask for one.</p>
 <button id="unsubscribe-go" class="button" type="button">Unsubscribe</button>
 <button id="unsubscribe-undo" class="button secondary" type="button" hidden>Subscribe again</button>
 <p id="unsubscribe-error" class="fineprint" hidden></p>
@@ -43,14 +43,14 @@
     go.addEventListener("click", async () => {
       if (!await send("unsubscribe", go)) return;
       title.textContent = "You’re unsubscribed";
-      line.textContent = "You won’t get Murmur’s tips and reminders any more. Sign-in codes still come whenever you ask for one.";
+      line.textContent = "You won’t get Redmic’s tips and reminders any more. Sign-in codes still come whenever you ask for one.";
       go.hidden = true;
       undo.hidden = false;
     });
     undo.addEventListener("click", async () => {
       if (!await send("resubscribe", undo)) return;
       title.textContent = "You’re subscribed again";
-      line.textContent = "Murmur’s tips and reminders will come again.";
+      line.textContent = "Redmic’s tips and reminders will come again.";
       undo.hidden = true;
     });
   })();

@@ -27,7 +27,7 @@ struct ListeningPill: View {
         .frame(width: 228, height: 40)
         .background(Capsule(style: .circular).fill(Mac.Palette.ink))
         .shadow(color: .black.opacity(0.2), radius: 9, y: 6)
-        .accessibilityLabel("Murmur listening")
+        .accessibilityLabel("Redmic listening")
     }
 }
 
@@ -104,7 +104,7 @@ struct AccountPicture: View {
             row("Dictionary", "Your words")
             row("Snippets", "Your shortcuts")
             row("Notes", "On both devices")
-            row("Style", "How Murmur writes")
+            row("Style", "How Redmic writes")
             row("Pro", "If you have it on iPhone", last: true)
         }
         .padding(.horizontal, 20).padding(.vertical, 18)
@@ -153,7 +153,7 @@ struct AccessibilityPicture: View {
                         HStack(spacing: 8) {
                             MarkView(size: 12, color: .white).frame(width: 18, height: 18)
                                 .background(RoundedRectangle(cornerRadius: 5).fill(Mac.Palette.ink))
-                            Text("Murmur").font(.system(size: 12, weight: .semibold))
+                            Text("Redmic").font(.system(size: 12, weight: .semibold))
                             Spacer()
                             miniSwitch(on: granted)
                         }
@@ -178,8 +178,8 @@ struct AccessibilityPicture: View {
             .shadow(color: .black.opacity(0.06), radius: 15, y: 10)
             VStack(alignment: .leading, spacing: 4) {
                 Text("1. Click Open Settings.")
-                Text("2. Turn on Murmur. Your Mac may ask for your password.")
-                Text("3. Come back here. Murmur notices by itself.")
+                Text("2. Turn on Redmic. Your Mac may ask for your password.")
+                Text("3. Come back here. Redmic notices by itself.")
             }
             .font(Mac.Font.small).foregroundStyle(Mac.Palette.second)
             .frame(width: 380, alignment: .leading)
@@ -253,7 +253,7 @@ struct KeyPicture: View {
 
     private var status: String {
         model.shortcutHeld ? "Listening… let go to finish"
-            : model.shortcutTried ? "That’s it. Murmur heard the key." : "Hold the key"
+            : model.shortcutTried ? "That’s it. Redmic heard the key." : "Hold the key"
     }
 }
 
@@ -345,7 +345,7 @@ struct MenuBarPicture: View {
             .overlay(alignment: .bottom) { Rectangle().fill(Color(hex: 0xD8D8D8)).frame(height: 1) }
             callout("In the menu bar", "Style, language, microphone, settings and your last dictation.")
                 .frame(width: 220).offset(x: 248, y: 40)
-            callout("Above the Dock", "The bar shows when Murmur is listening and writing.")
+            callout("Above the Dock", "The bar shows when Redmic is listening and writing.")
                 .frame(width: 230).offset(x: 120, y: 356)
             IdleCapsule().offset(x: 213, y: 510)
             HStack(spacing: 9) {

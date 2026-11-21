@@ -148,7 +148,7 @@ struct PadHint: View {
         case .starting:
             Text("Starting…")
         case .openingApp:
-            Text("Opening Murmur…")
+            Text("Opening Redmic…")
         case .needsReconnect:
             Text("Tap to reconnect")
         default:
@@ -158,7 +158,7 @@ struct PadHint: View {
                     UndoButton(model: model)
                 }
             } else {
-                Text(model.isSessionLive ? "Tap to speak" : "Tap to start Murmur")
+                Text(model.isSessionLive ? "Tap to speak" : "Tap to start Redmic")
             }
         }
     }

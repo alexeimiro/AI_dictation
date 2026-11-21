@@ -1,8 +1,14 @@
-# Murmur
+# Redmic (codename Murmur)
 
 A voice keyboard for iOS. You dictate in any app, OpenAI transcribes the speech, and an OpenAI
-or Claude model (whichever `CLEANUP_MODEL` names) cleans up the text before the keyboard inserts it. "Murmur" is a working name: it is set in
-`Config/Base.xcconfig` and `Brand.swift`.
+or Claude model (whichever `CLEANUP_MODEL` names) cleans up the text before the keyboard inserts it.
+
+The app is called **Redmic** (it was Murmur until November 2026). The name people see is set in
+`Config/Base.xcconfig` (`MURMUR_APP_NAME`), `Brand.swift` and the copy. Everything else keeps
+the codename on purpose: targets, modules and types (`MurmurKit`, `Murmur.xcodeproj`), bundle
+IDs, the App Group, the `murmur://` scheme, Pro's product IDs, the `Murmur` folder in
+Application Support that holds people's history, Logger subsystems, and the simplymurmur.com
+domain. Changing those would break the app on the App Store or lose people's data.
 
 The product plan, decisions, design system and phases are in [docs/PLAN.md](docs/PLAN.md).
 Onboarding is described in [docs/ONBOARDING.md](docs/ONBOARDING.md).

@@ -82,7 +82,7 @@ enum MacFixtures {
         _ = try? library.saveEntry(term: "Anton", misspelling: nil)
         _ = try? library.saveEntry(term: "by the way", misspelling: "btw")
         _ = try? library.saveEntry(term: "Kubernetes", misspelling: "cooper netties")
-        _ = try? library.saveEntry(term: "Murmur", misspelling: nil)
+        _ = try? library.saveEntry(term: "Redmic", misspelling: nil)
         _ = try? library.saveEntry(term: "Сбербанк", misspelling: nil)
         _ = try? library.saveSnippet(trigger: "standup update",
                                      expansion: "Yesterday: shipped the keyboard redesign. Today: Dictionary and Snippets. Blockers: none.")

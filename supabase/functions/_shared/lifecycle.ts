@@ -22,7 +22,7 @@
 //   LIFECYCLE_POSTAL_ADDRESS  the company's postal address for the footer (required for live)
 //   LIFECYCLE_TEST_TO         comma-separated addresses: test mode's accounts, and where previews may go
 //   LIFECYCLE_FOUNDER         the name that signs the day-1 note; without it the team signs it
-//   LIFECYCLE_FROM            default "Murmur <hello@simplymurmur.com>"
+//   LIFECYCLE_FROM            default "Redmic <hello@simplymurmur.com>"
 //   LIFECYCLE_REPLY_TO        default SUPPORT_EMAIL_TO's first address
 //   LIFECYCLE_DAILY_CAP       emails in any 24 hours, default 50 (Resend's free plan: 100 a day,
 //                             shared with the sign-in codes)
@@ -83,7 +83,7 @@ export function lifecycleConfig(env: { get(name: string): string | undefined } =
     start: Number.isFinite(start) ? start : null,
     testTo: addresses(env.get("LIFECYCLE_TEST_TO")),
     apiKey: env.get("RESEND_API_KEY")?.trim() || null,
-    from: optional(env.get("LIFECYCLE_FROM"), 120) ?? "Murmur <hello@simplymurmur.com>",
+    from: optional(env.get("LIFECYCLE_FROM"), 120) ?? "Redmic <hello@simplymurmur.com>",
     replyTo: addresses(env.get("LIFECYCLE_REPLY_TO"))[0] ?? addresses(env.get("SUPPORT_EMAIL_TO"))[0] ?? null,
     founder: optional(env.get("LIFECYCLE_FOUNDER"), 60),
     postalAddress: optional(env.get("LIFECYCLE_POSTAL_ADDRESS"), 200),

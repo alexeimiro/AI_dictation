@@ -3,7 +3,7 @@ import Foundation
 /// Product identity. The display name, URL scheme and App Group come from each target's
 /// Info.plist (set from Config/Base.xcconfig), so renaming the app is a config change.
 public enum Brand {
-    public static let name = "Murmur"
+    public static let name = "Redmic"
 
     public static var urlScheme: String {
         infoValue("MurmurURLScheme") ?? "murmur"
@@ -48,7 +48,7 @@ public enum Brand {
     }
 
     /// What a dictation past Basic's weekly words says; the keyboard turns it into a way to Pro.
-    public static let limitReachedMessage = "Dictation limit reached. Get unlimited access in Murmur."
+    public static let limitReachedMessage = "Dictation limit reached. Get unlimited access in Redmic."
 
     /// Linked from the sign-in screen; nil until `MURMUR_TERMS_URL` / `MURMUR_PRIVACY_URL` are set.
     public static var termsURL: URL? {

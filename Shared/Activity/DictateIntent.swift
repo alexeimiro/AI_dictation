@@ -10,9 +10,9 @@ import Foundation
 /// next press stops it, without leaving the app you're writing in. Otherwise Murmur opens on a new
 /// note and dictates into it.
 struct DictateIntent: AudioRecordingIntent {
-    static let title: LocalizedStringResource = "Dictate with Murmur"
+    static let title: LocalizedStringResource = "Dictate with Redmic"
     static let description = IntentDescription(
-        "Starts a dictation, or stops the one in progress. With the Murmur keyboard open, the text is typed where you're writing; otherwise Murmur opens a new note.")
+        "Starts a dictation, or stops the one in progress. With the Redmic keyboard open, the text is typed where you're writing; otherwise Redmic opens a new note.")
     static let supportedModes: IntentModes = [.background, .foreground(.dynamic)]
 
     init() {}

@@ -1113,7 +1113,7 @@ struct KeyboardSessionClientTests {
     /// to that dictation does, when it notices that the app stopped answering, and only its own
     /// dictation's.
     @Test func aPreviewTheAppLeftBehindIsRemovedWhenItStopsAnswering() async throws {
-        let notice = KeyboardSessionClient.Phase.notice("Murmur stopped listening. Tap the mic to start again.")
+        let notice = KeyboardSessionClient.Phase.notice("Redmic stopped listening. Tap the mic to start again.")
 
         let listening = try await listen(previews: true, staleAfter: 0.2)
         let (transport, app, client, id) = (listening.transport, listening.app, listening.client, listening.id)
@@ -1196,7 +1196,7 @@ struct KeyboardSessionClientTests {
         if case .listening(id, _) = client.phase {} else { Issue.record("expected .listening, got \(client.phase)") }
         #expect(await waitUntil {
             if let text = client.livePreview?.text { shown.insert(text) }
-            return client.phase == .notice("Murmur stopped listening. Tap the mic to start again.")
+            return client.phase == .notice("Redmic stopped listening. Tap the mic to start again.")
         })
         #expect(shown == [""], "words of a dictation whose app is gone were shown")
         #expect(transport.payloads.readLivePreview() == nil)
@@ -1249,7 +1249,7 @@ struct KeyboardSessionClientTests {
         if case .listening(id, _) = client.phase {} else { Issue.record("expected .listening, got \(client.phase)") }
         #expect(await waitUntil {
             if let text = client.livePreview?.text { shown.insert(text) }
-            return client.phase == .notice("Murmur stopped listening. Tap the mic to start again.")
+            return client.phase == .notice("Redmic stopped listening. Tap the mic to start again.")
         })
         #expect(shown == [""], "words of a dictation whose app is gone were shown")
         #expect(transport.payloads.readLivePreview() == nil)
@@ -1692,8 +1692,8 @@ struct KeyboardSessionClientTests {
         #expect(app.autoStart() == id)
         #expect(await waitUntil { client.phase.isListening(to: id) })
         app.publish(.recording, tag: id.tag16)
-        try app.say(id, "said under Murmur")
-        #expect(await waitUntil { client.livePreview?.settled == "said under Murmur" })
+        try app.say(id, "said under Redmic")
+        #expect(await waitUntil { client.livePreview?.settled == "said under Redmic" })
         #expect(field.text == "Hi. ")
         #expect(!typing.isTyping(id))
         #expect(log.lines == ["start tap", "start attach"])
@@ -1702,17 +1702,17 @@ struct KeyboardSessionClientTests {
         clock.pass(2)
         client.activate()
         app.publish(.recording, tag: id.tag16)
-        try app.say(id, "said under Murmur and after")
-        #expect(await waitUntil { client.livePreview?.settled == "said under Murmur and after" })
+        try app.say(id, "said under Redmic and after")
+        #expect(await waitUntil { client.livePreview?.settled == "said under Redmic and after" })
         clock.pass(2)
         #expect(await theLoopLooked(since: clock.now, on: transport))
         #expect(field.text == "Hi. " && field.insertions.isEmpty)
         #expect(log.lines == ["start tap", "start attach", "typing not armed: left the screen"])
 
         client.stopTapped()
-        try app.finish(id, text: "Said under Murmur and after.", document: nil)
+        try app.finish(id, text: "Said under Redmic and after.", document: nil)
         #expect(await waitUntil { host.inserted.count == 1 })
-        #expect(field.text == "Hi. Said under Murmur and after.")
+        #expect(field.text == "Hi. Said under Redmic and after.")
         #expect(field.deletions == 0)
     }
 
@@ -2872,7 +2872,7 @@ struct KeyboardSessionClientTests {
             return field.text == "Hi. so i was thinking"
         })
         // From here the app publishes nothing more.
-        #expect(await waitUntil { client.phase == .notice("Murmur stopped listening. Tap the mic to start again.") })
+        #expect(await waitUntil { client.phase == .notice("Redmic stopped listening. Tap the mic to start again.") })
         #expect(field.text == "Hi. so i was thinking")
         #expect(live.record?.typed == "so i was thinking")
         #expect(live.typing.typedRequestId == id)

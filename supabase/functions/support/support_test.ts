@@ -16,7 +16,7 @@ import {
 const USER = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 const GUEST: Caller = { userId: "6fa459ea-ee8a-4ca4-894e-db77e160355e", isAnonymous: true };
 const NOW = Date.UTC(2026, 10, 13, 9, 5);
-const CONFIG: MailConfig = { apiKey: "re_test", to: ["help@example.com"], from: "Murmur <no-reply@simplymurmur.com>",
+const CONFIG: MailConfig = { apiKey: "re_test", to: ["help@example.com"], from: "Redmic <no-reply@simplymurmur.com>",
   dailyLimit: 20 };
 const DIAGNOSTICS = { app: "1.0 (202611131200)", os: "iOS 26.1", device: "iPhone", locale: "ru-RU", kind: "issue",
   topic: "Dictation" };
@@ -92,7 +92,7 @@ Deno.test("no key or no address: nothing is emailed", () => {
   assertEquals(mailConfig(new Map([["RESEND_API_KEY", "re_x"]])), null);
   assertEquals(mailConfig(new Map([["RESEND_API_KEY", "re_x"], ["SUPPORT_EMAIL_TO", "not an address"]])), null);
   assertEquals(mailConfig(new Map([["RESEND_API_KEY", "re_x"], ["SUPPORT_EMAIL_TO", " a@example.com, b@example.org "]])),
-    { apiKey: "re_x", to: ["a@example.com", "b@example.org"], from: "Murmur <no-reply@simplymurmur.com>", dailyLimit: 20 });
+    { apiKey: "re_x", to: ["a@example.com", "b@example.org"], from: "Redmic <no-reply@simplymurmur.com>", dailyLimit: 20 });
 });
 
 Deno.test("the daily limit is 20 unless SUPPORT_EMAIL_DAILY_LIMIT is a whole number; 0 emails none", () => {
@@ -125,9 +125,9 @@ Deno.test("a message is saved, answered at once, then emailed with a way to repl
   assertEquals(w.emails.length, 1);
   const email = w.emails[0];
   assertEquals(email.to, ["help@example.com"]);
-  assertEquals(email.from, "Murmur <no-reply@simplymurmur.com>");
+  assertEquals(email.from, "Redmic <no-reply@simplymurmur.com>");
   assertEquals(email.reply_to, "olga@example.com");
-  assertEquals(email.subject, "Murmur issue (Dictation): The mic stops after a minute.");
+  assertEquals(email.subject, "Redmic issue (Dictation): The mic stops after a minute.");
   assert(email.text.startsWith("The mic stops after a minute.\n"));
   assert(email.text.includes(`From: olga@example.com · account ${USER}`));
   assert(email.text.includes("App: 1.0 (202611131200) · iOS 26.1 · iPhone · ru-RU"));
@@ -138,7 +138,7 @@ Deno.test("an account with no email address is emailed without a reply address",
   const w = world({ email: null });
   await send(w, { message: "Love it", diagnostics: { kind: "feedback" } });
   assertEquals(w.emails[0].reply_to, undefined);
-  assertEquals(w.emails[0].subject, "Murmur feedback: Love it");
+  assertEquals(w.emails[0].subject, "Redmic feedback: Love it");
   assert(w.emails[0].text.includes("From: an account with no email address"));
   assert(!w.emails[0].text.includes("Reply to this email"));
 });
@@ -202,9 +202,9 @@ Deno.test("refused requests save nothing and email nothing", async () => {
 Deno.test("the subject is one clean line, whatever the message holds", () => {
   const email = supportEmail({ message: "\n\nFirst line\u0007 here\nsecond line", diagnostics: { topic: "Key\nboard" } },
     { id: USER, email: null }, CONFIG, NOW);
-  assertEquals(email.subject, "Murmur issue (Key): First line here");
+  assertEquals(email.subject, "Redmic issue (Key): First line here");
   const long = supportEmail({ message: "w".repeat(100), diagnostics: {} }, { id: USER, email: null }, CONFIG, NOW);
-  assertEquals(long.subject, `Murmur issue: ${"w".repeat(59)}…`);
+  assertEquals(long.subject, `Redmic issue: ${"w".repeat(59)}…`);
 });
 
 Deno.test("Resend gets the email as JSON with the key, and a refusal is false", async () => {

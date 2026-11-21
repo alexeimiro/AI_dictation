@@ -14,11 +14,11 @@
       "localizations" : [
         {
           "description" : "Unlimited words, every week",
-          "displayName" : "Murmur Pro",
+          "displayName" : "Redmic Pro",
           "locale" : "en_US"
         }
       ],
-      "name" : "Murmur Pro",
+      "name" : "Redmic Pro",
       "subscriptions" : [
         {
           "adHocOffers" : [],
@@ -31,13 +31,13 @@
           "localizations" : [
             {
               "description" : "Unlimited words, every week, billed yearly",
-              "displayName" : "Murmur Pro Annual",
+              "displayName" : "Redmic Pro Annual",
               "locale" : "en_US"
             }
           ],
           "productID" : "com.antonmironenko.murmur.pro.annual",
           "recurringSubscriptionPeriod" : "P1Y",
-          "referenceName" : "Murmur Pro Annual",
+          "referenceName" : "Redmic Pro Annual",
           "subscriptionGroupID" : "21FA9C70",
           "type" : "RecurringSubscription",
           "winbackOffers" : []
@@ -53,13 +53,13 @@
           "localizations" : [
             {
               "description" : "Unlimited words, every week, billed monthly",
-              "displayName" : "Murmur Pro Monthly",
+              "displayName" : "Redmic Pro Monthly",
               "locale" : "en_US"
             }
           ],
           "productID" : "com.antonmironenko.murmur.pro.monthly",
           "recurringSubscriptionPeriod" : "P1M",
-          "referenceName" : "Murmur Pro Monthly",
+          "referenceName" : "Redmic Pro Monthly",
           "subscriptionGroupID" : "21FA9C70",
           "type" : "RecurringSubscription",
           "winbackOffers" : []

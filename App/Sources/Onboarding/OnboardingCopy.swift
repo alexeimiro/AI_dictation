@@ -18,7 +18,7 @@ enum OnboardingCopy {
         static let talk = "Talk instead of typing."
         static let languages = "Speak your language."
         static let dictionary = "It learns your words."
-        static let line = "Murmur is a keyboard that writes what you say."
+        static let line = "Redmic is a keyboard that writes what you say."
         static let button = "Get started"
 
         /// What the picture's talk button has just heard, page by page.
@@ -29,7 +29,7 @@ enum OnboardingCopy {
         /// The words in `dictionarySample` that came from the dictionary.
         static let dictionaryWords = ["Priya", "Lindqvist"]
         static let dictionaryCaption = "Names from your dictionary"
-        static let picture = "The talk button while Murmur listens"
+        static let picture = "The talk button while Redmic listens"
     }
 
     enum Survey {
@@ -46,7 +46,7 @@ enum OnboardingCopy {
 
     enum Explainer {
         static func title(benefit: String) -> String {
-            "Murmur helps you \(benefit), \(ending)."
+            "Redmic helps you \(benefit), \(ending)."
         }
 
         static let ending = "wherever you write"
@@ -107,16 +107,16 @@ enum OnboardingCopy {
     }
 
     enum Keyboard {
-        static let title = "Turn on Murmur in Settings"
-        static let line = "In Settings, tap Keyboards and turn on Murmur and Allow Full Access."
+        static let title = "Turn on Redmic in Settings"
+        static let line = "In Settings, tap Keyboards and turn on Redmic and Allow Full Access."
         static let keyboards = "Keyboards"
-        static let murmur = "Murmur"
+        static let murmur = "Redmic"
         static let fullAccess = "Allow Full Access"
-        static let picture = "In Settings, open Keyboards, then turn on Murmur and Allow Full Access"
+        static let picture = "In Settings, open Keyboards, then turn on Redmic and Allow Full Access"
         static let added = "Keyboard added"
         static let done = "Done"
         static let notDone = "Not done"
-        static let note = "Full Access lets the keyboard talk to the Murmur app. Murmur never sells what you say."
+        static let note = "Full Access lets the keyboard talk to the Redmic app. Redmic never sells what you say."
         static let button = "Go to Settings"
     }
 
@@ -149,24 +149,24 @@ enum OnboardingCopy {
     enum PracticeIntro {
         static let title = "Now try it."
         static let line = "One short dictation, so you know how it feels."
-        static let button = "Try Murmur"
+        static let button = "Try Redmic"
     }
 
     enum Microphone {
-        static let title = "Murmur needs the microphone"
-        static let line = "It listens only while Murmur is on. Whenever the mic is open, you’ll see the red dot."
-        static let caption = "Red means the microphone is open"
-        static let offTitle = "Turn on the microphone for Murmur"
-        static let deniedLine = "Microphone access is off. Turn it on in Settings › Murmur to dictate."
+        static let title = "Redmic needs the microphone"
+        static let line = "It listens only while Redmic is on. Whenever the mic is open, you’ll see the red dot."
+        static let caption = "A pulsing red dot means the microphone is open"
+        static let offTitle = "Turn on the microphone for Redmic"
+        static let deniedLine = "Microphone access is off. Turn it on in Settings › Redmic to dictate."
         static let restrictedLine = "Microphone access is restricted on this iPhone, so dictation can’t start."
         static let skip = "Skip the exercises"
     }
 
     enum Practice {
-        static let guideTitle = "Hold the globe key, then pick Murmur"
-        static let guidePicture = "The list of keyboards the globe key opens, with Murmur picked"
+        static let guideTitle = "Hold the globe key, then pick Redmic"
+        static let guidePicture = "The list of keyboards the globe key opens, with Redmic picked"
         static let otherKeyboards = ["English", "Emoji"]
-        static let murmurKeyboard = "Murmur"
+        static let murmurKeyboard = "Redmic"
 
         /// The check mark the keyboard's talk button shows follows these words.
         static let basicTitle = "Say anything, then tap"
@@ -175,7 +175,7 @@ enum OnboardingCopy {
         static let basicPrompt = "Your words appear here"
 
         static let emailTitle = "Dictate an email"
-        static let emailLine = "Change your mind halfway. Murmur keeps the last version."
+        static let emailLine = "Change your mind halfway. Redmic keeps the last version."
         static let emailLabel = "Email"
         static let emailPrompt = "Hey Tim, are you available on Friday at 3pm… actually 4pm?"
 
@@ -185,7 +185,7 @@ enum OnboardingCopy {
         static let notePrompt = "Things to do today:\n1. Run the laundry\n2. Buy groceries"
 
         /// After "Not now" to "Before Murmur listens" (`AIConsentCopy`).
-        static let notAllowed = "Murmur writes what you say with its AI services, so the exercises need your OK. You can skip them and try Murmur later."
+        static let notAllowed = "Redmic writes what you say with its AI services, so the exercises need your OK. You can skip them and try Redmic later."
         static let askAgain = "Try again"
         static let skipExercises = "Skip the exercises"
 
@@ -206,7 +206,7 @@ enum OnboardingCopy {
     enum PracticeDone {
         static let title = "That’s it. You’re dictating."
         static let skippedTitle = "Skipped for now."
-        static let skippedLine = "Open any text field and switch to Murmur when you want to try it."
+        static let skippedLine = "Open any text field and switch to Redmic when you want to try it."
         static let spoke = "Spoke"
         static let email = "Dictated an email"
         static let whispered = "Whispered"
@@ -221,14 +221,14 @@ enum OnboardingCopy {
 
     enum DataChoice {
         static let title = "Your words, your call."
-        static let line = "Choose what Murmur may do with your voice and text."
+        static let line = "Choose what Redmic may do with your voice and text."
         // The two options are the consent's wording (`DataChoiceDecision.currentPolicyVersion`).
-        static let improveTitle = "Improve Murmur for everyone"
-        static let improveDetail = "To make Murmur better, this option lets us review your transcripts and edits to improve transcription and cleanup."
+        static let improveTitle = "Improve Redmic for everyone"
+        static let improveDetail = "To make Redmic better, this option lets us review your transcripts and edits to improve transcription and cleanup."
         // Not "Don't share data": a dictation still goes to the AI services that write it, which
         // "Before Murmur listens" (`AIConsentCopy`) asks about. This choice is about Murmur's team.
         static let privateTitle = "Don’t review my dictations"
-        static let privateDetail = "Nobody at Murmur reads your transcripts. They go only to the AI services that write your text, which don’t train on them."
+        static let privateDetail = "Nobody at Redmic reads your transcripts. They go only to the AI services that write your text, which don’t train on them."
     }
 
     enum Languages {
@@ -236,14 +236,14 @@ enum OnboardingCopy {
         static let line = "We picked this from your iPhone’s languages. Add or remove languages if needed."
         static let edit = "Edit"
         static let pickerTitle = "Languages"
-        static let pickerLine = "Murmur dictates in up to two languages and switches between them from the keyboard."
+        static let pickerLine = "Redmic dictates in up to two languages and switches between them from the keyboard."
         static let primary = "Primary"
         static let second = "Second"
         static let done = "Done"
     }
 
     enum Style {
-        static let title = "Pick how Murmur writes"
+        static let title = "Pick how Redmic writes"
         static let line = "You can change it any time from the keyboard."
         static let youSay = "You say"
     }
@@ -254,34 +254,34 @@ enum OnboardingCopy {
         static let benefits = [
             "Tips for faster dictation",
             "News about new features",
-            "A nudge if you forget Murmur is there",
+            "A nudge if you forget Redmic is there",
         ]
         static let allow = "Allow notifications"
         static let later = "Not now"
-        static let sampleSender = "Murmur"
+        static let sampleSender = "Redmic"
         static let sampleTime = "now"
-        static let sampleText = "Tip: say “new paragraph” and Murmur starts one."
-        static let picture = "An example notification from Murmur"
+        static let sampleText = "Tip: say “new paragraph” and Redmic starts one."
+        static let picture = "An example notification from Redmic"
     }
 
     enum Desktop {
-        static let title = "Murmur for Mac and PC is on the way."
+        static let title = "Redmic for Mac and PC is on the way."
         static let line = "Want the link when it’s ready? We’ll email it once."
         static let accept = "Email me the link"
         static let decline = "No thanks"
         static let alertTitle = "Email a link?"
-        static let alertMessage = "We’ll send it when Murmur for desktop is available."
+        static let alertMessage = "We’ll send it when Redmic for desktop is available."
         static let alertField = "Email address"
         static let send = "Send"
         static let cancel = "Cancel"
         static let failed = "Couldn’t save that. Try again, or choose No thanks."
         static let sample = "Running ten minutes late, start without me"
         static let listening = "Listening"
-        static let picture = "Murmur writing what you say on a computer"
+        static let picture = "Redmic writing what you say on a computer"
     }
 
     enum Referral {
-        static let title = "How did you find Murmur?"
+        static let title = "How did you find Redmic?"
         static let detailTitle = "Which search engine?"
         static let xTwitter = "X / Twitter"
         static let searchEngine = "Search engine"
@@ -297,10 +297,10 @@ enum OnboardingCopy {
 
     enum Ready {
         static let title = "You’re set."
-        static let line = "Open any text field, switch to Murmur and talk."
+        static let line = "Open any text field, switch to Redmic and talk."
         static let button = "Start dictating"
         static let caption = "Tap to speak"
-        static let picture = "The talk button on the Murmur keyboard"
+        static let picture = "The talk button on the Redmic keyboard"
     }
 
     enum Offer {
@@ -325,7 +325,7 @@ enum OnboardingCopy {
 
         static let subscriberBadge = "Pro"
         static let subscriberTitle = "You have Pro. Unlimited words."
-        static let subscriberLine = "Your Murmur Pro subscription is active on this account."
+        static let subscriberLine = "Your Redmic Pro subscription is active on this account."
         static let subscriberCaption = "unlimited words"
 
         static let freeBadge = "Basic"

@@ -24,7 +24,7 @@ struct StylePage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                PageHeader(title: "How Murmur writes", lede: "Used for every dictation. Switch any time from the menu bar.")
+                PageHeader(title: "How Redmic writes", lede: "Used for every dictation. Switch any time from the menu bar.")
                 VStack(alignment: .leading, spacing: 3) {
                     SectionLabel(text: "You say")
                     Text(Self.said).font(Mac.Font.body).lineSpacing(3)
@@ -60,7 +60,7 @@ struct StylePage: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(style.title).font(Mac.Font.cardTitle)
                     Text(Self.description(style)).font(Mac.Font.small).foregroundStyle(Mac.Palette.second)
-                    Text("Murmur writes").font(.system(size: 12, weight: .semibold)).foregroundStyle(Mac.Palette.third)
+                    Text("Redmic writes").font(.system(size: 12, weight: .semibold)).foregroundStyle(Mac.Palette.third)
                         .padding(.top, 8)
                     Text(Self.example(style)).font(.system(size: 14)).lineSpacing(3)
                         .fixedSize(horizontal: false, vertical: true)

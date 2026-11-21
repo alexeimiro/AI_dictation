@@ -1,4 +1,5 @@
 import AppKit
+import MurmurBrand
 import MurmurCore
 import SwiftUI
 
@@ -49,7 +50,7 @@ struct PaywallSheet: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 MarkView(size: 22)
-                Text("murmur").font(.system(size: 20, weight: .semibold)).tracking(-0.5)
+                wordmarkName().font(.system(size: 20, weight: .semibold)).tracking(-0.5)
                 Text("Pro").font(.system(size: 12, weight: .bold)).foregroundStyle(.white)
                     .padding(.horizontal, 9).padding(.vertical, 3)
                     .background(Capsule(style: .circular).fill(Mac.Palette.ink))
@@ -106,7 +107,7 @@ struct PaywallSheet: View {
             Spacer()
             Image(systemName: "safari").font(.system(size: 34, weight: .regular))
             Text("Finish in your browser").font(.system(size: 26, weight: .bold)).tracking(-0.6)
-            Text("Checkout is open in your browser. Murmur switches to Pro by itself when you’re done.")
+            Text("Checkout is open in your browser. Redmic switches to Pro by itself when you’re done.")
                 .font(.system(size: 15)).foregroundStyle(Mac.Palette.second).multilineTextAlignment(.center)
             HStack(spacing: 6) {
                 ProgressView().controlSize(.mini)
@@ -169,7 +170,7 @@ struct PaywallSheet: View {
             } catch .notOpenYet {
                 notOpenYet = true
             } catch .signedOut {
-                failure = "Sign in to Murmur first."
+                failure = "Sign in to Redmic first."
             } catch {
                 failure = "Couldn’t open checkout. Check your connection and try again."
             }

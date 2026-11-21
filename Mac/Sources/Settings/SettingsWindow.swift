@@ -136,7 +136,7 @@ struct GeneralSettings: View {
                 }
             }
             SettingsSection("Language") {
-                SettingsRow(title: "Speak", detail: "Murmur works out the language of each dictation", first: true) {
+                SettingsRow(title: "Speak", detail: "Redmic works out the language of each dictation", first: true) {
                     PopupMenu(title: speak.map { DictationLanguage(tag: $0).localizedName } ?? "Auto-detect") {
                         Button("Auto-detect") { setSpeak(nil) }
                         Divider()
@@ -156,7 +156,7 @@ struct GeneralSettings: View {
                 }
             }
             SettingsSection("App") {
-                SettingsRow(title: "Launch at login", detail: "Murmur waits in the menu bar", first: true) {
+                SettingsRow(title: "Launch at login", detail: "Redmic waits in the menu bar", first: true) {
                     Toggle("", isOn: Binding(get: { settings.launchAtLogin }, set: { settings.setLaunchAtLogin($0) }))
                         .toggleStyle(InkToggleStyle()).labelsHidden().fixedSize()
                 }
@@ -280,7 +280,7 @@ struct AccountSettings: View {
                 }
                 SettingsSection("Sync") {
                     SettingsRow(title: "Dictionary, snippets, notes and style",
-                                detail: "The same on this Mac and on Murmur for iPhone", first: true) {
+                                detail: "The same on this Mac and on Redmic for iPhone", first: true) {
                         if syncing {
                             ProgressView().controlSize(.small)
                         } else if synced {
@@ -303,7 +303,7 @@ struct AccountSettings: View {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Delete account").font(.system(size: 14, weight: .semibold))
-                        Text("Deletes your account and everything synced with it, and signs Murmur out on all your devices. It doesn’t cancel a subscription: cancel Pro first.")
+                        Text("Deletes your account and everything synced with it, and signs Redmic out on all your devices. It doesn’t cancel a subscription: cancel Pro first.")
                             .font(Mac.Font.caption).foregroundStyle(Mac.Palette.third)
                             .fixedSize(horizontal: false, vertical: true)
                         if let deleteError { Text(deleteError).font(Mac.Font.caption).padding(.top, 4) }
@@ -317,7 +317,7 @@ struct AccountSettings: View {
                 SignedOutPanel(model: model)
             }
         }
-        .confirmationDialog("Delete your Murmur account?", isPresented: $confirmDelete) {
+        .confirmationDialog("Delete your Redmic account?", isPresented: $confirmDelete) {
             Button("Delete account", role: .destructive) { delete() }
         } message: {
             Text("Your dictionary, snippets, notes and style are deleted from every device. This can’t be undone.")
@@ -351,7 +351,7 @@ struct SignedOutPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Sign in to Murmur").font(Mac.Font.cardTitle)
+            Text("Sign in to Redmic").font(Mac.Font.cardTitle)
             Text("Use the account you use on your iPhone, so your words, snippets, notes and Pro come with you.")
                 .font(Mac.Font.small).foregroundStyle(Mac.Palette.second)
             Button { Task { await model.signInWithApple() } } label: {
@@ -407,7 +407,7 @@ struct PlanSettings: View {
                 planCard(name: "Basic", price: "Free", lines: ["1,000 words a week", "Dictionary, snippets and notes", "On your Mac and iPhone"], pro: false)
                 planCard(name: "Pro", price: "$9.99", lines: ["Unlimited words, every week", "Translate and polish as much as you like", "Command mode in any app"], pro: true)
             }
-            Text("Pro belongs to your Murmur account, so it works on your Mac and your iPhone. Bought Pro on your iPhone? It’s already on here.")
+            Text("Pro belongs to your Redmic account, so it works on your Mac and your iPhone. Bought Pro on your iPhone? It’s already on here.")
                 .font(Mac.Font.small).foregroundStyle(Mac.Palette.second)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(alignment: .center, spacing: 12) {
@@ -512,7 +512,7 @@ struct PrivacySettings: View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsSection("AI") {
                 SettingsRow(title: "Write with AI services",
-                            detail: "Send your recordings to OpenAI and their text to Anthropic, which write what you say. Murmur can’t dictate without them.",
+                            detail: "Send your recordings to OpenAI and their text to Anthropic, which write what you say. Redmic can’t dictate without them.",
                             first: true) {
                     Toggle("", isOn: Binding(get: { consent }, set: { on in
                         consent = on
@@ -525,7 +525,7 @@ struct PrivacySettings: View {
                     .toggleStyle(InkToggleStyle()).labelsHidden().fixedSize()
                 }
                 if !consent {
-                    Text("With this off, Murmur asks again before your next dictation.")
+                    Text("With this off, Redmic asks again before your next dictation.")
                         .font(Mac.Font.caption).foregroundStyle(Mac.Palette.second)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14).padding(.vertical, 10)

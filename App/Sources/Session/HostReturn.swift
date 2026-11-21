@@ -148,7 +148,7 @@ enum ReturnOutcome: Equatable {
         case .couldNotOpen(let app): "\(app): couldn't open it"
         case .notRecording: "The microphone is on, but that dictation isn't recording"
         case .sessionOff: "The session isn't on"
-        case .left: "Murmur was left first, or a newer start took over"
+        case .left: "Redmic was left first, or a newer start took over"
         }
     }
 

@@ -15,7 +15,7 @@ struct StyleView: View {
         @Bindable var settings = model.settings
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                ScreenTitle("How Murmur writes")
+                ScreenTitle("How Redmic writes")
                     .padding(.top, 6)
                     .accessibilityIdentifier(AccessibilityID.screen("style"))
                 Text("Used for every dictation. You can switch from the keyboard any time.")
@@ -83,7 +83,7 @@ struct StyleCard: View {
                     Text(style.subtitle)
                         .font(.murmur(.subhead))
                         .foregroundStyle(Theme.second)
-                    Text("Murmur writes")
+                    Text("Redmic writes")
                         .font(.murmur(.footnote, weight: .semibold))
                         .foregroundStyle(Theme.third)
                         .padding(.top, 10)

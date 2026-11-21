@@ -28,13 +28,14 @@ extension BrandRGB {
     var cgColor: CGColor { CGColor(srgbRed: red, green: green, blue: blue, alpha: opacity) }
 }
 
-/// Draws the mark, a dot inside a ring, centred in `rect`.
-func drawMark(_ context: CGContext, in rect: CGRect, color: BrandRGB) {
+/// Draws the mark, a dot inside a ring, centred in `rect`. The dot is red (`dot`) except where only
+/// greys may be used.
+func drawMark(_ context: CGContext, in rect: CGRect, color: BrandRGB, dot: BrandRGB? = nil) {
     let ring = MarkGeometry.ring(in: rect)
     context.setStrokeColor(color.cgColor)
     context.setLineWidth(ring.lineWidth)
     context.strokeEllipse(in: ring.rect)
-    context.setFillColor(color.cgColor)
+    context.setFillColor((dot ?? color).cgColor)
     context.fillEllipse(in: MarkGeometry.dot(in: rect))
 }
 
@@ -52,12 +53,12 @@ func png(width: Int, height: Int, opaque: Bool, _ draw: (CGContext) -> Void) -> 
 }
 
 /// The app icon: the mark on a full-bleed background (iOS rounds the corners).
-func icon(size: Int, background: BrandRGB, mark: BrandRGB) -> Data {
+func icon(size: Int, background: BrandRGB, mark: BrandRGB, dot: BrandRGB? = nil) -> Data {
     png(width: size, height: size, opaque: true) { context in
         let side = CGFloat(size)
         context.setFillColor(background.cgColor)
         context.fill(CGRect(x: 0, y: 0, width: side, height: side))
-        drawMark(context, in: CGRect(x: side * 0.2, y: side * 0.2, width: side * 0.6, height: side * 0.6), color: mark)
+        drawMark(context, in: CGRect(x: side * 0.2, y: side * 0.2, width: side * 0.6, height: side * 0.6), color: mark, dot: dot)
     }
 }
 
@@ -84,9 +85,12 @@ let catalog = "App/Resources/Assets.xcassets"
 let white = BrandRGB(0xFFFFFF)
 let black = BrandRGB(0x000000)
 
-add("\(catalog)/AppIcon.appiconset/AppIcon.png", icon(size: 1024, background: BrandToken.ink.light, mark: white))
-add("\(catalog)/AppIcon.appiconset/AppIcon-Dark.png", icon(size: 1024, background: black, mark: white))
-// Greys only: iOS lays the user's tint over it.
+// Redmic's mark: a white ring and the red dot, in the red of each appearance.
+add("\(catalog)/AppIcon.appiconset/AppIcon.png", icon(size: 1024, background: BrandToken.ink.light, mark: white,
+                                                     dot: BrandToken.live.light))
+add("\(catalog)/AppIcon.appiconset/AppIcon-Dark.png", icon(size: 1024, background: black, mark: white,
+                                                          dot: BrandToken.live.dark))
+// Greys only: iOS lays the user's tint over it, so the dot can't be red here.
 add("\(catalog)/AppIcon.appiconset/AppIcon-Tinted.png", icon(size: 1024, background: black, mark: BrandRGB(0xD0D0D0)))
 add("\(catalog)/AppIcon.appiconset/Contents.json", text: """
     {
@@ -100,11 +104,12 @@ add("\(catalog)/AppIcon.appiconset/Contents.json", text: """
 
     """)
 
-// The launch screen: the mark in ink, 72 pt, on the canvas.
+// The launch screen: the mark in ink with the red dot, 72 pt, on the canvas (the app is light only).
 for scale in [2, 3] {
     let side = 72 * scale
     add("\(catalog)/LaunchLogo.imageset/LaunchLogo@\(scale)x.png", png(width: side, height: side, opaque: false) { context in
-        drawMark(context, in: CGRect(x: 0, y: 0, width: side, height: side), color: BrandToken.ink.light)
+        drawMark(context, in: CGRect(x: 0, y: 0, width: side, height: side), color: BrandToken.ink.light,
+                 dot: BrandToken.live.light)
     })
 }
 add("\(catalog)/LaunchLogo.imageset/Contents.json", text: """

@@ -321,7 +321,7 @@ public final class KeyboardSessionClient {
     public func containingAppOpenFailed() {
         guard case .openingApp = phase else { return }
         transport.payloads.clearPendingStart()
-        setPhase(.notice("Open Murmur to turn on dictation."))
+        setPhase(.notice("Open Redmic to turn on dictation."))
     }
 
     public func dismissNotice() {
@@ -358,7 +358,7 @@ public final class KeyboardSessionClient {
             guard let self, !Task.isCancelled, case .starting(requestId) = self.phase else { return }
             if self.isQueued(requestId) {
                 self.send(.cancel, requestId: requestId)
-                self.setPhase(.notice("Murmur is still finishing your last dictation. Try again in a moment."))
+                self.setPhase(.notice("Redmic is still finishing your last dictation. Try again in a moment."))
             } else {
                 self.openApp(for: requestId)
             }
@@ -631,7 +631,7 @@ public final class KeyboardSessionClient {
                 sessionStatus = .off
                 // It can't take its preview away any more, so the keyboard does: the words don't outlive it.
                 removeLivePreview(of: requestId)
-                setPhase(.notice("Murmur stopped listening. Tap the mic to start again."))
+                setPhase(.notice("Redmic stopped listening. Tap the mic to start again."))
             } else {
                 notifyHost()
             }
@@ -662,7 +662,7 @@ public final class KeyboardSessionClient {
                 self.checkForResult()
             }
             guard let self, !Task.isCancelled, case .processing(requestId) = self.phase else { return }
-            self.setPhase(.notice("This is taking longer than usual. Your dictation will be saved in Murmur."))
+            self.setPhase(.notice("This is taking longer than usual. Your dictation will be saved in Redmic."))
             self.host?.dictationDidFinish(.problem)
         }
     }
@@ -726,7 +726,7 @@ public final class KeyboardSessionClient {
         cancelTasks()
         transport.payloads.clearPendingStart()
         shownFailureAt = freshFailure?.createdAt
-        setPhase(.notice(freshFailure?.message ?? "Murmur couldn't start. Open the app to see why."))
+        setPhase(.notice(freshFailure?.message ?? "Redmic couldn't start. Open the app to see why."))
         return true
     }
 

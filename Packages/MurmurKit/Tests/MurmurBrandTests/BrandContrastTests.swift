@@ -78,7 +78,7 @@ struct BrandContrastTests {
         #expect(BrandContrast.ratio(white, white) == 1)
     }
 
-    /// Red means an open microphone, so no other token may be red.
+    /// Red is the open microphone's and the logo's, so no other token may be red.
     @Test func onlyTheLiveTokenIsRed() {
         for token in BrandToken.allCases where token != .live {
             for value in [token.light, token.dark] {

@@ -40,12 +40,12 @@ struct DebugView: View {
                     LabeledContent("Last time", value: model.hostReturn.lastOutcome
                         ?? (model.hostReturn.isAvailable ? "—" : "Not available on this iOS"))
                 } header: {
-                    Text("After the keyboard opens Murmur")
+                    Text("After the keyboard opens Redmic")
                 } footer: {
-                    Text("What happened the last time Murmur tried to go back to the app you were typing in. The switch is in Settings › Keyboard.")
+                    Text("What happened the last time Redmic tried to go back to the app you were typing in. The switch is in Settings › Keyboard.")
                 }
                 Section {
-                    TextField("Tap here, switch to the Murmur keyboard, and dictate", text: $testText, axis: .vertical)
+                    TextField("Tap here, switch to the Redmic keyboard, and dictate", text: $testText, axis: .vertical)
                         .lineLimit(3...8)
                     if !testText.isEmpty {
                         Button("Clear") { testText = "" }
@@ -124,7 +124,7 @@ struct DebugView: View {
                 } header: {
                     Text("Keyboard demo")
                 } footer: {
-                    Text("The keyboard shows this state instead of the live one, for screenshots. It ends after 15 minutes or when Murmur next launches.")
+                    Text("The keyboard shows this state instead of the live one, for screenshots. It ends after 15 minutes or when Redmic next launches.")
                 }
                 #endif
                 Section("Housekeeping") {

@@ -3,7 +3,7 @@
 // Copy Local.xcconfig.example to Local.xcconfig to get started.
 
 // Branding — rename the app by changing these (plus Brand.swift).
-MURMUR_APP_NAME = Murmur
+MURMUR_APP_NAME = Redmic
 MURMUR_BUNDLE_PREFIX = com.antonmironenko
 MURMUR_URL_SCHEME = murmur
 MURMUR_APP_GROUP = group.$(MURMUR_BUNDLE_PREFIX).murmur

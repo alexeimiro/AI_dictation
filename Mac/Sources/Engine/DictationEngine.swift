@@ -109,7 +109,7 @@ final class DictationEngine {
     func begin(handsFree: Bool) {
         guard phase == .idle else { return }
         guard isSignedIn() else {
-            show(.init(kind: .signedOut, title: "You’re signed out", detail: "Open Murmur to sign in, and your words come back."))
+            show(.init(kind: .signedOut, title: "You’re signed out", detail: "Open Redmic to sign in, and your words come back."))
             onEndedOutsideShortcut?()
             return
         }
@@ -121,7 +121,7 @@ final class DictationEngine {
             Task { _ = await MacPermissions.requestMicrophone() }
             return
         default:
-            show(.init(kind: .microphone, title: "Murmur can't use the microphone",
+            show(.init(kind: .microphone, title: "Redmic can't use the microphone",
                        detail: "Allow it in System Settings › Privacy & Security › Microphone."))
             onEndedOutsideShortcut?()
             return
@@ -151,7 +151,7 @@ final class DictationEngine {
     func beginCommand() {
         guard phase == .idle else { return }
         guard isSignedIn() else {
-            show(.init(kind: .signedOut, title: "You’re signed out", detail: "Open Murmur to sign in, and your words come back."))
+            show(.init(kind: .signedOut, title: "You’re signed out", detail: "Open Redmic to sign in, and your words come back."))
             onEndedOutsideShortcut?()
             return
         }
@@ -372,7 +372,7 @@ final class DictationEngine {
                                                          hints: settings.dictationLanguages)
                 guard reply.status == "rewritten" else {
                     show(.init(kind: .unchanged, title: "Nothing changed",
-                               detail: reply.instruction.isEmpty ? "Murmur didn’t catch what to do."
+                               detail: reply.instruction.isEmpty ? "Redmic didn’t catch what to do."
                                    : "“\(reply.instruction)” left the text as it was."))
                     return
                 }
@@ -391,7 +391,7 @@ final class DictationEngine {
                 show(.init(kind: .proRequired, title: "Command mode is part of Pro",
                            detail: "Upgrade to change any text by voice."))
             } catch .signedOut {
-                show(.init(kind: .signedOut, title: "You’re signed out", detail: "Open Murmur to sign in."))
+                show(.init(kind: .signedOut, title: "You’re signed out", detail: "Open Redmic to sign in."))
             } catch {
                 show(.init(kind: .failed, title: "Couldn't change the text", detail: "Check your connection and try again."))
             }
@@ -402,7 +402,7 @@ final class DictationEngine {
         guard result.isInsertable else {
             switch result.status {
             case .empty:
-                show(.init(kind: .nothingHeard, title: "Murmur didn't catch that",
+                show(.init(kind: .nothingHeard, title: "Redmic didn't catch that",
                            detail: "Hold fn while you speak, then let go."))
             case .cancelled:
                 break
@@ -479,7 +479,7 @@ final class DictationEngine {
         case "copied":
             notice = Notice(kind: .copied, title: "Copied. Press ⌘V to paste.", detail: "There was no text box to type into.")
         case "signedout":
-            notice = Notice(kind: .signedOut, title: "You’re signed out", detail: "Open Murmur to sign in, and your words come back.")
+            notice = Notice(kind: .signedOut, title: "You’re signed out", detail: "Open Redmic to sign in, and your words come back.")
         case "command":
             commanding = true
             phase = .listening(handsFree: false)

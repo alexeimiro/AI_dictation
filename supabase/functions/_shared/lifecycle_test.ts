@@ -75,7 +75,7 @@ const dayOld = (days: number, overrides: Partial<Candidate> = {}) =>
 Deno.test("settings: off by default, with the sender, reply-to and cap defaults", () => {
   const config = lifecycleConfig(env({ SUPPORT_EMAIL_TO: "Team@Example.com, other@example.com" }));
   assertEquals(config.mode, "off");
-  assertEquals(config.from, "Murmur <hello@simplymurmur.com>");
+  assertEquals(config.from, "Redmic <hello@simplymurmur.com>");
   assertEquals(config.replyTo, "team@example.com");
   assertEquals(config.dailyCap, 50);
   assertEquals(config.adminKey, null);
@@ -203,7 +203,7 @@ Deno.test("emails: names are escaped, and the trial and plan lines follow the ac
   const facts = { ...previewFacts("trial", NOW, null), firstName: "<b>Ivy</b>" };
   const html = renderEmail(buildEmail("welcome", facts, CONTEXT), CONTEXT).html;
   assertStringIncludes(html, "Hi &lt;b&gt;Ivy&lt;/b&gt;,");
-  assertStringIncludes(html, "7 days of Murmur Pro, on us");
+  assertStringIncludes(html, "7 days of Redmic Pro, on us");
   const basic = renderEmail(buildEmail("welcome", previewFacts("basic", NOW, null), CONTEXT), CONTEXT).text;
   assertStringIncludes(basic, "1,000 words of dictation every week");
   assertStringIncludes(basic, "Hi there,");
@@ -217,22 +217,22 @@ Deno.test("emails: names are escaped, and the trial and plan lines follow the ac
 Deno.test("emails: week one shows the stats, or a nudge before the first dictation", () => {
   const stats = renderEmail(buildEmail("week_one", previewFacts("trial", NOW, null), CONTEXT), CONTEXT).text;
   assertStringIncludes(stats, "- 1,840 words dictated");
-  assertStringIncludes(stats, "- 5 days with Murmur");
+  assertStringIncludes(stats, "- 5 days with Redmic");
   assertStringIncludes(stats, "- 3 days longest streak");
   assertStringIncludes(stats, `- ${minutesSaved(1840)} min time saved`);
   const nudge = renderEmail(buildEmail("week_one", previewFacts("new", NOW, null), CONTEXT), CONTEXT).text;
-  assertStringIncludes(nudge, "You haven’t dictated with Murmur yet.");
+  assertStringIncludes(nudge, "You haven’t dictated with Redmic yet.");
   assertEquals(minutesSaved(1840), 33);
 });
 
 Deno.test("emails: the founder note is signed by the founder when named, and the address shows", () => {
   const context = { ...CONTEXT, founder: "Anton", postalAddress: "PO Box 1, Dubai" };
   const rendered = renderEmail(buildEmail("founder", previewFacts("trial", NOW, null), context), context);
-  assertEquals(rendered.subject, "A note from Anton at Murmur");
-  assertStringIncludes(rendered.text, "Anton\nFounder of Murmur");
-  assertStringIncludes(rendered.text, "Murmur · OKNENOR L.L.C-FZ · PO Box 1, Dubai");
+  assertEquals(rendered.subject, "A note from Anton at Redmic");
+  assertStringIncludes(rendered.text, "Anton\nFounder of Redmic");
+  assertStringIncludes(rendered.text, "Redmic · OKNENOR L.L.C-FZ · PO Box 1, Dubai");
   const team = renderEmail(buildEmail("founder", previewFacts("trial", NOW, null), CONTEXT), CONTEXT);
-  assertStringIncludes(team.text, "The Murmur team");
+  assertStringIncludes(team.text, "The Redmic team");
 });
 
 Deno.test("emails: the 1–10 question links each number to the score page", () => {
@@ -356,7 +356,7 @@ Deno.test("run: sends what's due once, records skips, and a second run sends not
   const handler = createLifecycleHandler(deps);
   const report = await (await call(handler, { action: "run" }, CRON)).json();
   assertEquals(report, { mode: "live", considered: 2, sent: 2, skipped: 1, failed: 0, deferred: 0 });
-  assertEquals(sent.map((item) => item.email.subject), ["Welcome to Murmur", "Make Murmur write like you"]);
+  assertEquals(sent.map((item) => item.email.subject), ["Welcome to Redmic", "Make Redmic write like you"]);
   assertEquals(sent[0].key, `lifecycle-${USER}-welcome`);
   assertEquals(rows.get(`${USER}:welcome`), { status: "sent", detail: "em_1" });
   assertEquals(rows.get("11111111-1111-1111-1111-111111111111:founder"), { status: "skipped", detail: "late" });

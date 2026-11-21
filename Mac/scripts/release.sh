@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds the Murmur for Mac download: a Release archive exported for Developer ID, notarized and
-# stapled, inside a signed, notarized and stapled disk image (build/mac-release/Murmur.dmg).
+# stapled, inside a signed, notarized and stapled disk image (build/mac-release/Redmic.dmg).
 #
 # It builds from a clean copy of one commit, so other work in progress in this folder stays out of
 # the download; --with-mac-changes copies the working copy's Mac/ folder (uncommitted changes
@@ -62,7 +62,7 @@ cat > "$work/ExportOptions.plist" <<EOF
 EOF
 xcodebuild -exportArchive -archivePath "$work/Murmur.xcarchive" -exportPath "$work/export" \
   -exportOptionsPlist "$work/ExportOptions.plist" > "$work/export.log" 2>&1 || { tail -30 "$work/export.log"; exit 1; }
-app=$work/export/Murmur.app
+app=$work/export/Redmic.app
 codesign --verify --deep --strict "$app"
 
 # 2. Notarize (Apple keeps a log of each submission) and staple.
@@ -75,29 +75,29 @@ notarize() {  # $1 the file to send, $2 a name for the result files
   echo "notarization of the $2: $result ($id)"
   [[ $result == Accepted ]] || { cat "$work/notary-$2-log.json" 2>/dev/null; exit 1; }
 }
-ditto -c -k --keepParent "$app" "$work/Murmur-app.zip"
-notarize "$work/Murmur-app.zip" app
+ditto -c -k --keepParent "$app" "$work/Redmic-app.zip"
+notarize "$work/Redmic-app.zip" app
 xcrun stapler staple -q "$app"
 
 # 3. The disk image: the app and a shortcut to Applications. Not `hdiutil create -srcfolder`: it
 # mounts under /Volumes and failed every time with "Resource busy" (2026-11-16); `makehybrid`
 # avoids mounting but gives files a Finder-info attribute that breaks codesign's strict check.
 # So an empty image, mounted here and kept out of Spotlight, then compressed.
-hdiutil create -quiet -size 64m -fs APFS -volname Murmur -type UDIF "$work/rw.dmg"
+hdiutil create -quiet -size 64m -fs APFS -volname Redmic -type UDIF "$work/rw.dmg"
 mkdir "$work/dmg"
 hdiutil attach -quiet -nobrowse -noautoopen -mountpoint "$work/dmg" "$work/rw.dmg"
 touch "$work/dmg/.metadata_never_index"
-ditto "$app" "$work/dmg/Murmur.app"
+ditto "$app" "$work/dmg/Redmic.app"
 ln -s /Applications "$work/dmg/Applications"
-codesign --verify --deep --strict "$work/dmg/Murmur.app"
+codesign --verify --deep --strict "$work/dmg/Redmic.app"
 hdiutil detach -quiet "$work/dmg" || hdiutil detach -quiet -force "$work/dmg"
-hdiutil convert -quiet "$work/rw.dmg" -format UDZO -o "$work/Murmur.dmg"
+hdiutil convert -quiet "$work/rw.dmg" -format UDZO -o "$work/Redmic.dmg"
 rm "$work/rw.dmg"
-codesign -s "$identity" --timestamp "$work/Murmur.dmg"
-notarize "$work/Murmur.dmg" dmg
-xcrun stapler staple -q "$work/Murmur.dmg"
+codesign -s "$identity" --timestamp "$work/Redmic.dmg"
+notarize "$work/Redmic.dmg" dmg
+xcrun stapler staple -q "$work/Redmic.dmg"
 
 spctl -a -t exec -vv "$app"
-spctl -a -t open --context context:primary-signature -vv "$work/Murmur.dmg"
+spctl -a -t open --context context:primary-signature -vv "$work/Redmic.dmg"
 echo "Murmur $(plutil -extract CFBundleShortVersionString raw "$app/Contents/Info.plist") ($build_number) from $(git rev-parse --short "$commit")$([[ $with_mac_changes == yes ]] && echo " + Mac/ changes")"
-shasum -a 256 "$work/Murmur.dmg"
+shasum -a 256 "$work/Redmic.dmg"

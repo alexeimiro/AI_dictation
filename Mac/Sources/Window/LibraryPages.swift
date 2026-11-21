@@ -15,10 +15,10 @@ struct DictionaryPage: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    PageHeader(title: "Dictionary", lede: "Words Murmur should always spell your way, in every app.")
+                    PageHeader(title: "Dictionary", lede: "Words Redmic should always spell your way, in every app.")
                     if !model.dictionaryIntroDismissed, search.isEmpty {
-                        IntroCard(title: "Teach Murmur your words",
-                                  text: "Names, product terms, jargon. Add a word once and Murmur spells it right. If Murmur hears it wrong, tell it what you say and what it should write.",
+                        IntroCard(title: "Teach Redmic your words",
+                                  text: "Names, product terms, jargon. Add a word once and Redmic spells it right. If Redmic hears it wrong, tell it what you say and what it should write.",
                                   dismiss: { model.dictionaryIntroDismissed = true })
                     }
                     VStack(alignment: .leading, spacing: 0) {
@@ -110,7 +110,7 @@ struct WordSheet: View {
             DialogField(label: "Word", text: $term)
             Toggle(isOn: $hearsWrong) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Murmur hears it wrong").font(.system(size: 14, weight: .semibold))
+                    Text("Redmic hears it wrong").font(.system(size: 14, weight: .semibold))
                     Text("Tell it what you say, and it writes the word instead")
                         .font(Mac.Font.caption).foregroundStyle(Mac.Palette.third)
                 }
@@ -120,7 +120,7 @@ struct WordSheet: View {
                 VStack(alignment: .leading, spacing: 6) {
                     DialogField(label: "When I say", text: $heard)
                     if !term.isEmpty, !heard.isEmpty {
-                        Text("Murmur writes “\(term)” whenever it hears “\(heard)”.")
+                        Text("Redmic writes “\(term)” whenever it hears “\(heard)”.")
                             .font(Mac.Font.caption).foregroundStyle(Mac.Palette.third)
                     }
                 }
@@ -161,10 +161,10 @@ struct SnippetsPage: View {
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    PageHeader(title: "Snippets", lede: "Say a snippet’s name while you dictate and Murmur types the whole thing.")
+                    PageHeader(title: "Snippets", lede: "Say a snippet’s name while you dictate and Redmic types the whole thing.")
                     if !model.snippetsIntroDismissed, search.isEmpty {
                         IntroCard(title: "Shortcuts for text you repeat",
-                                  text: "Your email, an address, a link. Say “my calendar link” in any app and Murmur writes the link.",
+                                  text: "Your email, an address, a link. Say “my calendar link” in any app and Redmic writes the link.",
                                   dismiss: { model.snippetsIntroDismissed = true })
                     }
                     VStack(alignment: .leading, spacing: 0) {
@@ -253,7 +253,7 @@ struct SnippetSheet: View {
         DialogChrome(title: snippet == nil ? "New snippet" : "Edit snippet", width: 500) {
             DialogField(label: "Name you say", text: $trigger)
             VStack(alignment: .leading, spacing: 6) {
-                Text("Murmur types").font(Mac.Font.label)
+                Text("Redmic types").font(Mac.Font.label)
                 TextEditor(text: $expansion)
                     .font(Mac.Font.body)
                     .lineSpacing(3)
@@ -265,7 +265,7 @@ struct SnippetSheet: View {
                     .font(Mac.Font.caption.monospacedDigit()).foregroundStyle(Mac.Palette.third)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
-            Text("Say “\(trigger.isEmpty ? "my calendar link" : trigger)” in any app and Murmur writes the whole text. It works in the middle of a sentence too.")
+            Text("Say “\(trigger.isEmpty ? "my calendar link" : trigger)” in any app and Redmic writes the whole text. It works in the middle of a sentence too.")
                 .font(Mac.Font.small).foregroundStyle(Mac.Palette.second).lineSpacing(2)
             if let error {
                 Text(error).font(Mac.Font.caption).foregroundStyle(Mac.Palette.ink)

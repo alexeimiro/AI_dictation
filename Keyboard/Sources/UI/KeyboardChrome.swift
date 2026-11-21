@@ -39,7 +39,8 @@ enum KeyboardChrome {
     })
     /// A switch that is off.
     static let track = Color(brand: .track)
-    /// The microphone is open: the talk button while it listens, and its rings. Nothing else is red.
+    /// The microphone is open: the talk button while it listens, and its rings. Besides the logo's dot,
+    /// nothing else is red.
     static let live = Color(brand: .live)
     static let liveGlyph = Color(brand: .onLive)
     /// The style pill while a dictation holds its options.

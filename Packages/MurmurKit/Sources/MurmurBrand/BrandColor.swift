@@ -62,7 +62,7 @@ public enum Theme {
     public static let graphic = Color(brand: .graphic)
     public static let track = Color(brand: .track)
     public static let disabled = Color(brand: .disabled)
-    /// The microphone is open. Nothing else is red.
+    /// The microphone is open, and the logo (the mark's dot, the r and m of "redmic"). Nothing else is red.
     public static let live = Color(brand: .live)
     public static let onLive = Color(brand: .onLive)
 }

@@ -62,7 +62,7 @@ private final class SignedOutTranscriber: Transcriber, UtteranceTimingProviding,
 /// was refused, and never "Check your connection".
 @MainActor
 struct DictationPipelineSignedOutTests {
-    private let signedOut = "You're signed out. Open Murmur to sign in again."
+    private let signedOut = "You're signed out. Open Redmic to sign in again."
 
     @Test func aRefusedTranscriptionSaysSo() async {
         let (result, transcript, _) = await dictate(heard: nil)

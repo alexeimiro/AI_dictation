@@ -183,14 +183,14 @@ final class NavigationTests: XCTestCase {
         launch()
         let control = element(AccessibilityID.sessionControl)
         XCTAssertTrue(control.waitForExistence(timeout: 10))
-        XCTAssertEqual(control.label, "Murmur is on")
+        XCTAssertEqual(control.label, "Redmic is on")
         XCTAssertEqual(control.value as? String, "Off")
 
         app.terminate()
         launch(extra: ["-session-fixture", "on"])
         let live = element(AccessibilityID.sessionControl)
         XCTAssertTrue(live.waitForExistence(timeout: 10))
-        XCTAssertEqual(live.label, "Murmur is on")
+        XCTAssertEqual(live.label, "Redmic is on")
         XCTAssertEqual(live.value as? String, "On")
     }
 
@@ -232,7 +232,7 @@ final class NavigationTests: XCTestCase {
 
         XCTAssertTrue(waitUntilGone(element(AccessibilityID.aiConsentAllow)), "the question stayed up")
         let reason = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "AI services")).firstMatch
-        XCTAssertTrue(reason.waitForExistence(timeout: 5), "Home doesn't say why Murmur is off")
+        XCTAssertTrue(reason.waitForExistence(timeout: 5), "Home doesn't say why Redmic is off")
         XCTAssertEqual(element(AccessibilityID.sessionControl).value as? String, "Off")
     }
 

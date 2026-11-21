@@ -13,14 +13,14 @@ struct MenuBarMenu: View {
         ? SharedSettings.shared.translationSourceLanguage : nil
 
     var body: some View {
-        Toggle("Murmur is on", isOn: $model.enabled)
+        Toggle("Redmic is on", isOn: $model.enabled)
         Text(model.enabled ? "Hold \(settings.trigger == .function ? "fn" : settings.trigger.name) in any app to talk"
                            : "The shortcut is off")
         Divider()
         Button("Paste last transcript") { Task { await model.engine.pasteLast() } }
             .keyboardShortcut("v", modifiers: [.control, .command])
             .disabled(model.engine.lastText == nil)
-        Button("Open Murmur") { model.openMainWindow() }
+        Button("Open Redmic") { model.openMainWindow() }
         Button("New note") { model.openQuickNote() }
             .keyboardShortcut("n", modifiers: [.option, .command])
         Divider()
@@ -57,7 +57,7 @@ struct MenuBarMenu: View {
         Button("Help") { openURL(MacLinks.support) }
         SettingsLink { Text("Settings…") }
             .keyboardShortcut(",")
-        Button("Quit Murmur") { NSApp.terminate(nil) }
+        Button("Quit Redmic") { NSApp.terminate(nil) }
             .keyboardShortcut("q")
     }
 }
@@ -73,7 +73,9 @@ struct MenuBarLabel: View {
     }
 }
 
-/// The mark in the menu bar: at rest, with a red dot while the mic is open, faded while off.
+/// The mark in the menu bar: the logo (ring and red dot) at rest, all red while the mic is open,
+/// faded while off. Not templates where red shows: the ring takes the menu bar's own text colour and
+/// the red the menu bar's appearance, each time the image is drawn.
 enum MenuBarIcon {
     static func image(phase: DictationEngine.Phase, enabled: Bool) -> NSImage {
         if !enabled { return off }
@@ -81,8 +83,9 @@ enum MenuBarIcon {
         return idle
     }
 
-    static let idle = draw(template: true) { rect in
-        ring(rect, color: .black)
+    static let idle = draw(template: false) { rect in
+        ring(rect, color: .labelColor)
+        red().setFill()
         NSBezierPath(ovalIn: MarkGeometry.dot(in: rect)).fill()
     }
 
@@ -93,12 +96,17 @@ enum MenuBarIcon {
         NSBezierPath(ovalIn: MarkGeometry.dot(in: rect)).fill()
     }
 
-    /// Not a template, so the dot can be red; the ring is drawn in the menu bar's own text colour
-    /// each time it's drawn.
+    /// The red dot is the logo's now, so listening turns the ring red as well.
     static let listening = draw(template: false) { rect in
-        ring(rect, color: .labelColor)
-        NSColor(srgbRed: 1, green: 0.32, blue: 0.28, alpha: 1).setFill()
+        ring(rect, color: red())
+        red().setFill()
         NSBezierPath(ovalIn: MarkGeometry.dot(in: rect).insetBy(dx: -0.6, dy: -0.6)).fill()
+    }
+
+    /// The brand red for the appearance being drawn in (a menu bar can be dark in light mode).
+    private static func red() -> NSColor {
+        let dark = NSAppearance.currentDrawing().bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        return NSColor(rgb: BrandToken.live.value(dark: dark))
     }
 
     private static func ring(_ rect: NSRect, color: NSColor) {

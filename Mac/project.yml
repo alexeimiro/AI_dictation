@@ -52,7 +52,8 @@ targets:
         product: Supabase
     settings:
       base:
-        PRODUCT_NAME: Murmur
+        PRODUCT_NAME: Redmic
+        PRODUCT_MODULE_NAME: Murmur
         PRODUCT_BUNDLE_IDENTIFIER: $(MURMUR_BUNDLE_PREFIX).murmur.mac
         ENABLE_HARDENED_RUNTIME: YES
         COMBINE_HIDPI_IMAGES: YES
@@ -81,7 +82,7 @@ targets:
         LSApplicationCategoryType: public.app-category.productivity
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSHumanReadableCopyright: © 2026 OKNENOR L.L.C-FZ
-        NSMicrophoneUsageDescription: Murmur listens only while you hold your dictation shortcut, then writes what you said.
+        NSMicrophoneUsageDescription: Redmic listens only while you hold your dictation shortcut, then writes what you said.
         MurmurSupabaseHost: $(SUPABASE_HOST)
         MurmurSupabaseAnonKey: $(SUPABASE_ANON_KEY)
         MurmurEdgeHost: $(MURMUR_EDGE_HOST)

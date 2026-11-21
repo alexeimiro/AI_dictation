@@ -40,14 +40,14 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.35), value: model.onboarding.isComplete)
-        .confirmationDialog("Turn on Murmur?",
+        .confirmationDialog("Turn on Redmic?",
                             isPresented: Binding(get: { model.confirmUntrustedStart && !held },
                                                  set: { model.confirmUntrustedStart = $0 }),
                             titleVisibility: .visible) {
             Button("Turn On") { model.startSessionFromKeyboard() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("A link asked Murmur to start listening.")
+            Text("A link asked Redmic to start listening.")
         }
         // A code from an invite link, used once signed in.
         .alert("Your invite", isPresented: Binding(get: { model.inviteMessage != nil && !held },

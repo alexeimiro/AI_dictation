@@ -247,11 +247,11 @@ otp_expiry = 3600
 # The app signs in with the six-digit code from these emails (or their link). The hosted project
 # gets the same subject and template from scripts/supabase_auth_email.mjs (never `config push`).
 [auth.email.template.magic_link]
-subject = "{{ .Token }} is your Murmur code"
+subject = "{{ .Token }} is your Redmic code"
 content_path = "./supabase/templates/sign_in_code.html"
 
 [auth.email.template.confirmation]
-subject = "{{ .Token }} is your Murmur code"
+subject = "{{ .Token }} is your Redmic code"
 content_path = "./supabase/templates/sign_in_code.html"
 
 # Uncomment to customize email template

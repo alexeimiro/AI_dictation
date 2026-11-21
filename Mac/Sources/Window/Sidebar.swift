@@ -1,3 +1,4 @@
+import MurmurBrand
 import MurmurCore
 import SwiftUI
 
@@ -45,7 +46,7 @@ struct Sidebar: View {
     private var brand: some View {
         HStack(spacing: 8) {
             MarkView(size: 20)
-            Text("murmur").font(Mac.Font.wordmark).tracking(-0.4)
+            wordmarkName().font(Mac.Font.wordmark).tracking(-0.4)
             if let badge = planBadge { Badge(text: badge) }
         }
         .padding(.horizontal, 10)

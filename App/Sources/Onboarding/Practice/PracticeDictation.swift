@@ -177,7 +177,7 @@ final class ScriptedPracticeClient: PracticeDictationClient {
 
     nonisolated static func sampleText(for exercise: PracticeExercise) -> String {
         switch exercise {
-        case .basic: "Hello from Murmur."
+        case .basic: "Hello from Redmic."
         case .formatting: "Hey Tim, are you available on Friday at 4 pm?"
         case .whisper: "1. Call mom.\n2. Walk the dog."
         }

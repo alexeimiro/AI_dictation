@@ -24,11 +24,11 @@ struct SignInGateTests {
     }
 
     @Test func fixtureRunsAreTheScreenshotAndUITestLaunches() {
-        #expect(!LaunchOptions(arguments: ["Murmur"]).isFixtureRun)
-        #expect(LaunchOptions(arguments: ["Murmur", "-fixtures"]).isFixtureRun)
-        #expect(LaunchOptions(arguments: ["Murmur", "-route", "home"]).isFixtureRun)
-        #expect(LaunchOptions(arguments: ["Murmur", "-onboarding-fixtures"]).isFixtureRun)
-        #expect(LaunchOptions(arguments: ["Murmur", "-onboarding-step", "welcome"]).isFixtureRun)
+        #expect(!LaunchOptions(arguments: ["Redmic"]).isFixtureRun)
+        #expect(LaunchOptions(arguments: ["Redmic", "-fixtures"]).isFixtureRun)
+        #expect(LaunchOptions(arguments: ["Redmic", "-route", "home"]).isFixtureRun)
+        #expect(LaunchOptions(arguments: ["Redmic", "-onboarding-fixtures"]).isFixtureRun)
+        #expect(LaunchOptions(arguments: ["Redmic", "-onboarding-step", "welcome"]).isFixtureRun)
     }
 
     /// Log in, and every dictation refused while signed out, lead to onboarding's own sign-in

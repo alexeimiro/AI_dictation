@@ -1,8 +1,8 @@
-# Murmur Terms of Use
+# Redmic Terms of Use
 
 Effective November 16, 2026
 
-These terms are between you and OKNENOR L.L.C-FZ ("we"), the maker of Murmur. By using Murmur you
+These terms are between you and OKNENOR L.L.C-FZ ("we"), the maker of Redmic. By using Redmic you
 agree to them, and to Apple's Licensed Application End User License Agreement
 (https://www.apple.com/legal/internet-services/itunes/dev/stdeula/), which applies alongside them.
 
@@ -11,19 +11,19 @@ agree to them, and to Apple's Licensed Application End User License Agreement
 Keep your sign-in secure. You're responsible for what's done with your account. You can delete it
 at any time in the app.
 
-## Murmur Pro
+## Redmic Pro
 
-- Murmur is free with a weekly word limit, after a free trial of Murmur Pro. The trial is one
-  per iPhone: a later account on the same iPhone starts on the free plan. Murmur Pro has no
+- Redmic is free with a weekly word limit, after a free trial of Redmic Pro. The trial is one
+  per iPhone: a later account on the same iPhone starts on the free plan. Redmic Pro has no
   weekly limit.
 - Deleting your account doesn't reset the weekly limit, the free trial or invites: an account you
   make within 30 days of deleting one carries on where that one left off.
-- Murmur Pro is an auto-renewing subscription, monthly or yearly, bought through the App Store.
+- Redmic Pro is an auto-renewing subscription, monthly or yearly, bought through the App Store.
   Payment is charged to your Apple Account when you confirm the purchase. It renews
   automatically, at the same price and for the same period, unless you cancel it at least 24
   hours before the period ends. Manage or cancel it in Settings › Apple Account › Subscriptions.
-- Invites: a friend who enters your invite code within 14 days of creating their Murmur account,
-  on an iPhone that hasn't had a free trial, gets a month of Murmur Pro, and you get a month once they finish their first dictation, up to
+- Invites: a friend who enters your invite code within 14 days of creating their Redmic account,
+  on an iPhone that hasn't had a free trial, gets a month of Redmic Pro, and you get a month once they finish their first dictation, up to
   12 months in total. Free months start when they're given, alongside any subscription. They
   have no cash value, and we may withhold them if invites are abused, for example with fake
   accounts.
@@ -31,31 +31,31 @@ at any time in the app.
 - We may change prices. A new price applies to your subscription only after Apple tells you about
   it, as App Store rules require.
 
-## Using Murmur
+## Using Redmic
 
-Don't use Murmur to break the law, to infringe others' rights, or to harm, harass or deceive
+Don't use Redmic to break the law, to infringe others' rights, or to harm, harass or deceive
 anyone. Don't interfere with our service, or try to get around its limits.
 
-## What Murmur writes
+## What Redmic writes
 
-Murmur turns speech into text with speech recognition and AI, and the result can contain
+Redmic turns speech into text with speech recognition and AI, and the result can contain
 mistakes. Check what it writes before you send or rely on it, especially for anything
 medical, legal or financial. What you dictate is yours.
 
 ## Availability and changes
 
-We work to keep Murmur available, but it may change, pause or end. If we end Murmur Pro, we'll
+We work to keep Redmic available, but it may change, pause or end. If we end Redmic Pro, we'll
 tell you in advance.
 
 ## Disclaimers and liability
 
-Murmur is provided "as is", without warranties of any kind, as far as the law allows. To the
+Redmic is provided "as is", without warranties of any kind, as far as the law allows. To the
 extent the law allows, we aren't liable for indirect or consequential losses, and our total
 liability is limited to what you paid us in the 12 months before the claim.
 
 ## Ending
 
-You can stop using Murmur and delete your account at any time. We may suspend accounts that
+You can stop using Redmic and delete your account at any time. We may suspend accounts that
 break these terms.
 
 ## Law

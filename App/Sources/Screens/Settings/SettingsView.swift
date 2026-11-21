@@ -240,7 +240,7 @@ struct SettingsView: View {
     static func accountFooter(phrase: String?, guest: Bool) -> String {
         if guest {
             let signIn = phrase.map { "Sign in \($0) to get it back." } ?? "Sign in to get it back."
-            return "You're using Murmur as a guest, without your account's plan. \(signIn)"
+            return "You're using Redmic as a guest, without your account's plan. \(signIn)"
         }
         let signIn = phrase.map { "Sign in again \($0)" } ?? "Sign in again"
         return "You're signed out. \(signIn) to keep cloud dictation and your plan."
@@ -252,7 +252,7 @@ struct SettingsView: View {
         let kept = signedIn
             ? "Your dictionary, snippets and notes are saved to your account, so they’re on every device you sign in on. Transcripts and recordings stay on this iPhone."
             : "Transcripts, recordings, your dictionary, snippets and notes stay on this iPhone; sign in to have the dictionary, snippets and notes on your other devices too."
-        return kept + " OpenAI gets each recording to turn it into text, and Anthropic gets that text when it needs tidying or translating. Neither trains on them, and Murmur’s servers don’t keep either."
+        return kept + " OpenAI gets each recording to turn it into text, and Anthropic gets that text when it needs tidying or translating. Neither trains on them, and Redmic’s servers don’t keep either."
     }
 
     static func layoutTitle(_ layout: KeyboardLayoutPreference) -> String {

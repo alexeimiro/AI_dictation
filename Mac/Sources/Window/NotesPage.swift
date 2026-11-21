@@ -74,7 +74,7 @@ struct NotesPage: View {
                 }
                 .padding(.horizontal, 8)
             }
-            Text("Notes sync with Murmur on your iPhone.")
+            Text("Notes sync with Redmic on your iPhone.")
                 .font(Mac.Font.caption).foregroundStyle(Mac.Palette.third)
                 .padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 16)
         }
