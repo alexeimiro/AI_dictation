@@ -16,14 +16,24 @@ struct LanguagePickerTests {
     @Test func searchMatchesEitherName() {
         #expect(LanguagePickerSheet.matching("russ").map(\.languageCode) == ["ru"])
         #expect(LanguagePickerSheet.matching("Русск").map(\.languageCode) == ["ru"])
-        #expect(LanguagePickerSheet.matching("  ").count == DictationLanguage.cloudLanguages.count)
+        #expect(LanguagePickerSheet.matching("  ").count == DictationLanguage.speechLanguages.count)
         #expect(LanguagePickerSheet.matching("zzz").isEmpty)
+        #expect(LanguagePickerSheet.matching("farsi").map(\.languageCode) == ["fa"])
+        #expect(LanguagePickerSheet.matching("bangla").map(\.languageCode) == ["bn"])
+        // A language Murmur only types in can't be picked to speak.
+        #expect(LanguagePickerSheet.matching("amharic").isEmpty)
     }
 
     @Test func pickedLanguagesLeaveTheList() {
         let rest = LanguagePickerSheet.unpicked([DictationLanguage(tag: "ru-RU")])
         #expect(!rest.contains { $0.languageCode == "ru" })
-        #expect(rest.count == DictationLanguage.cloudLanguages.count - 1)
+        #expect(rest.count == DictationLanguage.speechLanguages.count - 1)
+    }
+
+    @Test func theFooterSaysWhenTheLimitIsReached() {
+        #expect(LanguagePickerSheet.footer(pickedCount: 0).contains("detects the language you speak"))
+        #expect(LanguagePickerSheet.footer(pickedCount: 3).contains("Pick one language"))
+        #expect(LanguagePickerSheet.footer(pickedCount: DictationLanguage.maxSpokenLanguages).contains("up to 10"))
     }
 
     /// A tap picks a language, a second tap (or a regional variant) unpicks it; it's saved at once.
@@ -40,6 +50,22 @@ struct LanguagePickerTests {
         #expect(settings.dictationLanguages == ["ru-RU"])
         settings.dictationLanguages = []
         #expect(shared.dictationLanguages.isEmpty)
+    }
+
+    /// No more languages than the recognizer is told, and none that can't be spoken.
+    @Test func pickingStopsAtTheLimitAndSkipsTextOnlyLanguages() throws {
+        let suite = "test.murmur.languages.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SettingsModel(settings: SharedSettings(defaults: defaults))
+        settings.toggleDictationLanguage("am-ET")
+        #expect(settings.dictationLanguages.isEmpty)
+        let tags = DictationLanguage.speechLanguages.prefix(DictationLanguage.maxSpokenLanguages + 2).map(\.tag)
+        for tag in tags { settings.toggleDictationLanguage(tag) }
+        #expect(settings.dictationLanguages == Array(tags.prefix(DictationLanguage.maxSpokenLanguages)))
+        // Unpicking still works at the limit.
+        settings.toggleDictationLanguage(tags[0])
+        #expect(settings.dictationLanguages.count == DictationLanguage.maxSpokenLanguages - 1)
     }
 }
 

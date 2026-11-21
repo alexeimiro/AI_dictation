@@ -150,7 +150,9 @@ struct KeyboardMenuPage: View {
     }
 
     private var eligibleRecent: [DictationLanguage] {
-        model.recentLanguages.filter { $0.languageCode != model.effectiveLanguage.languageCode }
+        model.recentLanguages.filter {
+            $0.supportsTranslation && $0.languageCode != model.effectiveLanguage.languageCode
+        }
     }
 
     /// Light / Dark / Auto as one capsule of three, the chosen one in ink.

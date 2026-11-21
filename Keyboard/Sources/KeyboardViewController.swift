@@ -583,7 +583,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     }
 
     /// Loads the app's installed on-device languages and the languages picked in its Settings.
-    /// Cloud recognition can additionally use any of `DictationLanguage.cloudLanguages`.
+    /// Cloud recognition can additionally use any of `DictationLanguage.speechLanguages`.
     private func loadLanguages() {
         let primary = settings.primaryLanguage.map(DictationLanguage.init(tag:)) ?? .englishUS
         let verified = settings.verifiedEngines
@@ -601,7 +601,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     /// follow the iPhone's language until they are picked (`KeyboardLanguageDefaults`).
     private func loadTranslationSettings() {
         interfaceLanguage = KeyboardLanguageDefaults.interfaceLanguage(
-            preferred: Locale.preferredLanguages, available: DictationLanguage.cloudLanguages)
+            preferred: Locale.preferredLanguages, available: DictationLanguage.speechLanguages)
         let source = KeyboardLanguageDefaults.source(
             saved: settings.translationSourceLanguage, autoDetectApplied: settings.autoDetectDefaultApplied)
         if !settings.autoDetectDefaultApplied {
@@ -624,10 +624,13 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     private func defaultTarget(saved: DictationLanguage? = nil, source: DictationLanguage) -> DictationLanguage {
         KeyboardLanguageDefaults.target(
             saved: saved, source: source, preferred: Locale.preferredLanguages,
-            available: DictationLanguage.cloudLanguages, recent: model.recentLanguages)
+            available: DictationLanguage.translationLanguages, recent: model.recentLanguages)
     }
 
     private func selectSourceLanguage(_ language: DictationLanguage?) {
+        // Only a language that can be spoken is listened for: one that can only be typed in
+        // would be sent to the recognizer as a language it doesn't know.
+        if let language, !language.isAutomatic, !language.supportsSpeech { return }
         let selected = language ?? model.primaryLanguage
         model.languageOverride = selected.languageCode == model.primaryLanguage.languageCode ? nil : selected
         settings.translationSourceLanguage = selected.tag
@@ -640,7 +643,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     }
 
     private func selectTargetLanguage(_ language: DictationLanguage) {
-        guard !language.isAutomatic, language.languageCode != model.effectiveLanguage.languageCode else { return }
+        guard language.supportsTranslation, language.languageCode != model.effectiveLanguage.languageCode else { return }
         model.targetLanguage = language
         settings.translationTargetLanguage = language.tag
         remember(language)
@@ -657,7 +660,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     }
 
     private func swapTranslationLanguages() {
-        guard model.translationEnabled, !model.effectiveLanguage.isAutomatic else { return }
+        guard model.canSwapLanguages else { return }
         let oldSource = model.effectiveLanguage
         let oldTarget = model.targetLanguage
         selectSourceLanguage(oldTarget.languageCode == model.primaryLanguage.languageCode ? nil : oldTarget)

@@ -303,6 +303,52 @@ Deno.test("translation guard: a script change is expected, staying in the spoken
   );
 });
 
+/**
+ * "Can you send me the report by Friday?" in targets the app added in November 2026, several only
+ * as translation targets: each script is recognized, so a translation passes, an English reply is
+ * caught, and the words are counted (Khmer, Lao and Burmese are written without spaces).
+ */
+const NEW_TARGETS: [string, string][] = [
+  ["am-ET", "ሪፖርቱን እስከ አርብ ልትልክልኝ ትችላለህ?"],
+  ["km-KH", "តើអ្នកអាចផ្ញើរបាយការណ៍មកខ្ញុំត្រឹមថ្ងៃសុក្របានទេ?"],
+  ["lo-LA", "ເຈົ້າສາມາດສົ່ງລາຍງານໃຫ້ຂ້ອຍພາຍໃນວັນສຸກໄດ້ບໍ?"],
+  ["my-MM", "သောကြာနေ့မတိုင်ခင် အစီရင်ခံစာကို ကျွန်တော့်ဆီ ပို့ပေးနိုင်မလား?"],
+  ["si-LK", "සිකුරාදා වන විට මට වාර්තාව එවන්න පුළුවන්ද?"],
+  ["ka-GE", "შეგიძლია პარასკევამდე ანგარიში გამომიგზავნო?"],
+  ["bn-BD", "তুমি কি শুক্রবারের মধ্যে আমাকে রিপোর্টটা পাঠাতে পারবে?"],
+  ["as-IN", "আপুনি শুক্ৰবাৰৰ ভিতৰত মোলৈ প্ৰতিবেদনখন পঠিয়াব পাৰিবনে?"],
+  ["gu-IN", "શું તમે શુક્રવાર સુધીમાં મને રિપોર્ટ મોકલી શકો?"],
+  ["pa-IN", "ਕੀ ਤੁਸੀਂ ਸ਼ੁੱਕਰਵਾਰ ਤੱਕ ਮੈਨੂੰ ਰਿਪੋਰਟ ਭੇਜ ਸਕਦੇ ਹੋ?"],
+  ["ml-IN", "വെള്ളിയാഴ്ചയ്ക്കകം റിപ്പോർട്ട് എനിക്ക് അയയ്ക്കാമോ?"],
+  ["te-IN", "శుక్రవారం లోగా నాకు నివేదిక పంపగలరా?"],
+  ["or-IN", "ଆପଣ ଶୁକ୍ରବାର ସୁଦ୍ଧା ମୋତେ ରିପୋର୍ଟ ପଠାଇ ପାରିବେ କି?"],
+  ["ps-AF", "ایا ته کولی شې تر جمعې پورې راپور ماته راولېږې؟"],
+  ["mn-MN", "Та баасан гараг гэхэд надад тайлангаа илгээж чадах уу?"],
+  ["yue-CN", "你可唔可以喺星期五之前将份报告发俾我？"],
+];
+
+Deno.test("translation guard: the scripts of the new targets", () => {
+  const english = "can you send me the report by friday i need it for the meeting";
+  for (const [target, translation] of NEW_TARGETS) {
+    const pair = { source: "en-US", target };
+    assert(scriptOf(target), `${target} has a script`);
+    assert(guardTranslation(english, translation, pair).ok, `${target}: a translation passes`);
+    assertEquals(
+      guardTranslation(english, "Can you send me the report by Friday? I need it for the meeting.", pair),
+      { ok: false, reason: "untranslated" },
+      `${target}: English is caught`,
+    );
+    assert(countWords(translation, target) >= 3, `${target}: words are counted`);
+  }
+  // Latin-script targets are judged by the words instead: Uzbek, Esperanto.
+  for (const [target, translation] of [["uz-UZ", "Hisobotni juma kunigacha menga yubora olasizmi? Uchrashuv uchun kerak."], [
+    "eo",
+    "Ĉu vi povas sendi al mi la raporton ĝis vendredo? Mi bezonas ĝin por la kunveno.",
+  ]]) {
+    assert(guardTranslation(english, translation, { source: "en-US", target }).ok, `${target}: a translation passes`);
+  }
+});
+
 Deno.test("translation guard: within one script the words show whether it was translated", () => {
   const enToTr = { source: "en-US", target: "tr-TR" };
   const english = "um so can you send me the report by friday thanks so much";

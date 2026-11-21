@@ -53,10 +53,16 @@ Deno.test("language is optional and odd tags fall back to detection", () => {
   assert(parsed.ok);
   assertEquals(parsed.value.language, null);
   assertEquals(isoLanguage("en-US"), "en");
-  assertEquals(isoLanguage("yue-Hant"), null);
   assertEquals(isoLanguage("nb-NO"), "no");
   assertEquals(isoLanguage("fil-PH"), "tl");
+  assertEquals(isoLanguage("bn-BD"), "bn");
   assertEquals(isoLanguage(undefined), null);
+  // Three letters only where gpt-transcribe's guide names the code: Cantonese, and Mandarin as zh.
+  assertEquals(isoLanguage("yue-CN"), "yue");
+  assertEquals(isoLanguage("yue-Hant"), "yue");
+  assertEquals(isoLanguage("cmn-CN"), "zh");
+  assertEquals(isoLanguage("haw-US"), null);
+  assertEquals(isoLanguage("ceb"), null);
 });
 
 Deno.test("the user's languages become ISO-639-1 hints, deduplicated and capped", () => {
@@ -66,7 +72,7 @@ Deno.test("the user's languages become ISO-639-1 hints, deduplicated and capped"
   assertEquals(parsed.value.languageHints, ["en", "ru", "no"]);
   // Not a list, or odd items: skipped, never refused.
   assertEquals(cleanLanguageHints("en-US"), []);
-  assertEquals(cleanLanguageHints([42, "yue-Hant", "", "uk-UA"]), ["uk"]);
+  assertEquals(cleanLanguageHints([42, "haw", "", "uk-UA", "yue-CN"]), ["uk", "yue"]);
   const many = ["en", "ru", "de", "fr", "es", "it", "pt", "nl", "pl", "uk", "tr", "ja"];
   assertEquals(cleanLanguageHints(many).length, TRANSCRIBE_LIMITS.maxLanguageHints);
 });
@@ -136,6 +142,77 @@ Deno.test("surfaces OpenAI errors without the response body", async () => {
   );
   assertEquals(error.status, 400);
   assertFalse(error.message.includes("secret detail"));
+});
+
+/** Records each form sent, answering with the statuses given in turn, then 200. */
+function scriptedOpenAI(statuses: number[]) {
+  const forms: FormData[] = [];
+  const fetcher = ((_url: string, init: RequestInit) => {
+    forms.push(init.body as FormData);
+    const status = statuses[forms.length - 1] ?? 200;
+    return Promise.resolve(
+      status === 200
+        ? Response.json({ text: "Habari.", languages: [{ code: "sw" }] })
+        : Response.json({ error: { type: "invalid_request_error", code: "unsupported_language" } }, { status }),
+    );
+  }) as unknown as typeof fetch;
+  return { forms, fetcher };
+}
+
+Deno.test("a 400 to a request naming its language is tried again without it, so the model detects it", async () => {
+  const { forms, fetcher } = scriptedOpenAI([400]);
+  const named = { ...request, language: "sw" };
+  const result = await transcribeWithOpenAI(named, { apiKey: "k", model: "gpt-transcribe", deadlineMs: 1000, fetcher });
+  assertEquals(result, { text: "Habari.", languages: ["sw"] });
+  assertEquals(forms.length, 2);
+  assertEquals(forms[0].getAll("languages[]"), ["sw"]);
+  assertEquals(forms[1].getAll("languages[]"), []);
+  // Only the languages go: the audio and the keywords are sent again as they were.
+  assertEquals(forms[1].getAll("keywords[]"), forms[0].getAll("keywords[]"));
+  assert(forms[1].get("file") instanceof File);
+});
+
+Deno.test("the user's languages are dropped the same way, and a second 400 is thrown", async () => {
+  const hinted = { ...request, language: null, languageHints: ["bn", "en"] };
+  const once = scriptedOpenAI([400]);
+  await transcribeWithOpenAI(hinted, { apiKey: "k", model: "gpt-transcribe", deadlineMs: 1000, fetcher: once.fetcher });
+  assertEquals(once.forms.map((form) => form.getAll("languages[]")), [["bn", "en"], []]);
+
+  const twice = scriptedOpenAI([400, 400]);
+  const error = await assertRejects(
+    () => transcribeWithOpenAI(hinted, { apiKey: "k", model: "gpt-transcribe", deadlineMs: 1000, fetcher: twice.fetcher }),
+    OpenAIError,
+  );
+  assertEquals(error.status, 400);
+  assertEquals(twice.forms.length, 2);
+});
+
+Deno.test("no retry without languages named, nor for an error that isn't a 400", async () => {
+  const unnamed = scriptedOpenAI([400]);
+  await assertRejects(
+    () =>
+      transcribeWithOpenAI({ ...request, language: null, languageHints: [] }, {
+        apiKey: "k",
+        model: "gpt-transcribe",
+        deadlineMs: 1000,
+        fetcher: unnamed.fetcher,
+      }),
+    OpenAIError,
+  );
+  assertEquals(unnamed.forms.length, 1);
+
+  const overloaded = scriptedOpenAI([500]);
+  await assertRejects(
+    () =>
+      transcribeWithOpenAI({ ...request, language: "ru" }, {
+        apiKey: "k",
+        model: "gpt-transcribe",
+        deadlineMs: 1000,
+        fetcher: overloaded.fetcher,
+      }),
+    OpenAIError,
+  );
+  assertEquals(overloaded.forms.length, 1);
 });
 
 Deno.test("a caller's signal replaces the deadline timer", async () => {

@@ -830,7 +830,7 @@ final class SessionController {
             saved: settings.translationSourceLanguage, autoDetectApplied: settings.autoDetectDefaultApplied)
         let target = settings.translationEnabled ? KeyboardLanguageDefaults.target(
             saved: settings.translationTargetLanguage.map(DictationLanguage.init(tag:)), source: speak,
-            preferred: Locale.preferredLanguages, available: DictationLanguage.cloudLanguages,
+            preferred: Locale.preferredLanguages, available: DictationLanguage.translationLanguages,
             recent: settings.recentTranslationLanguages.map(DictationLanguage.init(tag:))) : nil
         let request = PendingStart(
             requestId: UUID(), documentIdentifier: nil, createdAt: Date(), autoStart: true,

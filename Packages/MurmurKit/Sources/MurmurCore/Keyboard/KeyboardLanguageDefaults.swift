@@ -7,9 +7,12 @@ public enum KeyboardLanguageDefaults {
     /// What the keyboard listens for. Auto-detect, like ChatGPT's dictation, until the user picks
     /// a language in the Speak menu. `autoDetectApplied` is false until the keyboard first ran
     /// with Auto as the default: a language saved before then was the old default, not a choice.
+    /// A saved language that can't be spoken (one that can only be typed in, swapped there by an
+    /// older build) is Auto-detect too: the recognizer would be asked for a language it doesn't know.
     public static func source(saved: String?, autoDetectApplied: Bool) -> DictationLanguage {
         guard autoDetectApplied, let saved else { return .automatic }
-        return DictationLanguage(tag: saved)
+        let language = DictationLanguage(tag: saved)
+        return language.supportsSpeech ? language : .automatic
     }
 
     /// The iPhone's language as one of `available` (matched by language code), or nil when it
@@ -24,7 +27,8 @@ public enum KeyboardLanguageDefaults {
         source.isAutomatic ? interface?.languageCode ?? "en" : source.languageCode
     }
 
-    /// "Type in" for translations, when the user hasn't picked it or picked the source itself:
+    /// "Type in" for translations, when the user hasn't picked it, picked the source itself, or
+    /// picked a language Murmur no longer types in:
     /// the iPhone's language ("Auto → Russian" on a Russian iPhone). When that is the source,
     /// English; when the source is English too, another of the iPhone's languages, a recent one,
     /// else Spanish.
@@ -34,7 +38,7 @@ public enum KeyboardLanguageDefaults {
     ) -> DictationLanguage {
         let sourceCode = source.isAutomatic ? nil : source.languageCode
         func usable(_ language: DictationLanguage?) -> DictationLanguage? {
-            guard let language, !language.isAutomatic, language.languageCode != sourceCode else { return nil }
+            guard let language, language.supportsTranslation, language.languageCode != sourceCode else { return nil }
             return language
         }
         if let saved = usable(saved) { return saved }

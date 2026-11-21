@@ -268,7 +268,16 @@ deno run --allow-env --allow-net --allow-read --allow-write --env-file=supabase/
 # Speech: gpt-transcribe with Auto-detect vs a chosen language, on clips the Mac speaks in ten languages.
 deno run --allow-env --allow-net --allow-read --allow-write --allow-run --env-file=supabase/functions/.env \
   scripts/bench/transcribe_bench.ts --out <dir>
+# Languages: does gpt-transcribe accept every Speak language (DictationLanguage.speechLanguages)?
+# One second of silence per language, under $0.01; exits 1 and names any it refuses.
+deno run --allow-env --allow-net --allow-read --env-file=supabase/functions/.env scripts/bench/language_probe.ts
 ```
+
+Languages live in one place, `DictationLanguage` (MurmurCore): `speechLanguages` (65, recognized in
+the cloud: the Speak menus and Settings › Languages) and `translationLanguages` (91: those plus 26
+the text model writes but no speech service recognizes reliably, offered only under "Type in").
+The server takes any well-formed tag; a 400 from OpenAI to a request that named its languages is
+tried once more without them, so a code it refuses can't fail a dictation.
 
 The `cleanup` function sends OpenAI's Responses API one system prompt in three parts — the shared
 rules, a language pack (English, Russian, or one named after any other language; with no tag, one

@@ -39,7 +39,7 @@ struct MenuBarMenu: View {
                 SharedSettings.shared.autoDetectDefaultApplied = speak != nil
             })) {
                 Text("Auto-detect").tag("")
-                ForEach(DictationLanguage.cloudLanguagesByName, id: \.tag) { language in
+                ForEach(DictationLanguage.speechLanguagesByName, id: \.tag) { language in
                     Text(language.localizedName).tag(language.tag)
                 }
             }

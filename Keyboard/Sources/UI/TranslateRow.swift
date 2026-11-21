@@ -10,7 +10,7 @@ struct TranslateRow: View {
 
     var body: some View {
         let on = model.translationEnabled
-        let canSwap = on && !model.effectiveLanguage.isAutomatic
+        let canSwap = model.canSwapLanguages
         HStack(spacing: 8) {
             // Solid while translation is on, outlined while it is off.
             Image(systemName: "translate")
@@ -28,7 +28,7 @@ struct TranslateRow: View {
 
             HStack(spacing: 6) {
                 LanguageMenu(title: "From", accessibilityTitle: "Translate from",
-                             selection: model.effectiveLanguage, choices: model.languageChoices) { language in
+                             selection: model.effectiveLanguage, sections: model.languageSections) { language in
                     model.actions.setLanguage(language == model.primaryLanguage ? nil : language)
                 }
 
@@ -43,9 +43,11 @@ struct TranslateRow: View {
                 .disabled(!canSwap)
                 .opacity(canSwap ? 1 : 0.4)
                 .accessibilityLabel("Swap languages")
+                .accessibilityHint(on && !model.effectiveLanguage.isAutomatic && !model.targetLanguage.supportsSpeech
+                    ? "\(model.targetLanguage.localizedName) can be typed in but not spoken" : "")
 
                 LanguageMenu(title: "To", accessibilityTitle: "Translate to",
-                             selection: model.targetLanguage, choices: model.targetLanguageChoices,
+                             selection: model.targetLanguage, sections: model.targetLanguageSections,
                              action: model.actions.setTargetLanguage)
                     .disabled(!on)
                     .opacity(on ? 1 : 0.4)
@@ -66,24 +68,31 @@ struct TranslateRow: View {
     }
 }
 
-/// A From or To button that opens the language list, with a check on the current language.
+/// A From or To button that opens the language list, with a check on the current language. The
+/// sections (the user's languages, then all the others) are split by a line. A keyboard can't
+/// type into a search field of its own: the languages found and picked in the app's searchable
+/// Settings › Languages come first here instead.
 struct LanguageMenu: View {
     let title: String
     let accessibilityTitle: String
     let selection: DictationLanguage
-    let choices: [DictationLanguage]
+    let sections: [[DictationLanguage]]
     let action: (DictationLanguage) -> Void
 
     var body: some View {
         Menu {
-            ForEach(choices) { language in
-                Button {
-                    action(language)
-                } label: {
-                    if language.languageCode == selection.languageCode {
-                        Label(language.localizedName, systemImage: "checkmark")
-                    } else {
-                        Text(language.localizedName)
+            ForEach(Array(sections.enumerated()), id: \.offset) { _, languages in
+                Section {
+                    ForEach(languages) { language in
+                        Button {
+                            action(language)
+                        } label: {
+                            if language.languageCode == selection.languageCode {
+                                Label(language.localizedName, systemImage: "checkmark")
+                            } else {
+                                Text(language.localizedName)
+                            }
+                        }
                     }
                 }
             }
