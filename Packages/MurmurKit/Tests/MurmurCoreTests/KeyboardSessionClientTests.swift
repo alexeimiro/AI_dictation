@@ -681,14 +681,14 @@ struct KeyboardSessionClientTests {
         client.host = host
         client.activate()
 
-        client.styleOverride = .grammar
+        client.styleOverride = .rewrite
         client.languageOverride = "ru-RU"
         client.translationTargetLanguage = "en-US"
         client.micTapped()
         let pending = try #require(transport.payloads.readPendingStart())
         #expect(pending.autoStart == true)
         #expect(pending.documentIdentifier == host.currentDocumentIdentifier)
-        #expect(pending.styleOverride == .grammar)
+        #expect(pending.styleOverride == .rewrite)
         #expect(pending.languageOverride == "ru-RU")
         #expect(pending.translationTargetLanguage == "en-US")
     }

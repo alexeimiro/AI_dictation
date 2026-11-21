@@ -1,46 +1,26 @@
 import MurmurCore
 import SwiftUI
 
-/// "How Murmur writes": the five styles with what each makes of the same sentence.
+/// "How Murmur writes": the four modes, two to a row, with what each makes of the same sentence.
 struct StylePage: View {
     @Bindable var model: MacAppModel
-
-    static let said = "“um so me and him was thinking maybe we could like meet on friday at 4 if that works for you guys”"
-
-    static func example(_ style: StylePreset) -> String {
-        switch style {
-        case .verbatim: "So me and him was thinking maybe we could, like, meet on Friday at 4 if that works for you guys."
-        case .grammar: "He and I were thinking maybe we could meet on Friday at 4 if that works for you guys."
-        case .professional: "He and I would like to meet on Friday at 4, if that works for you."
-        case .casual: "me and him were thinking we could meet friday at 4 if that works for you guys"
-        case .concise: "Can we meet Friday at 4?"
-        }
-    }
-
-    static func description(_ style: StylePreset) -> String {
-        style == .concise ? "The same point in fewer words" : style.subtitle
-    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                PageHeader(title: "How Murmur writes", lede: "Used for every dictation. Switch any time from the menu bar.")
+                PageHeader(title: "How Murmur writes",
+                           lede: "Pick a mode for every dictation. Switch any time from the menu bar.")
                 VStack(alignment: .leading, spacing: 3) {
                     SectionLabel(text: "You say")
-                    Text(Self.said).font(Mac.Font.body).lineSpacing(3)
-                }
-                SectionLabel(text: "As you said it")
-                LazyVGrid(columns: columns, spacing: 12) {
-                    card(.verbatim)
-                }
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    SectionLabel(text: "Rewritten by AI")
-                    Text("The recording goes to the AI services that write your text. They don’t train on it.")
-                        .font(Mac.Font.caption).foregroundStyle(Mac.Palette.third)
+                    Text(verbatim: "“\(StyleSample.spoken)”").font(Mac.Font.body).lineSpacing(3)
                 }
                 LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach([StylePreset.grammar, .professional, .casual, .concise], id: \.self) { card($0) }
+                    ForEach(StylePreset.allCases) { card($0) }
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Writing mode")
+                Text("The recording goes to the AI services that write your text. They don’t train on it.")
+                    .font(Mac.Font.caption).foregroundStyle(Mac.Palette.third)
             }
             .padding(.horizontal, Mac.Metric.pagePadding)
             .padding(.top, 44).padding(.bottom, 40)
@@ -58,11 +38,11 @@ struct StylePage: View {
         } label: {
             HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(style.title).font(Mac.Font.cardTitle)
-                    Text(Self.description(style)).font(Mac.Font.small).foregroundStyle(Mac.Palette.second)
+                    Label(style.title, systemImage: style.symbol).font(Mac.Font.cardTitle)
+                    Text(style.subtitle).font(Mac.Font.small).foregroundStyle(Mac.Palette.second)
                     Text("Murmur writes").font(.system(size: 12, weight: .semibold)).foregroundStyle(Mac.Palette.third)
                         .padding(.top, 8)
-                    Text(Self.example(style)).font(.system(size: 14)).lineSpacing(3)
+                    Text(verbatim: StyleSample.written(style)).font(.system(size: 14)).lineSpacing(3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -77,7 +57,10 @@ struct StylePage: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityAddTraits(on ? .isSelected : [])
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(style.title)
+        .accessibilityHint(style.subtitle)
+        .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
     }
 }
 

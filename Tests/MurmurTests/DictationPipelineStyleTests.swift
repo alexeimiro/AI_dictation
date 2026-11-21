@@ -8,6 +8,8 @@ import Testing
 private final class StyleCleanup: Cleaning {
     var isConfigured = true
     var text = "Sounds good."
+    /// Runs while the request is in flight: a test changes the settings there.
+    var whileWriting: () -> Void = {}
     /// Nil while the model was never asked.
     private(set) var receivedStyle: StylePreset?
     private(set) var receivedLanguage: String?
@@ -20,6 +22,7 @@ private final class StyleCleanup: Cleaning {
         receivedStyle = style
         receivedLanguage = language
         receivedSnippets = snippets
+        whileWriting()
         return CleanupClient.Response(
             text: text, status: "cleaned", words: 2, model: "test", ttftMs: 10, totalMs: 20, remaining: nil)
     }
@@ -97,7 +100,7 @@ struct DictationPipelineLanguageTests {
             transcript: "yarın toplantıya gelemiyorum çünkü hastayım", detectedLanguage: "tr"))
 
         let outcome = await DictationPipeline(cleanup: cleanup, settings: settings).complete(
-            dictation(style: .grammar, language: "und"), transcriber: transcriber, audioSeconds: 2,
+            dictation(style: .rewrite, language: "und"), transcriber: transcriber, audioSeconds: 2,
             stoppedAt: ContinuousClock.now)
 
         #expect(cleanup.receivedLanguage == "tr")
@@ -116,12 +119,12 @@ struct DictationPipelineLanguageTests {
                 totalMs: 400, remaining: nil))))
 
         let outcome = await DictationPipeline(cleanup: cleanup).complete(
-            dictation(style: .grammar), transcriber: transcriber, audioSeconds: 2, stoppedAt: ContinuousClock.now)
+            dictation(style: .rewrite), transcriber: transcriber, audioSeconds: 2, stoppedAt: ContinuousClock.now)
 
         #expect(cleanup.receivedStyle == nil, "no second request")
         #expect(outcome.result.text == "He and I were going to the store.")
         let request = try #require(transcriber.request)
-        #expect(request.style == .grammar)
+        #expect(request.style == .rewrite)
         #expect(request.targetLanguage == nil)
     }
 
@@ -133,7 +136,7 @@ struct DictationPipelineLanguageTests {
                 text: "", status: "raw", words: 2, model: nil, ttftMs: nil, totalMs: 0, remaining: nil, reason: "short"))))
 
         let outcome = await DictationPipeline(cleanup: StyleCleanup()).complete(
-            dictation(style: .grammar), transcriber: transcriber, audioSeconds: 1, stoppedAt: ContinuousClock.now)
+            dictation(style: .rewrite), transcriber: transcriber, audioSeconds: 1, stoppedAt: ContinuousClock.now)
 
         #expect(outcome.result.text == "Sounds good")
         #expect(outcome.result.status == .raw)
@@ -147,10 +150,10 @@ struct DictationPipelineLanguageTests {
         #expect(transcriber.request == nil)
     }
 
-    /// Word for word has no model request to carry the dictation's id, so the pipeline names it:
+    /// Word-to-Word has no model request to carry the dictation's id, so the pipeline names it:
     /// the server counts the free plan's words under that id, whichever requests the dictation takes.
     @Test func everyDictationIsNamedToTheTranscriber() async {
-        for style in [StylePreset.verbatim, .grammar] {
+        for style in [StylePreset.verbatim, .rewrite] {
             let transcriber = CloudLikeTranscriber(UtteranceOutput(transcript: "See you at five."))
             let spoken = dictation(style: style)
             _ = await DictationPipeline(cleanup: StyleCleanup()).complete(
@@ -159,7 +162,7 @@ struct DictationPipelineLanguageTests {
         }
     }
 
-    /// Word for word and the styles the model writes go through the same function, so the timings
+    /// Word-to-Word and the styles the model writes go through the same function, so the timings
     /// log is told the style: the requests alone no longer say which is which.
     @Test func theTimingsNameTheDictationsStyle() async {
         for style in StylePreset.allCases {
@@ -178,7 +181,7 @@ struct DictationPipelineLanguageTests {
 
 @MainActor
 struct DictationPipelineStyleTests {
-    /// Word for word keeps hedges and self-corrections, so a punctuated transcript goes in as the
+    /// Word-to-Word keeps hedges and self-corrections, so a punctuated transcript goes in as the
     /// recognizer wrote it, minus sound fillers, with no model call.
     @Test func wordForWordSkipsTheModelForAPunctuatedTranscript() async {
         let cleanup = StyleCleanup()
@@ -201,25 +204,24 @@ struct DictationPipelineStyleTests {
     @Test func grammarAlwaysAsksTheModel() async {
         let cleanup = StyleCleanup()
         cleanup.text = "He and I were going to the store."
-        let (result, transcript) = await dictate("Me and him was going to the store.", style: .grammar, cleanup: cleanup)
-        #expect(cleanup.receivedStyle == .grammar)
+        let (result, transcript) = await dictate("Me and him was going to the store.", style: .rewrite, cleanup: cleanup)
+        #expect(cleanup.receivedStyle == .rewrite)
         #expect(result.text == "He and I were going to the store.")
-        #expect(transcript.style == .grammar)
+        #expect(transcript.style == .rewrite)
     }
 
-    /// Three words or fewer never reach the model, whatever the mode. Casual still writes them
-    /// its own way: lowercase, with no full stop.
+    /// Three words or fewer never reach the model, whatever the mode: no call is made for them.
     @Test func shortRepliesSkipTheModel() async {
         for style in StylePreset.allCases {
             let cleanup = StyleCleanup()
             let (result, _) = await dictate("Sounds good.", style: style, cleanup: cleanup)
             #expect(cleanup.receivedStyle == nil, "\(style)")
-            #expect(result.text == (style == .casual ? "sounds good" : "Sounds good."), "\(style)")
+            #expect(result.text == "Sounds good.", "\(style)")
         }
     }
 
-    /// Professional, Casual and Concise are written by the model in the request that transcribes,
-    /// as Improve my grammar is.
+    /// Rewrite, Email and Funny are written by the model in the request that transcribes: one
+    /// request per dictation, never a second one for the text.
     @Test func everyStyleTheModelWritesIsWrittenInTheTranscribingRequest() async throws {
         for style in StylePreset.allCases where style.usesModel {
             let cleanup = StyleCleanup()
@@ -240,9 +242,8 @@ struct DictationPipelineStyleTests {
             #expect(request.style == style && request.targetLanguage == nil, "\(style)")
             #expect(outcome.result.status == .cleaned, "\(style)")
             #expect(outcome.transcript.style == style, "\(style)")
-            // The model's text goes in as it came; Casual only loses a last full stop the model left.
-            #expect(outcome.result.text == (style == .casual ? "I will need the report by Friday" : "I will need the report by Friday."),
-                    "\(style)")
+            // The model's text goes in exactly as it came.
+            #expect(outcome.result.text == "I will need the report by Friday.", "\(style)")
         }
     }
 
@@ -258,21 +259,83 @@ struct DictationPipelineStyleTests {
         }
     }
 
-    /// A Casual dictation whose model step failed still goes in lowercase, with no full stop.
-    @Test func casualFallsBackToItsLocalForm() async {
-        let transcriber = CloudLikeTranscriber(UtteranceOutput(
-            transcript: "Sounds good. See you at the office tomorrow.",
-            modelReply: .failure(.unavailable("dictate couldn't write the text (deadline)"))))
-        let dictation = ActiveDictation(
-            requestId: UUID(), documentIdentifier: nil, style: .casual, language: "en-US",
-            translationTargetLanguage: nil, source: .keyboard, startedAt: Date())
-        let outcome = await DictationPipeline(cleanup: StyleCleanup()).complete(
-            dictation, transcriber: transcriber, audioSeconds: 2, stoppedAt: ContinuousClock.now)
-        #expect(outcome.result.text == "sounds good. see you at the office tomorrow")
-        #expect(outcome.result.status == .raw)
+    /// A mode whose model step failed (offline, a timeout) still types what was said, tidied on
+    /// the iPhone, and keeps the transcript for Retry.
+    @Test func aModeWhoseModelStepFailedTypesTheSpeakersWords() async {
+        for style in StylePreset.allCases where style.usesModel {
+            let transcriber = CloudLikeTranscriber(UtteranceOutput(
+                transcript: "Um, sounds good. See you at the office tomorrow.",
+                modelReply: .failure(.unavailable("dictate couldn't write the text (deadline)"))))
+            let dictation = ActiveDictation(
+                requestId: UUID(), documentIdentifier: nil, style: style, language: "en-US",
+                translationTargetLanguage: nil, source: .keyboard, startedAt: Date())
+            let outcome = await DictationPipeline(cleanup: StyleCleanup()).complete(
+                dictation, transcriber: transcriber, audioSeconds: 2, stoppedAt: ContinuousClock.now)
+            #expect(outcome.result.text == "Sounds good. See you at the office tomorrow.", "\(style)")
+            #expect(outcome.result.status == .raw, "\(style)")
+            #expect(outcome.transcript.rawText == "Um, sounds good. See you at the office tomorrow.", "\(style)")
+            #expect(outcome.transcript.style == style && outcome.transcript.canRegenerate, "\(style)")
+        }
     }
 
-    /// "um" is a word in German: Word for word must not drop it as a hesitation.
+    /// What the speaker said is kept beside what the mode wrote, for the transcript's page and
+    /// for Regenerate.
+    @Test func theTranscriptKeepsWhatWasSaidBesideWhatWasWritten() async {
+        let cleanup = StyleCleanup()
+        cleanup.text = "Hi Anna,\n\nI'll be ten minutes late.\n\nBest regards,"
+        let (result, transcript) = await dictate(
+            "tell anna I'll be like ten minutes late", style: .email, cleanup: cleanup)
+        #expect(result.text == "Hi Anna,\n\nI'll be ten minutes late.\n\nBest regards,")
+        #expect(transcript.rawText == "tell anna I'll be like ten minutes late")
+        #expect(transcript.cleanedText == result.text)
+    }
+
+    /// Funny's emoji and Email's blank lines go in as the model wrote them.
+    @Test func emojiAndBlankLinesGoInAsWritten() async {
+        for (style, written) in [(StylePreset.funny, "Pizza night is ON 🍕 — see you at 8!"),
+                                 (.email, "Hello,\n\nCould we move the call to Thursday?\n\nThanks,")] {
+            let cleanup = StyleCleanup()
+            cleanup.text = written
+            let (result, _) = await dictate("so we are doing pizza tonight at eight", style: style, cleanup: cleanup)
+            #expect(result.text == written, "\(style)")
+        }
+    }
+
+    /// The pipeline writes in the dictation's own mode, read when it started: a mode picked while
+    /// the model writes (the Style screen, the keyboard's pill) doesn't change this dictation.
+    @Test func aModePickedWhileTheModelWritesDoesNotChangeTheDictation() async throws {
+        let suite = "test.murmur.pipeline.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = SharedSettings(defaults: defaults)
+        settings.defaultStyle = .rewrite
+        let cleanup = StyleCleanup()
+        cleanup.text = "He and I were going to the store."
+        cleanup.whileWriting = { settings.defaultStyle = .funny }
+        let dictation = ActiveDictation(
+            requestId: UUID(), documentIdentifier: nil, style: .rewrite, language: "en-US",
+            translationTargetLanguage: nil, source: .keyboard, startedAt: Date())
+        let outcome = await DictationPipeline(cleanup: cleanup, settings: settings).complete(
+            dictation, transcriber: SpokenTranscriber("Me and him was going to the store."), audioSeconds: 2,
+            stoppedAt: ContinuousClock.now)
+        #expect(cleanup.receivedStyle == .rewrite)
+        #expect(outcome.transcript.style == .rewrite)
+        #expect(outcome.timings?.style == "rewrite")
+        #expect(settings.defaultStyle == .funny)
+    }
+
+    /// Each mode reaches the model under its own name, so the server writes it its own way.
+    @Test func everyModeReachesTheModelUnderItsOwnName() async {
+        var received: [StylePreset] = []
+        for style in StylePreset.allCases where style.usesModel {
+            let cleanup = StyleCleanup()
+            _ = await dictate("Hey guys, so I'm gonna need the report by Friday.", style: style, cleanup: cleanup)
+            if let sent = cleanup.receivedStyle { received.append(sent) }
+        }
+        #expect(received == [.rewrite, .email, .funny])
+    }
+
+    /// "um" is a word in German: Word-to-Word must not drop it as a hesitation.
     @Test func wordForWordKeepsGermanUm() async {
         let cleanup = StyleCleanup()
         let dictation = ActiveDictation(
@@ -300,11 +363,11 @@ struct DictationPipelineStyleTests {
     @Test func regenerateUsesTheStoredMode() async throws {
         let cleanup = StyleCleanup()
         let pipeline = DictationPipeline(cleanup: cleanup)
-        let stored = Transcript(language: "en-US", style: .grammar, rawText: "sounds good", status: .raw)
+        let stored = Transcript(language: "en-US", style: .rewrite, rawText: "sounds good", status: .raw)
 
         let updated = try await pipeline.recleanup(stored)
 
-        #expect(cleanup.receivedStyle == .grammar)
+        #expect(cleanup.receivedStyle == .rewrite)
         #expect(updated.cleanedText == "Sounds good.")
     }
 
@@ -340,7 +403,7 @@ struct DictationPipelineSnippetTests {
         }
     }
 
-    /// Word for word swaps the snippet in on the iPhone, in the middle of a sentence too.
+    /// Word-to-Word swaps the snippet in on the iPhone, in the middle of a sentence too.
     @Test func wordForWordExpandsASnippetWithoutTheModel() async {
         let cleanup = StyleCleanup()
         let result = await dictate("Send the invoice to my email address, please.", style: .verbatim, cleanup: cleanup)
@@ -353,7 +416,7 @@ struct DictationPipelineSnippetTests {
         let cleanup = StyleCleanup()
         cleanup.text = "Could you send the invoice to \(SnippetPlaceholders.token(for: email)) by Friday?"
         let result = await dictate(
-            "Hey, can you send the invoice to my email address by Friday?", style: .professional, cleanup: cleanup)
+            "Hey, can you send the invoice to my email address by Friday?", style: .email, cleanup: cleanup)
         #expect(cleanup.receivedSnippets?.map(\.trigger).sorted() == ["my email address", "my home address", "my signature"])
         #expect(result.text == "Could you send the invoice to anton@example.com by Friday?")
         #expect(result.status == .cleaned)
@@ -370,7 +433,7 @@ struct DictationPipelineSnippetTests {
         let pipeline = DictationPipeline(cleanup: StyleCleanup())
         pipeline.snippets = [email]
         let outcome = await pipeline.complete(
-            dictation(style: .grammar), transcriber: transcriber, audioSeconds: 2, stoppedAt: ContinuousClock.now)
+            dictation(style: .rewrite), transcriber: transcriber, audioSeconds: 2, stoppedAt: ContinuousClock.now)
         #expect(outcome.result.text == "Hey, can you send the invoice to anton@example.com by Friday?")
         #expect(try #require(transcriber.request).snippets == [email])
     }
@@ -380,28 +443,27 @@ struct DictationPipelineSnippetTests {
     @Test func aSnippetTheModelMissedIsStillExpanded() async {
         let cleanup = StyleCleanup()
         cleanup.text = "Please send the parcel to my home address by Friday."
-        var result = await dictate("Send the parcel to my home address by Friday.", style: .grammar, cleanup: cleanup)
+        var result = await dictate("Send the parcel to my home address by Friday.", style: .rewrite, cleanup: cleanup)
         #expect(result.text == "Please send the parcel to 12 Garden Road. London N1. by Friday.")
 
         cleanup.text = "My \(SnippetPlaceholders.token(for: address)) is where the parcel should go."
-        result = await dictate("My home address is where the parcel should go.", style: .professional, cleanup: cleanup)
+        result = await dictate("My home address is where the parcel should go.", style: .email, cleanup: cleanup)
         #expect(result.text == "12 Garden Road. London N1. is where the parcel should go.")
     }
 
-    /// Casual restyles the speaker's words and leaves the snippet's text as typed, with the model
-    /// and without it.
-    @Test func casualLeavesTheSnippetsTextAsTyped() async {
-        // Three words or fewer never reach the model.
-        var result = await dictate("My signature.", style: .casual, cleanup: StyleCleanup())
-        #expect(result.text == "Best regards,\nAnton")
-        result = await dictate("Thanks. My signature.", style: .casual, cleanup: StyleCleanup())
-        #expect(result.text == "thanks. Best regards,\nAnton")
+    /// Email and Funny reword the speaker's words and leave the snippet's text as typed, with the
+    /// model and without it.
+    @Test func emailAndFunnyLeaveTheSnippetsTextAsTyped() async {
+        for style in [StylePreset.email, .funny] {
+            // Three words or fewer never reach the model.
+            var result = await dictate("Thanks. My signature.", style: style, cleanup: StyleCleanup())
+            #expect(result.text == "Thanks. Best regards,\nAnton", "\(style)")
 
-        // Written by the model: the sentence's full stop goes, the snippet's own stays.
-        let cleanup = StyleCleanup()
-        cleanup.text = "thanks, send it to \(SnippetPlaceholders.token(for: address))."
-        result = await dictate("Thanks, send it to my home address.", style: .casual, cleanup: cleanup)
-        #expect(result.text == "thanks, send it to 12 Garden Road. London N1.")
+            let cleanup = StyleCleanup()
+            cleanup.text = "Hi,\n\nPlease send it to \(SnippetPlaceholders.token(for: address))\n\nThanks,"
+            result = await dictate("Thanks, send it to my home address.", style: style, cleanup: cleanup)
+            #expect(result.text == "Hi,\n\nPlease send it to 12 Garden Road. London N1.\n\nThanks,", "\(style)")
+        }
     }
 
     /// Regenerate swaps the snippets into the new text too.
@@ -410,7 +472,7 @@ struct DictationPipelineSnippetTests {
         cleanup.text = "Write to \(SnippetPlaceholders.token(for: email))."
         let pipeline = DictationPipeline(cleanup: cleanup)
         pipeline.snippets = [email]
-        let stored = Transcript(language: "en-US", style: .grammar, rawText: "write to my email address", status: .raw)
+        let stored = Transcript(language: "en-US", style: .rewrite, rawText: "write to my email address", status: .raw)
         let updated = try await pipeline.recleanup(stored)
         #expect(updated.cleanedText == "Write to anton@example.com.")
     }

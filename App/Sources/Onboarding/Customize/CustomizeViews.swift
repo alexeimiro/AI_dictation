@@ -220,7 +220,8 @@ private struct LanguagePicker: View {
     }
 }
 
-/// Writes the default style the keyboard uses, with what each style makes of one sentence.
+/// Writes the default mode the keyboard uses: the Style screen's picker, with what the picked
+/// mode makes of one sentence.
 struct DefaultStyleView: View {
     @Environment(AppModel.self) private var model
 
@@ -229,22 +230,12 @@ struct DefaultStyleView: View {
         OnboardingPage {
             OnboardingTitle(OnboardingCopy.Style.title, line: OnboardingCopy.Style.line)
                 .padding(.top, 14)
-            SectionLabel(OnboardingCopy.Style.youSay)
-                .padding(.top, 22)
-            Text(verbatim: "“\(StyleView.spoken)”")
-                .font(.transcript(.body))
-                .lineSpacing(2)
-                .foregroundStyle(Theme.ink)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 4)
-            VStack(spacing: 12) {
-                ForEach(StylePreset.allCases) { style in
-                    StyleCard(style: style, isSelected: store.answers.style == style) {
-                        store.send(.selectStyle(style))
-                    }
-                }
+            ModePicker(selection: store.answers.style ?? .verbatim) { style in
+                store.send(.selectStyle(style))
             }
-            .padding(.top, 20)
+            .padding(.top, 22)
+            ModePreview(style: store.answers.style ?? .verbatim)
+                .padding(.top, 22)
         } actions: {
             Button(OnboardingCopy.next) {
                 if let style = store.answers.style, store.send(.next), !model.launchOptions.usesOnboardingFixtures {
@@ -254,8 +245,8 @@ struct DefaultStyleView: View {
             .buttonStyle(.murmur(.primary))
             .disabled(!store.allows(.next))
         }
-        // Word for word is the default; one tap on Next keeps it. After a reinstall it's the
-        // style the account had, taken when the user signed in (`StyleSync`).
+        // Word-to-Word is the default; one tap on Next keeps it. After a reinstall it's the
+        // mode the account had, taken when the user signed in (`StyleSync`).
         .onAppear {
             if store.answers.style == nil {
                 let style = model.launchOptions.usesOnboardingFixtures ? .verbatim : SharedSettings.shared.defaultStyle

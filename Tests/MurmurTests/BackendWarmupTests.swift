@@ -17,7 +17,7 @@ private final class FakeSession: SessionRenewing {
 @MainActor
 private final class WarmedDictate: Dictating {
     var isAvailable = true
-    /// A deployment that takes Word for word; false for one from before it did.
+    /// A deployment that takes Word-to-Word; false for one from before it did.
     var takesPlain = true
     var transcribesAlone: Bool { isAvailable && takesPlain }
     var lastReplyAt: ContinuousClock.Instant?
@@ -73,7 +73,7 @@ struct BackendWarmupTests {
         #expect(warmup.takeTiming(for: id) == nil)
     }
 
-    /// Word for word is `dictate`'s request too, so its worker is warmed like any other's.
+    /// Word-to-Word is `dictate`'s request too, so its worker is warmed like any other's.
     @Test func aWordForWordDictationWarmsDictateToo() async throws {
         let warmup = warmup()
         let id = UUID()
@@ -85,7 +85,7 @@ struct BackendWarmupTests {
         #expect(try #require(warmup.takeTiming(for: id)).server?.executionId == "w1")
     }
 
-    /// A deployment from before `dictate` took Word for word: that dictation goes to `transcribe`,
+    /// A deployment from before `dictate` took Word-to-Word: that dictation goes to `transcribe`,
     /// which a warm-up of `dictate` does nothing for. The styles the model writes still get theirs.
     @Test func noWarmUpForWordForWordWhileDictateCannotTranscribeAlone() async {
         dictate.takesPlain = false

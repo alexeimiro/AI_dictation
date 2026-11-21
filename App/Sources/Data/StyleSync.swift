@@ -2,7 +2,7 @@ import Foundation
 import MurmurCore
 import os
 
-/// Keeps the default style (Word for word or Improve my grammar) the same on every device signed in
+/// Keeps the default mode (Word-to-Word, Rewrite, Email or Funny) the same on every device signed in
 /// to the account, as `profiles.default_style`.
 ///
 /// A style changed on this iPhone since the last sync is sent; otherwise the account's is taken, so

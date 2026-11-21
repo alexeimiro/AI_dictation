@@ -17,7 +17,24 @@ export interface BenchCase {
   unchanged?: boolean;
   /** The output has at most this share of the transcript's words (Concise). */
   maxWordRatio?: number;
+  /** The output has at most this many emoji (0 for the modes that never add one, 2 for Funny). */
+  maxEmoji?: number;
 }
+
+/** A greeting line, then a blank line: how an Email reply to someone opens. */
+const GREETING = /^(?:Hi|Hello|Dear|Good (?:morning|afternoon))\b[^\n]*[,!]\n\n/;
+/** A closing line after a blank line, and nothing after it: no sender's name. */
+const CLOSING = /\n\n(?:Best regards|Kind regards|Regards|Best|Thanks|Thank you|Many thanks|Cheers)[,!.]?$/;
+/** An email that signs a name under its closing. */
+const SIGNED = /\n\n(?:Best regards|Kind regards|Regards|Best|Thanks|Thank you|Many thanks|Cheers)[,!.]?\n\S/;
+/** A greeting by a name the speaker didn't say: "Hi all," and "Hi team," are fine. */
+const NAMED_GREETING = /^(?:Hi|Hello|Dear) (?![Aa]ll\b|[Ee]veryone\b|[Tt]eam\b|[Gg]uys\b)\p{Lu}/u;
+const LAUGHING = /[\u{1F602}\u{1F923}\u{1F606}\u{1F605}\u{1F61C}\u{1F92A}\u{1F639}\u{1F61D}]|\b(?:lol|lmao|haha)\b/iu;
+/** A word of Latin letters, which a translation into Russian has none of here. */
+const LATIN_WORD = /[A-Za-z]{3,}/;
+const CYRILLIC = /\p{Script=Cyrillic}/u;
+/** A whole Russian word, case-insensitive (`\b` is ASCII-only in JavaScript). */
+const ru = (word: string) => new RegExp(`(?<![\\p{L}])${word}(?![\\p{L}])`, "iu");
 
 /** The sentence the app's Style screen shows in every style (`StyleView.spoken`). */
 const SCREEN = "um so me and him was thinking maybe we could like meet on friday at 4 if that works for you guys";
@@ -433,6 +450,209 @@ export const CASES: BenchCase[] = [
     must: [/четверг/i, /встреч/i],
     maxWordRatio: 0.8,
   },
+  // The four modes (November 21, 2026): the Style screen's sentence in each, then each mode's promises.
+  {
+    id: "screen.rewrite",
+    style: "rewrite",
+    language: "en-US",
+    transcript: SCREEN,
+    must: [/\bhe and I were\b/i, /\bFriday at 4\b/],
+    mustNot: [/\bum\b/i, /\bme and him\b/i, /\b[ap]\.?m\b/i, /^(?:hi|hello|dear)\b/i, /\bregards\b/i],
+    maxEmoji: 0,
+  },
+  {
+    id: "screen.email",
+    style: "email",
+    language: "en-US",
+    transcript: SCREEN,
+    must: [GREETING, /\bFriday at 4\b/, CLOSING],
+    mustNot: [/\bum\b/i, /\bme and him\b/i, /\b[ap]\.?m\b/i, /\bsubject\b/i, SIGNED, NAMED_GREETING],
+    maxEmoji: 0,
+  },
+  {
+    id: "screen.funny",
+    style: "funny",
+    language: "en-US",
+    transcript: SCREEN,
+    must: [/\bFriday\b/, /\b4\b/],
+    mustNot: [/\bum\b/i, /\b[ap]\.?m\b/i, /#\w/],
+    maxEmoji: 2,
+  },
+  // Rewrite: better sentences, nothing said twice, the speaker's register.
+  {
+    id: "rewrite.en.repetition",
+    style: "rewrite",
+    language: "en-US",
+    transcript:
+      "so the the plan is we we launch on monday and um yeah the plan is we launch on monday because the server is ready and the team is ready too",
+    must: [/\bMonday\b/, /\bserver\b/i, /\bteam\b/i],
+    mustNot: [/\bthe the\b/i, /\bwe we\b/i, /\bum\b/i, /Monday[\s\S]*Monday/],
+    maxWordRatio: 0.8,
+    maxEmoji: 0,
+  },
+  {
+    id: "rewrite.en.casual-stays-casual",
+    style: "rewrite",
+    language: "en-US",
+    transcript: "hey can you grab me a coffee on your way in i'm like dying here",
+    must: [/\bcoffee\b/i, /\b(?:hey|grab)\b/i],
+    mustNot: [/\b(?:could you please|would you kindly|dear|regards)\b/i],
+    maxEmoji: 0,
+  },
+  {
+    id: "rewrite.ru.structure",
+    style: "rewrite",
+    language: "ru-RU",
+    transcript:
+      "ну короче мы вчера с петей созвонились и петя сказал что релиз переносим на среду потому что тесты ну не прошли",
+    must: [/Пет/, /сред/i, /тест/i, /релиз/i],
+    mustNot: [ru("короче"), ru("ну")],
+    maxEmoji: 0,
+  },
+  // Email: a greeting and a closing for a message, a name only when the speaker gave it.
+  {
+    id: "email.en.named",
+    style: "email",
+    language: "en-US",
+    transcript: "hey anna so can you send me the slides from yesterday's meeting before friday thanks",
+    must: [/^(?:Hi|Hello|Dear) Anna,\n\n/, /\bslides\b/i, /\bFriday\b/, CLOSING],
+    mustNot: [/\b[ap]\.?m\b/i, /\bsubject\b/i, SIGNED],
+    maxEmoji: 0,
+  },
+  {
+    id: "email.en.unnamed",
+    style: "email",
+    language: "en-US",
+    transcript: "so the office is closed on monday and everyone should work from home that day",
+    must: [GREETING, /\bMonday\b/, /\bhome\b/i, CLOSING],
+    mustNot: [NAMED_GREETING, SIGNED],
+    maxEmoji: 0,
+  },
+  {
+    id: "email.en.no-invented-details",
+    style: "email",
+    language: "en-US",
+    transcript: "hi can we move the call to next week something came up",
+    must: [/\bnext week\b/i],
+    mustNot: [/\b(?:Monday|Tuesday|Wednesday|Thursday|Friday)\b/, /\d/, /\b(?:apologi[sz]e|sorry)\b/i, SIGNED, NAMED_GREETING],
+    maxEmoji: 0,
+  },
+  {
+    id: "email.en.fragment",
+    style: "email",
+    language: "en-US",
+    transcript: "remember to renew the domain and pay the hosting bill",
+    must: [/\bdomain\b/i, /\bhosting\b/i],
+    mustNot: [GREETING, /\b(?:regards|dear)\b/i, /\n\n(?:Thanks|Thank you)/],
+    maxEmoji: 0,
+  },
+  {
+    id: "email.ru.ty",
+    style: "email",
+    language: "ru-RU",
+    transcript: "привет слушай можешь скинуть мне договор до пятницы",
+    must: [/^Привет/, /договор/i, /пятниц/i, /(?:[Пп]рисл|[Сс]кин|[Оо]тправ)/],
+    mustNot: [/(?:Пришлите|Отправьте|Скиньте|Можете)/, ru("короче"), ru("слушай")],
+    maxEmoji: 0,
+  },
+  {
+    id: "email.ru.vy",
+    style: "email",
+    language: "ru-RU",
+    transcript: "здравствуйте можете прислать счёт до конца недели",
+    must: [/^(?:Здравствуйте|Добрый день)/, /сч[её]т/i, /недел/i],
+    mustNot: [/(?:Пришли,|Скинь|Отправь )/],
+    maxEmoji: 0,
+  },
+  // Funny: light and kind, at most two emoji, warm for sad news.
+  {
+    id: "funny.en.light",
+    style: "funny",
+    language: "en-US",
+    transcript: "i finished the quarterly report and sent it to the client this morning",
+    must: [/\breport\b/i, /\bclient\b/i, /\bmorning\b/i],
+    mustNot: [/#\w/],
+    maxEmoji: 2,
+  },
+  {
+    id: "funny.en.sad-news-stays-kind",
+    style: "funny",
+    language: "en-US",
+    transcript: "my grandmother passed away last night so i won't be at work today",
+    must: [/\bgrand(?:mother|ma)\b/i, /\btoday\b/i],
+    mustNot: [LAUGHING, /#\w/],
+    maxEmoji: 2,
+  },
+  {
+    id: "funny.ru.light",
+    style: "funny",
+    language: "ru-RU",
+    transcript: "я сегодня опоздаю минут на десять потому что проспал",
+    must: [/(?:десят|10)/i, /просп/i],
+    mustNot: [/#[\p{L}]/u],
+    maxEmoji: 2,
+  },
+  // The modes in a translation.
+  {
+    id: "translate.rewrite.ru-en",
+    style: "rewrite",
+    language: "ru-RU",
+    targetLanguage: "en-US",
+    transcript: "ну короче мы вчера с петей созвонились и петя сказал что релиз переносим на среду",
+    must: [/\bPet(?:y|i)?a\b/, /\bWednesday\b/, /\brelease\b/i],
+    mustNot: [CYRILLIC],
+    maxEmoji: 0,
+  },
+  {
+    id: "translate.email.ru-en",
+    style: "email",
+    language: "ru-RU",
+    targetLanguage: "en-US",
+    transcript: "привет аня можешь прислать отчёт до пятницы спасибо",
+    must: [/^(?:Hi|Hello|Dear) An(?:n|y|j)a,\n\n/, /\breport\b/i, /\bFriday\b/, CLOSING],
+    mustNot: [CYRILLIC, SIGNED],
+    maxEmoji: 0,
+  },
+  {
+    id: "translate.funny.ru-en",
+    style: "funny",
+    language: "ru-RU",
+    targetLanguage: "en-US",
+    transcript: "я наконец доделал отчёт и прямо сейчас его отправляю",
+    must: [/\breport\b/i],
+    mustNot: [CYRILLIC, /#\w/],
+    maxEmoji: 2,
+  },
+  {
+    id: "translate.rewrite.en-ru",
+    style: "rewrite",
+    language: "en-US",
+    targetLanguage: "ru-RU",
+    transcript: "so the client called and the client said they want the new design by next week",
+    must: [/клиент/i, /дизайн/i, /следующ/i],
+    mustNot: [LATIN_WORD],
+    maxEmoji: 0,
+  },
+  {
+    id: "translate.email.en-ru",
+    style: "email",
+    language: "en-US",
+    targetLanguage: "ru-RU",
+    transcript: "hi tom can you send me the invoice by friday thanks",
+    must: [/^(?:Здравствуйте|Привет|Добрый день)[^\n]*\n\n/, /Том/, /сч[её]т/i, /пятниц/i],
+    mustNot: [LATIN_WORD],
+    maxEmoji: 0,
+  },
+  {
+    id: "translate.funny.en-ru",
+    style: "funny",
+    language: "en-US",
+    targetLanguage: "ru-RU",
+    transcript: "the pizza is here everyone come to the kitchen before it gets cold",
+    must: [/пицц/i, /кухн/i],
+    mustNot: [LATIN_WORD],
+    maxEmoji: 2,
+  },
 ];
 
 /** Lowercased letters and digits, one space apart: what "the same words" compares. */
@@ -442,6 +662,15 @@ function words(text: string): string {
 
 function wordCount(text: string): number {
   return words(text).split(" ").filter(Boolean).length;
+}
+
+/** Emoji in the text, one per character as it shows: a family or a flag is one. */
+export function emojiCount(text: string): number {
+  let count = 0;
+  for (const { segment } of new Intl.Segmenter("en", { granularity: "grapheme" }).segment(text)) {
+    if (/\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(segment)) count++;
+  }
+  return count;
 }
 
 /** What a run got wrong, as short labels; empty when it passed. */
@@ -455,6 +684,10 @@ export function check(benchCase: BenchCase, outcome: { status: string; reason?: 
     if (pattern.test(outcome.text)) problems.push(`has ${pattern}`);
   }
   if (benchCase.unchanged && words(outcome.text) !== words(benchCase.transcript)) problems.push("reworded");
+  if (benchCase.maxEmoji !== undefined) {
+    const emoji = emojiCount(outcome.text);
+    if (emoji > benchCase.maxEmoji) problems.push(`${emoji} emoji (at most ${benchCase.maxEmoji})`);
+  }
   if (benchCase.maxWordRatio !== undefined) {
     const [written, spoken] = [wordCount(outcome.text), wordCount(benchCase.transcript)];
     if (written > benchCase.maxWordRatio * spoken) problems.push(`not shorter (${written} of ${spoken} words)`);

@@ -86,11 +86,11 @@ Keyboard ext ── Darwin post + command file (one-time token) ──► Murmur
    - `DictationTranscriber` covers locales SpeechTranscriber lacks. Only it honors `AnalysisContext.contextualStrings` (at most 100 phrases).
 2. **Cleanup.**
    - Dictations of 3 words or fewer skip Claude.
-   - So do Word for word transcripts `CleanupGate` finds nothing to write differently in: punctuated (in any script), with no spoken punctuation command or spelled-out address. They get `LocalFormatter` only. The styles the model writes (Improve my grammar, Professional, Casual, Concise) always ask it.
+   - So do Word-to-Word transcripts `CleanupGate` finds nothing to write differently in: punctuated (in any script), with no spoken punctuation command or spelled-out address. They get `LocalFormatter` only. The modes the model writes (Rewrite, Email, Funny) always ask it.
    - Otherwise `CleanupClient` calls `cleanup` with an 8 s timeout.
    - Snippet triggers come back from Claude as `⟦s:<id>⟧` placeholders, and the app substitutes the expansion. Expansions never go to the server, and nothing is expanded twice.
    - A trigger said word for word is marked before Claude reads the transcript (`markSnippets` in the functions, `SnippetPlaceholders.mark` in the app for a text no model writes): Claude keeps a placeholder far more reliably than it puts one in (live checks, November 2026). Claude is left the other forms of a trigger, and both sides repair a reply that kept part of a trigger beside its placeholder.
-   - A reply that marks a snippet nobody named (not its trigger, nor another form of it) is refused, and the app writes the text itself: the snippet's text is the user's and may be private. A Casual reply that came back as the transcript around a snippet gets Casual's lowercase on the server.
+   - A reply that marks a snippet nobody named (not its trigger, nor another form of it) is refused, and the app writes the text itself: the snippet's text is the user's and may be private. A Casual reply (builds before the four modes) that came back as the transcript around a snippet gets Casual's lowercase on the server.
    - The expansion goes in last, after every tidy-up and style, exactly as typed. A dictation that is one snippet and nothing else is the expansion alone, without the recognizer's capital or full stop.
 3. **`TextJoiner`.**
    - Adds a leading space and fixes capitalization from `documentContextBeforeInput`.
@@ -214,7 +214,7 @@ Every `-route` name still opens its screen; `menu` opens the menu.
 - **Snippets:**
   - Fields: Snippet (under 60 characters) and Expansion.
   - Errors: "Please enter a snippet", "Snippet too long", "Snippet already exists".
-- **Style:** "How Murmur writes": Word for word (exact words, literal translation; the default), then four the model writes: Improve my grammar (the same words and tone, grammatically correct), Professional (clear and polite, for work), Casual (lowercase, like texting) and Concise (fewer words). Each is shown on one spoken sentence, with a pill on the keyboard that sets it. Four earlier styles (formal, casual, very casual, excited) were removed in November 2026; today's Casual is stored as `chat`. Since iOS 26.4 there's no per-app context.
+- **Style:** "How Murmur writes": four modes in a 2×2 picker, with what the picked one writes from one spoken sentence: Word-to-Word (exact words in order, punctuated, literal translation; the default), then three the model writes: Rewrite (grammar and flow fixed, meaning and facts kept), Email (a clear, polite email, greeting and closing when it is a whole message) and Funny (playful, light humor, an emoji or two). The keyboard's style pill opens the same four as tiles. The styles of earlier builds read as the closest mode (Improve my grammar and Concise → Rewrite, Professional → Email, Casual → Word-to-Word); the functions keep their prompts for older builds. Since iOS 26.4 there's no per-app context.
 
 **Menu and Account:**
 - **Account:**

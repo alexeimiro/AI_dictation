@@ -21,7 +21,7 @@ enum HistoryFixtures {
     /// "Pending" badge. The newest is from a minute before the status bar's 9:41.
     static func showcaseSample(now: Date = Date()) -> [Transcript] {
         let morning = Calendar.current.date(bySettingHour: 9, minute: 41, second: 0, of: now) ?? now
-        // The two the sample leaves unwritten (offline, over the limit), as Word for word writes them.
+        // The two the sample leaves unwritten (offline, over the limit), as Word-to-Word writes them.
         let written = [
             "11111111-1111-1111-1111-111111111103": "Короче, дедлайн по пулл-реквесту в гитхабе перенесли на семь вечера.",
             "11111111-1111-1111-1111-111111111106": "Напомни Светлане Юрьевне про Сбербанк.",
@@ -80,7 +80,7 @@ enum HistoryFixtures {
             Transcript(
                 id: UUID(uuidString: "11111111-1111-1111-1111-111111111104")!,
                 createdAt: now.addingTimeInterval(-26 * 3600),
-                language: "en-US", style: .grammar,
+                language: "en-US", style: .rewrite,
                 rawText: "things to do today first run the laundry second buy groceries and third call mom",
                 cleanedText: "Things to do today:\n1. Run the laundry\n2. Buy groceries\n3. Call mom",
                 status: .cleaned, metrics: metrics(7.8, 15), cleanupModel: "gpt-6-astra",

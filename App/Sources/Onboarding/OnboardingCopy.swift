@@ -244,8 +244,7 @@ enum OnboardingCopy {
 
     enum Style {
         static let title = "Pick how Murmur writes"
-        static let line = "You can change it any time from the keyboard."
-        static let youSay = "You say"
+        static let line = "Four modes. You can switch any time from the keyboard."
     }
 
     enum Notifications {

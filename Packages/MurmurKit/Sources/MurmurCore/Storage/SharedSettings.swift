@@ -150,8 +150,8 @@ public final class SharedSettings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Key.interactionSounds.rawValue) }
     }
 
-    /// Word for word until the user picks Improve my grammar; a style removed in November 2026
-    /// reads as Word for word (`StylePreset(stored:)`).
+    /// Word-to-Word until the user picks another mode; a style of an older build reads as the
+    /// mode closest to it (`StylePreset(stored:)`).
     public var defaultStyle: StylePreset {
         get { defaults.string(forKey: Key.defaultStyle.rawValue).map(StylePreset.init(stored:)) ?? .verbatim }
         set { defaults.set(newValue.rawValue, forKey: Key.defaultStyle.rawValue) }
@@ -197,7 +197,7 @@ public final class SharedSettings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Key.lowDataMode.rawValue) }
     }
 
-    /// "Smart formatting": a Word for word dictation drops "um" and "uh", and spoken commands
+    /// "Smart formatting": a Word-to-Word dictation drops "um" and "uh", and spoken commands
     /// ("new line", "comma", "at gmail dot com") become what they say. Off, it goes in as
     /// recognized, with only the dictionary and snippets applied. App-only.
     public var smartFormatting: Bool {

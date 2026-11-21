@@ -1,16 +1,16 @@
 import Foundation
 
 /// Decides whether a transcript needs the AI cleanup or can be inserted as the recognizer wrote
-/// it. The styles the model writes (Improve my grammar, Professional, Casual, Concise) always
-/// need it: what they change doesn't show in the text. Word for
-/// word keeps the speaker's words, so the model only earns its 1–3 s when there is something it
+/// it. The modes the model writes (Rewrite, Email, Funny) always need it: what they change
+/// doesn't show in the text. Word-to-Word keeps the speaker's words, so the model only earns its
+/// 1–3 s, and the call, when there is something it
 /// writes differently: no punctuation at all, a spoken punctuation or layout command, or a
 /// spelled-out address. A miss costs polish, never words, and Regenerate runs the model anyway.
-/// With Smart formatting off, Word for word never needs it: the text goes in as recognized.
+/// With Smart formatting off, Word-to-Word never needs it: the text goes in as recognized.
 public enum CleanupGate {
     public static func needsModel(_ transcript: String, style: StylePreset, smartFormatting: Bool = true) -> Bool {
         switch style {
-        case .grammar, .professional, .casual, .concise:
+        case .rewrite, .email, .funny:
             return true
         case .verbatim:
             guard smartFormatting else { return false }

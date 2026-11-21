@@ -132,7 +132,7 @@ struct SettingsView: View {
                 header("Personalization")
                 Toggle(isOn: $settings.smartFormatting) {
                     SettingLabel("Smart formatting",
-                                 detail: "Drop “um” and “uh”, and turn “new line” or “comma” into what they say. Every style but Word for word always does.")
+                                 detail: "Drop “um” and “uh”, and turn “new line” or “comma” into what they say. Every mode but Word-to-Word always does.")
                 }
                 .settingRow()
             }

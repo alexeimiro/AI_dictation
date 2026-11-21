@@ -10,6 +10,7 @@ import Anthropic from "npm:@anthropic-ai/sdk@1.2.0";
 import {
   apiKeyName,
   buildInstructionParts,
+  buildMessagesRequest,
   buildResponsesRequest,
   claudeThinking,
   CleanupAPIError,
@@ -30,6 +31,7 @@ import {
   describeLanguage,
   genericLanguageRules,
   LANGUAGE_RULES,
+  MODE_REMINDERS,
   resolveLanguage,
   TRANSLATION_RULES,
   TRANSLATION_STYLES,
@@ -40,6 +42,7 @@ import {
   cyrillicShare,
   guardOutput,
   guardTranslation,
+  maxCleanupWords,
   scriptOf,
   scriptShare,
   tidyOutput,
@@ -48,8 +51,11 @@ import {
 import {
   type CleanupRequest,
   LIMITS,
+  MODES,
   normalizeLanguageTag,
   parseCleanupRequest,
+  PRE_MODE_STYLES,
+  type Style,
   writesWithModel,
 } from "../_shared/types.ts";
 
@@ -701,7 +707,8 @@ Deno.test("improve my grammar fixes grammar and changes nothing else", () => {
     assertStringIncludes(pack.styles.grammar, "never make the text more formal", pack.key);
   }
   assertStringIncludes(TRANSLATION_STYLES.grammar, "natural, grammatical text in the target language");
-  // Every pack has today's five styles and none of the removed ones ("chat" is Casual).
+  // Every pack has the four modes, the five styles older builds send, and none of the styles
+  // removed in early November ("chat" is Casual).
   for (
     const styles of [
       LANGUAGE_RULES.en.styles,
@@ -711,7 +718,16 @@ Deno.test("improve my grammar fixes grammar and changes nothing else", () => {
       TRANSLATION_STYLES,
     ]
   ) {
-    assertEquals(Object.keys(styles).sort(), ["chat", "concise", "grammar", "professional", "verbatim"]);
+    assertEquals(Object.keys(styles).sort(), [
+      "chat",
+      "concise",
+      "email",
+      "funny",
+      "grammar",
+      "professional",
+      "rewrite",
+      "verbatim",
+    ]);
   }
   assertFalse(CLEANUP_RULES.includes("more formal than the requested style"));
 });
@@ -881,7 +897,7 @@ Deno.test("request validation", () => {
   assertFalse(parseCleanupRequest({ ...request, transcript: 42 }).ok);
   assertFalse(parseCleanupRequest({ ...request, transcript: "x".repeat(20_001) }).ok);
   assertFalse(parseCleanupRequest({ ...request, style: "shouty" }).ok);
-  for (const style of ["verbatim", "grammar", "professional", "chat", "concise"]) {
+  for (const style of ["verbatim", "rewrite", "email", "funny", "grammar", "professional", "chat", "concise"]) {
     const parsed = parseCleanupRequest({ ...request, style });
     assert(parsed.ok && parsed.value.style === style, style);
   }
@@ -892,6 +908,7 @@ Deno.test("request validation", () => {
     assert(parsed.ok && parsed.value.style === "grammar", legacy);
   }
   assert(writesWithModel("grammar") && writesWithModel("professional") && writesWithModel("chat") && writesWithModel("concise"));
+  assert(writesWithModel("rewrite") && writesWithModel("email") && writesWithModel("funny"));
   assertFalse(writesWithModel("verbatim") || writesWithModel(undefined), "a request without a style is Word for word");
   assertFalse(parseCleanupRequest({ ...request, snippets: [{ token: "{s:1}", trigger: "x" }] }).ok);
   assertFalse(parseCleanupRequest({ ...request, dictionary: [{ term: "" }] }).ok);
@@ -1044,4 +1061,226 @@ Deno.test("tidyOutput removes fences and wrapping quotes", () => {
   assertEquals(tidyOutput(quoted), quoted, "inner quotes of the same pair are the user's");
   const dialogue = "Он сказал: «Я приду» — и поставил точку в этом вопросе.";
   assertEquals(tidyOutput(dialogue), dialogue);
+});
+
+// MARK: The four modes (November 21, 2026)
+
+/** SHA-256 of the five styles' lines, in this order, joined by NUL, as they were before the four modes. */
+const PRE_MODE_STYLE_HASHES: Record<string, string> = {
+  en: "25629482611a03095ea4e8b606d52ffd237d44f826742c3287a4d243a0ae9baf",
+  ru: "3d78195ab480e70b7acfec61496dd54a3e5297cd7d9b3179492d4ac70f08cb08",
+  "tr-TR": "86a085257315bdb6369bc52d7ecb6b9a36917614d037da7588fe390c8e790b14",
+  "de-DE": "dab932c82d19ea5e8e7c6f4acce963f73fcbc02592c7127eee3d8c61ab32dfed",
+  auto: "e6cc902538bf525ae5b0427a2a3769b1925f47ce1d98bdf00a54fca1a9627f4d",
+  translation: "1f653a97a5cecf41d3bed8fe99d092c0b225a48b1fa48167d89b87a7f9a39e65",
+};
+
+async function sha256(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+Deno.test("builds from before the four modes get the prompt they had, byte for byte", async () => {
+  const packs: Record<string, Record<Style, string>> = {
+    en: LANGUAGE_RULES.en.styles,
+    ru: LANGUAGE_RULES.ru.styles,
+    "tr-TR": genericLanguageRules("tr-TR").styles,
+    "de-DE": genericLanguageRules("de-DE").styles,
+    auto: genericLanguageRules(null).styles,
+    translation: TRANSLATION_STYLES,
+  };
+  const oldStyles: Style[] = ["verbatim", "grammar", "professional", "chat", "concise"];
+  for (const [key, styles] of Object.entries(packs)) {
+    assertEquals(await sha256(oldStyles.map((style) => styles[style]).join("\u0000")), PRE_MODE_STYLE_HASHES[key], key);
+  }
+  // The shared blocks every style's prompt starts with, cached across users, are the same too.
+  assertEquals(
+    await sha256([CLEANUP_RULES, VERBATIM_RULES, TRANSLATION_RULES].join("\u0000")),
+    "d403ec9db6d50c48744172bf358c33a19e37a1d86007761b05e856fc074f98da",
+  );
+  const blocks = [LANGUAGE_RULES.en, LANGUAGE_RULES.ru, genericLanguageRules("tr-TR"), genericLanguageRules(null)]
+    .flatMap((pack) => [buildLanguageBlock(pack), buildVerbatimLanguageBlock(pack)]);
+  assertEquals(await sha256(blocks.join("\u0000")), "2c74279ea1c4dd2fcc19b23292cf3465dcb4b87f667d2bc9383b2b37c4413573");
+});
+
+Deno.test("the four modes are the app's, the five styles still parse, and both lists cover every style", () => {
+  assertEquals([...MODES], ["verbatim", "rewrite", "email", "funny"]);
+  assertEquals([...PRE_MODE_STYLES], ["grammar", "professional", "chat", "concise"]);
+  assertEquals(Object.keys(TRANSLATION_STYLES).sort(), [...MODES, ...PRE_MODE_STYLES].sort());
+  for (const style of MODES) {
+    const parsed = parseCleanupRequest({ ...request, style });
+    assert(parsed.ok && parsed.value.style === style, style);
+  }
+  assertFalse(parseCleanupRequest({ ...request, style: "Rewrite" }).ok, "raw values are lowercase");
+  assertFalse(parseCleanupRequest({ ...request, style: "professional_email" }).ok);
+});
+
+Deno.test("Rewrite, Email and Funny say what they change and what they must keep", () => {
+  const packs = [LANGUAGE_RULES.en, LANGUAGE_RULES.ru, genericLanguageRules("tr-TR"), genericLanguageRules(null)];
+  for (const pack of packs) {
+    const { rewrite, email, funny } = pack.styles;
+    assert(rewrite.startsWith("Rewrite: this style changes the wording."), pack.key);
+    assert(email.startsWith("Email: this style changes the wording and the layout."), pack.key);
+    assert(funny.startsWith("Funny: this style changes the wording."), pack.key);
+    for (const line of [rewrite, email, funny]) {
+      assertStringIncludes(line, "fact, name, number, date, time, question and request", pack.key);
+      assertStringIncludes(line, "Write times as the speaker gave them", pack.key);
+    }
+    // Rewrite: better sentences, the same message, the speaker's own register.
+    assertStringIncludes(rewrite, "Improve the sentence structure", pack.key);
+    assertStringIncludes(rewrite, "Remove repetition the speaker did not mean", pack.key);
+    assertStringIncludes(rewrite, "Do not make it more formal or more polite", pack.key);
+    assertStringIncludes(rewrite, "do not summarize", pack.key);
+    // Email: greeting and closing only for a message, a name only when the speaker gave it.
+    assertStringIncludes(email, "Greet by name only a person the speaker named as the recipient", pack.key);
+    assert(/never sign with a name/i.test(email), pack.key);
+    assertStringIncludes(email, "No subject line", pack.key);
+    assertStringIncludes(email, "gets no greeting and no closing", pack.key);
+    assertStringIncludes(email, "never add names, dates, times, deadlines, promises, apologies, thanks", pack.key);
+    // Funny: light, kind, at most two emoji, never about sad news.
+    assertStringIncludes(funny, "at most two in the whole text", pack.key);
+    assertStringIncludes(funny, "Keep the humor kind", pack.key);
+    assertStringIncludes(funny, "gets warmth, not jokes", pack.key);
+    assertStringIncludes(funny, "Never invent events, excuses, reasons or details", pack.key);
+  }
+  // The language packs show an example in their own language; Russian keeps «ты» and «вы».
+  assertStringIncludes(LANGUAGE_RULES.en.styles.email, '"Hi Anna,\n\nI\'ve looked at the budget');
+  assertStringIncludes(LANGUAGE_RULES.ru.styles.email, "«Привет, Аня!\n\nЯ посмотрел бюджет");
+  assertStringIncludes(LANGUAGE_RULES.ru.styles.email, "«ты» stays «ты»");
+  assertStringIncludes(LANGUAGE_RULES.ru.styles.rewrite, "«ты» stays «ты» and «вы» stays «вы»");
+  assertStringIncludes(LANGUAGE_RULES.ru.styles.funny, "keep «ты» or «вы» as the speaker used it");
+  assertStringIncludes(LANGUAGE_RULES.ru.styles.rewrite, "«в четыре» stays «в четыре»");
+  // The generic packs name the language, and Rewrite reuses the grammar example a language needed.
+  assertStringIncludes(genericLanguageRules("de-DE").styles.email, "emails in German usually do");
+  assertStringIncludes(genericLanguageRules("tr-TR").styles.rewrite, "«Ben yarın okula gideceğim.»");
+  assertStringIncludes(genericLanguageRules(null).styles.funny, "in the spoken language the way");
+  for (const style of ["rewrite", "email", "funny"] as const) {
+    assertStringIncludes(TRANSLATION_STYLES[style], "this style changes the wording", style);
+    assertStringIncludes(LANGUAGE_RULES.en.styles[style], "When translating", style);
+    assertStringIncludes(LANGUAGE_RULES.ru.styles[style], "When translating", style);
+  }
+});
+
+Deno.test("each mode reaches the prompt: its line in the context, under the rules it is written with", () => {
+  const labels: Record<string, string> = { rewrite: "Rewrite:", email: "Email:", funny: "Funny:" };
+  for (const style of ["rewrite", "email", "funny"] as const) {
+    for (const tag of ["en-US", "ru-RU", "tr-TR", undefined]) {
+      const language = resolveLanguage(tag);
+      const parts = buildInstructionParts({ ...request, language: tag, style }, language);
+      assertEquals(parts[0], CLEANUP_RULES, `${style} ${tag}`);
+      assertEquals(parts[1], buildLanguageBlock(language.rules), `${style} ${tag}`);
+      assertStringIncludes(parts[2], `Style: ${language.rules.styles[style]}`, `${style} ${tag}`);
+      assertStringIncludes(parts[2], `Style: ${labels[style]}`, `${style} ${tag}`);
+    }
+    // A translation takes the target's pack when there is one, the generic line otherwise.
+    const translation = { ...request, language: "ru-RU", style };
+    const intoEnglish = buildInstructionParts({ ...translation, targetLanguage: "en-US" }, resolveLanguage("ru-RU"));
+    assertEquals(intoEnglish[0], TRANSLATION_RULES);
+    assertStringIncludes(intoEnglish[1], "Style: " + LANGUAGE_RULES.en.styles[style]);
+    const intoRussian = buildTranslationContext({ ...translation, language: "en-US", targetLanguage: "ru-RU" }, resolveLanguage("en-US"));
+    assertStringIncludes(intoRussian, "Style: " + LANGUAGE_RULES.ru.styles[style]);
+    const intoTurkish = buildTranslationContext({ ...translation, targetLanguage: "tr-TR" }, resolveLanguage("ru-RU"));
+    assertStringIncludes(intoTurkish, "Style: " + TRANSLATION_STYLES[style]);
+  }
+  // The four modes differ from each other in every pack, so switching mode changes the request.
+  for (const pack of [LANGUAGE_RULES.en, LANGUAGE_RULES.ru, genericLanguageRules("tr-TR")]) {
+    assertEquals(new Set(MODES.map((style) => pack.styles[style])).size, 4, pack.key);
+  }
+});
+
+Deno.test("Email and Funny may grow a short dictation; every other style keeps its bound", () => {
+  assertEquals(maxCleanupWords(4, "email"), 20);
+  assertEquals(maxCleanupWords(4, "funny"), 20);
+  assertEquals(maxCleanupWords(20, "email"), 50);
+  for (const style of [undefined, "verbatim", "rewrite", "grammar", "professional", "chat", "concise"] as const) {
+    assertEquals(maxCleanupWords(4, style), 12, String(style));
+    assertEquals(maxCleanupWords(20, style), 36, String(style));
+  }
+  const spoken = "tell him I'm running late";
+  const email = "Hi,\n\nI wanted to let you know that I'm running late today.\n\nBest regards,";
+  assert(countWords(email) > 12, "the email is longer than the bound of the other styles");
+  assert(guardOutput(spoken, email, "en", "email").ok);
+  assertEquals(guardOutput(spoken, email, "en", "rewrite"), { ok: false, reason: "too_long" });
+  // An answer still fails in Email: a dictated request is content, not a task.
+  const poem = "Hi,\n\nSoft paws upon the windowsill, a quiet purr, the world is still. Whiskers twitch at morning light, " +
+    "a sleepy cat curls up so tight, and dreams of mice that run all night.\n\nBest regards,";
+  assertEquals(guardOutput("write me a poem about cats", poem, "en", "email"), { ok: false, reason: "too_long" });
+  // Greetings are not assistant openers, in English or Russian.
+  for (const [said, written] of [
+    ["hey anna can you send me the numbers", "Hi Anna,\n\nCould you please send me the numbers?\n\nThanks,"],
+    ["hello can you send me the numbers", "Hello,\n\nCould you please send me the numbers?\n\nBest regards,"],
+    ["можете прислать цифры до четверга", "Здравствуйте!\n\nПришлите, пожалуйста, цифры до четверга.\n\nС уважением,"],
+  ]) {
+    assert(guardOutput(said, written, said.match(/[а-я]/) ? "ru-RU" : "en", "email").ok, written);
+  }
+  // Emoji aren't words: a Funny reply is counted by its words.
+  assertEquals(countWords("Report done! 🎉🎉"), 2);
+  assert(guardOutput("so i finally finished the report", "Drumroll, please… the report is finally done! 🎉", "en", "funny").ok);
+});
+
+Deno.test("tidyOutput keeps an email's lines and a reply's emoji", () => {
+  const email = "Hi Anna,\n\nI've looked at the budget, and it's fine.\n\nThanks,";
+  assertEquals(tidyOutput(`\n${email}\n`), email);
+  assertEquals(tidyOutput("Pizza has landed! 🍕"), "Pizza has landed! 🍕");
+  assertEquals(tidyOutput('"Pizza has landed! 🍕"'), "Pizza has landed! 🍕");
+});
+
+Deno.test("an Email reply comes back with its layout, a Funny one with its emoji", async () => {
+  const email = "Hi Anna,\n\nI've looked at the budget, and it's fine. Could you please send me the final numbers by Thursday?\n\nThanks,";
+  const emailRequest: CleanupRequest = {
+    ...request,
+    style: "email",
+    transcript: "hey anna i looked at the budget it's fine can you send the final numbers by thursday thanks",
+    snippets: [],
+  };
+  const captured: Captured = {};
+  const outcome = await runCleanup(emailRequest, options(fakeFetch(reply(email), captured)));
+  assertEquals([outcome.status, outcome.text], ["cleaned", email]);
+  assertStringIncludes(captured.body!.instructions as string, "Style: " + LANGUAGE_RULES.en.styles.email);
+  assertEquals(captured.body!.prompt_cache_key, "murmur-cleanup-en", "the modes share the cleanup cache");
+
+  const funny = "Drumroll, please… the report is finally done and flying your way! 🎉";
+  const funnyRequest: CleanupRequest = { ...emailRequest, style: "funny", transcript: "so i finally finished the report and i'm sending it now" };
+  const written = await runCleanup(funnyRequest, options(fakeFetch(reply(funny))));
+  assertEquals([written.status, written.text], ["cleaned", funny]);
+  // Funny's room doesn't let an answer through.
+  const answer = await runCleanup(
+    { ...funnyRequest, transcript: "what's the weather tomorrow" },
+    options(fakeFetch(reply("Sure! Tomorrow looks sunny with a high of 22 degrees, so pack sunglasses 😎"))),
+  );
+  assertEquals([answer.status, answer.reason], ["raw", "assistant_reply"]);
+});
+
+// The mode restated after the transcript (live check, 2026-11-21): only the three modes that reword
+// get it, so older builds' styles send exactly the message they always did.
+Deno.test("Rewrite, Email and Funny restate their mode after the transcript; other styles don't", () => {
+  const transcript = "me and him was thinking we could meet on friday";
+  const plain = `<transcript>\n${transcript}\n</transcript>`;
+  for (const style of ["verbatim", "grammar", "professional", "chat", "concise"] as const) {
+    assertEquals(buildTranscriptMessage(transcript, style), plain, style);
+    assertEquals(
+      buildTranslationMessage(transcript, "de-DE", style),
+      `${plain}\n\nTranslate the transcript into ${describeLanguage("de-DE")}.`,
+      style,
+    );
+  }
+  assertEquals(buildTranscriptMessage(transcript), plain);
+  for (const style of ["rewrite", "email", "funny"] as const) {
+    const message = buildTranscriptMessage(transcript, style);
+    assert(message.startsWith(`${plain}\n\n`), style);
+    assert(message.includes(MODE_REMINDERS[style]!), style);
+    const translation = buildTranslationMessage(transcript, "de-DE", style);
+    assert(translation.endsWith(`. ${MODE_REMINDERS[style]}`), style);
+  }
+  assert(MODE_REMINDERS.email!.includes("greeting line"));
+  assert(MODE_REMINDERS.funny!.includes("emoji"));
+});
+
+Deno.test("both providers send the mode's restatement", () => {
+  const request = { dictationId: crypto.randomUUID(), transcript: "me and him was late", style: "email" as const };
+  const language = resolveLanguage("en-US");
+  const openai = buildResponsesRequest(request, language, { model: "gpt-test", effort: "none" });
+  assertEquals(openai.input, [{ role: "user", content: buildTranscriptMessage(request.transcript, "email") }]);
+  const claude = buildMessagesRequest(request, language, { model: "claude-haiku-5-5", effort: "none" });
+  assertEquals(claude.messages, [{ role: "user", content: buildTranscriptMessage(request.transcript, "email") }]);
 });

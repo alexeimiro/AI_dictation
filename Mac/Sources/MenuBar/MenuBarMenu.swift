@@ -51,7 +51,7 @@ struct MenuBarMenu: View {
             }
             .pickerStyle(.inline)
             Divider()
-            Button("Compare styles…") { model.openMainWindow(page: .style) }
+            Button("Compare modes…") { model.openMainWindow(page: .style) }
         }
         Divider()
         Button("Help") { openURL(MacLinks.support) }

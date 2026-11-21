@@ -929,8 +929,10 @@ final class SessionController {
             if source == .keyboard { logger.info("Live words: none, the week's words wait for the server") }
         }
         audio.openGate()
+        // The mode is fixed now, whichever asked: one picked while this dictation is recorded or
+        // written (the app's Style screen, the keyboard's pill) applies from the next one.
         active = ActiveDictation(requestId: requestId, documentIdentifier: documentIdentifier,
-                                 style: style, language: language.tag,
+                                 style: style ?? settings.defaultStyle, language: language.tag,
                                  translationTargetLanguage: translationTargetLanguage,
                                  source: source, startedAt: Date())
         phase = .recording(requestId)

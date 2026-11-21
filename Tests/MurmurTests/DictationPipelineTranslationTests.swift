@@ -97,7 +97,7 @@ struct DictationPipelineTranslationTests {
         let pipeline = DictationPipeline(cleanup: cleanup, settings: isolatedSettings())
         let requestID = UUID()
         let dictation = ActiveDictation(
-            requestId: requestID, documentIdentifier: nil, style: .grammar, language: "ru-RU",
+            requestId: requestID, documentIdentifier: nil, style: .rewrite, language: "ru-RU",
             translationTargetLanguage: "tr-TR", source: .keyboard, startedAt: Date())
 
         let outcome = await pipeline.complete(
@@ -206,14 +206,14 @@ struct DictationPipelineTranslationTests {
         let pipeline = DictationPipeline(cleanup: TranslationCleanup(), settings: isolatedSettings())
         let requestID = UUID()
         let dictation = ActiveDictation(
-            requestId: requestID, documentIdentifier: nil, style: .grammar, language: "ru-RU",
+            requestId: requestID, documentIdentifier: nil, style: .rewrite, language: "ru-RU",
             translationTargetLanguage: "tr-TR", source: .keyboard, startedAt: Date())
 
         _ = await pipeline.complete(dictation, transcriber: transcriber, audioSeconds: 2, stoppedAt: ContinuousClock.now)
 
         #expect(transcriber.translationRequest?.dictationId == requestID)
         #expect(transcriber.translationRequest?.targetLanguage == "tr-TR")
-        #expect(transcriber.translationRequest?.style == .grammar)
+        #expect(transcriber.translationRequest?.style == .rewrite)
     }
 
     /// Out of time or a model error in `dictate`: the transcript is translated through `cleanup`

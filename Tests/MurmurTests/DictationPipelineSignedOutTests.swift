@@ -90,10 +90,10 @@ struct DictationPipelineSignedOutTests {
         #expect(transcript.errorReason == "The account was signed out.")
     }
 
-    /// No cleanup runs to be refused for a short dictation or a Word for word one with nothing to
+    /// No cleanup runs to be refused for a short dictation or a Word-to-Word one with nothing to
     /// write differently: the transcriber's word on the refusal is enough for the keyboard to say so.
     @Test func aDictationThatSkipsTheCleanupSaysSoToo() async {
-        for (heard, style) in [("Thanks, Olga", StylePreset.grammar), ("Can you send me the report by Friday?", .verbatim)] {
+        for (heard, style) in [("Thanks, Olga", StylePreset.rewrite), ("Can you send me the report by Friday?", .verbatim)] {
             let (result, transcript, cleanup) = await dictate(heard: heard, style: style)
             #expect(cleanup.calls == 0)
             #expect(result.status == .raw)
@@ -121,7 +121,7 @@ struct DictationPipelineSignedOutTests {
     /// `heard`: the fallback's transcript, or nil when the cloud's refusal (or `fallbackFailure`)
     /// is all there is.
     private func dictate(
-        heard: String?, translatingTo target: String? = nil, style: StylePreset = .grammar,
+        heard: String?, translatingTo target: String? = nil, style: StylePreset = .rewrite,
         refusal: CloudTranscriptionError = .signedOut, fallbackFailure: (any Error)? = nil
     ) async -> (DictationResult, Transcript, SignedOutCleanup) {
         let suite = "test.murmur.pipeline.\(UUID().uuidString)"

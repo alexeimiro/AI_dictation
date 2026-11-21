@@ -45,15 +45,15 @@ private final class FakeCloud: CloudTranscribing {
 @MainActor
 private final class FakeDictate: Dictating {
     var isAvailable = true
-    /// A deployment that takes Word for word; false for one from before it did.
+    /// A deployment that takes Word-to-Word; false for one from before it did.
     var takesPlain = true
     var transcribesAlone: Bool { isAvailable && takesPlain }
     var lastReplyAt: ContinuousClock.Instant?
     var failure: CloudTranscriptionError?
-    /// What a Word for word request fails with.
+    /// What a Word-to-Word request fails with.
     var plainFailure: CloudTranscriptionError?
     private(set) var calls: [(audio: Data, language: String?, request: ModelRequest)] = []
-    /// The Word for word requests: the transcript alone.
+    /// The Word-to-Word requests: the transcript alone.
     private(set) var plainCalls: [(audio: Data, language: String?, dictationId: UUID)] = []
     /// What the fake heard, as `dictate` reports it.
     var languages = ["ru"]
@@ -438,16 +438,16 @@ struct OpenAITranscriberTests {
         feed(transcriber, seconds: 1)
 
         let output = try await transcriber.finishUtterance(
-            model: ModelRequest(dictationId: UUID(), targetLanguage: nil, style: .grammar, dictionary: [], snippets: []))
+            model: ModelRequest(dictationId: UUID(), targetLanguage: nil, style: .rewrite, dictionary: [], snippets: []))
 
         #expect(try output.modelReply?.get().text == "Hi from the cloud.")
         #expect(cloud.calls.isEmpty)
         let call = try #require(dictate.calls.first)
         #expect(call.request.targetLanguage == nil)
-        #expect(call.request.style == .grammar)
+        #expect(call.request.style == .rewrite)
     }
 
-    /// Word for word goes through `dictate` as well: one worker checks and transcribes it, and no
+    /// Word-to-Word goes through `dictate` as well: one worker checks and transcribes it, and no
     /// model writes it.
     @Test func aWordForWordDictationIsTranscribedByDictate() async throws {
         let cloud = FakeCloud()
@@ -561,7 +561,7 @@ struct OpenAITranscriberTests {
     }
 
     /// The server counts a transcript's words under the dictation's own id, so `transcribe` is told
-    /// it: by the pipeline for Word for word, by the model request when `dictate` can't take it.
+    /// it: by the pipeline for Word-to-Word, by the model request when `dictate` can't take it.
     @Test func transcribeIsToldWhichDictationItIs() async throws {
         let cloud = FakeCloud()
         let dictate = FakeDictate()
@@ -1083,7 +1083,7 @@ struct OpenAITranscriberTests {
         let suite = "test.murmur.pipeline.\(UUID().uuidString)"
         defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
         let settings = SharedSettings(defaults: UserDefaults(suiteName: suite))
-        // Word for word: the punctuated on-device text has nothing for the model to change.
+        // Word-to-Word: the punctuated on-device text has nothing for the model to change.
         let dictation = ActiveDictation(
             requestId: UUID(), documentIdentifier: nil, style: .verbatim, language: "ru-RU",
             translationTargetLanguage: nil, source: .keyboard, startedAt: Date())
@@ -1168,7 +1168,7 @@ struct OpenAITranscriberTests {
         transcriber.beginUtterance()
         feed(transcriber, seconds: 1)
         var dictation = ActiveDictation(
-            requestId: UUID(), documentIdentifier: nil, style: .grammar, language: "ru-RU",
+            requestId: UUID(), documentIdentifier: nil, style: .rewrite, language: "ru-RU",
             translationTargetLanguage: "en-US", source: .keyboard, startedAt: Date())
         dictation.stopRequestedAt = Date().addingTimeInterval(-0.05)
         dictation.tapToStopMs = 50
@@ -1205,7 +1205,7 @@ struct OpenAITranscriberTests {
         transcriber.beginUtterance()
         feed(transcriber, seconds: 1)
         let dictation = ActiveDictation(
-            requestId: UUID(), documentIdentifier: nil, style: .grammar, language: "ru-RU",
+            requestId: UUID(), documentIdentifier: nil, style: .rewrite, language: "ru-RU",
             translationTargetLanguage: nil, source: .keyboard, startedAt: Date())
 
         let outcome = await DictationPipeline(cleanup: TimedCleanup()).complete(
@@ -1999,7 +1999,7 @@ struct OpenAITranscriberTests {
         #expect(cloud.calls.count == 2 && onDevice.finished == 0)
     }
 
-    /// The same through `dictate`, for a style the model writes and for Word for word, and for too
+    /// The same through `dictate`, for a style the model writes and for Word-to-Word, and for too
     /// many dictations a minute.
     @Test(arguments: [CloudTranscriptionError.limitReached, .rateLimited])
     func aRefusedDictateIsNeverRecognizedOnTheIPhone(refusal: CloudTranscriptionError) async throws {
@@ -2015,7 +2015,7 @@ struct OpenAITranscriberTests {
             await transcriber.prepareFallback()
             transcriber.beginUtterance()
             feed(transcriber, seconds: 1)
-            let request = wordForWord ? nil : ModelRequest(dictationId: UUID(), targetLanguage: nil, style: .grammar,
+            let request = wordForWord ? nil : ModelRequest(dictationId: UUID(), targetLanguage: nil, style: .rewrite,
                                                            dictionary: [], snippets: [])
             await #expect(throws: refusal) {
                 try await transcriber.finishUtterance(model: request, dictationId: UUID())
@@ -2166,7 +2166,7 @@ struct OpenAITranscriberTests {
         #expect(settings.wordsUsedUp())
     }
 
-    /// Word for word at the limit, with the iPhone's model ready: nothing for the keyboard or the
+    /// Word-to-Word at the limit, with the iPhone's model ready: nothing for the keyboard or the
     /// history, the limit's notice, and no dictation until the week resets.
     @Test func pastTheLimitTheKeyboardAndTheHistoryGetNoText() async throws {
         let cloud = FakeCloud()
@@ -2205,7 +2205,7 @@ struct OpenAITranscriberTests {
         let cleanup = RefusingCleanup()
 
         let outcome = await DictationPipeline(cleanup: cleanup, settings: settings).complete(
-            dictation(style: .grammar), transcriber: transcriber, audioSeconds: 1, stoppedAt: ContinuousClock.now)
+            dictation(style: .rewrite), transcriber: transcriber, audioSeconds: 1, stoppedAt: ContinuousClock.now)
 
         #expect(cleanup.calls == 1)
         #expect(outcome.result.status == .raw && outcome.result.isInsertable)
@@ -2231,7 +2231,7 @@ struct OpenAITranscriberTests {
         let cleanup = RefusingCleanup()
 
         let outcome = await DictationPipeline(cleanup: cleanup, settings: settings).complete(
-            dictation(style: .grammar), transcriber: transcriber, audioSeconds: 1, stoppedAt: ContinuousClock.now)
+            dictation(style: .rewrite), transcriber: transcriber, audioSeconds: 1, stoppedAt: ContinuousClock.now)
 
         #expect(onDevice.finished == 1 && cleanup.calls == 1)
         #expect(outcome.result.status == .limitReached && outcome.result.text.isEmpty)

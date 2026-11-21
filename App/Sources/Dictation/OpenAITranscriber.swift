@@ -497,7 +497,7 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
         try await finish(model: request, dictationId: request?.dictationId)
     }
 
-    /// As above, naming the dictation whatever it asks for: Word for word has no model request to
+    /// As above, naming the dictation whatever it asks for: Word-to-Word has no model request to
     /// carry its id, and its words are counted under it by the function that transcribes it,
     /// `dictate` when that can, else `transcribe`.
     func finishUtterance(model request: ModelRequest?, dictationId: UUID) async throws -> UtteranceOutput {
@@ -555,7 +555,7 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
                                          detectedLanguage: detected(reply.languages), heardInCloud: true)
                 timing = reply.timing
             } else {
-                // Word for word asks `dictate` for the transcript alone. A dictation the model was
+                // Word-to-Word asks `dictate` for the transcript alone. A dictation the model was
                 // to write, which `dictate` couldn't take, goes to `transcribe` as it always did.
                 let transcript: CloudTranscript
                 if request == nil, let dictationId,
@@ -634,7 +634,7 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
         }
     }
 
-    /// A Word for word dictation's transcript from `dictate`, or nil to send the same audio to
+    /// A Word-to-Word dictation's transcript from `dictate`, or nil to send the same audio to
     /// `transcribe`: `dictate` is unavailable, can't transcribe alone, or couldn't run its checks.
     private func transcribedAlone(_ audio: EncodedAudio, language: String?, hints: [String], keywords: [String],
                                   dictationId: UUID) async throws -> CloudTranscript? {

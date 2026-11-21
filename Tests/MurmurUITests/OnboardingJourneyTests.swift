@@ -29,7 +29,7 @@ final class OnboardingJourneyTests: XCTestCase {
 
     // MARK: Helpers
 
-    /// The button labeled `text`, else the first whose label starts with it ("Word for word, Your exact …").
+    /// The button labeled `text`, else the first whose label starts with it ("Word-to-Word, Your exact …").
     /// Keyboard keys are excluded: the globe key is "Next keyboard".
     private func button(_ text: String) -> XCUIElement {
         let exact = app.buttons.matching(NSPredicate(format: "label == %@", text)).firstMatch
@@ -125,8 +125,8 @@ final class OnboardingJourneyTests: XCTestCase {
         tap(Copy.next)
         expectText(Copy.Languages.title)
         tap(Copy.next)
-        // A style's name, from MurmurCore.
-        tap("Word for word")
+        // A mode's name, from MurmurCore.
+        tap("Word-to-Word")
         tap(Copy.next)
         tap(Copy.Notifications.later)
         tap(Copy.Desktop.decline)

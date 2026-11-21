@@ -21,7 +21,7 @@ struct DictateClientTests {
     }
 
     private func translation(id: UUID = UUID()) -> ModelRequest {
-        ModelRequest(dictationId: id, targetLanguage: "en-US", style: .grammar,
+        ModelRequest(dictationId: id, targetLanguage: "en-US", style: .rewrite,
                            dictionary: [DictionaryTerm(term: "Окафор", misspelling: "окофор")],
                            snippets: [])
     }
@@ -31,7 +31,7 @@ struct DictateClientTests {
                                  keywords: ["Окафор"], request: translation(id: id))
     }
 
-    /// A Word for word dictation under Auto-detect.
+    /// A Word-to-Word dictation under Auto-detect.
     private func transcribe(with client: DictateClient, id: UUID = UUID()) async throws(CloudTranscriptionError) -> CloudTranscript {
         try await client.transcribe(audio: Data([0x00, 0x01, 0x02]), format: .m4a, language: nil,
                                     languageHints: ["ru-RU", "en-US"], keywords: ["Окафор"], dictationId: id)
@@ -89,7 +89,7 @@ struct DictateClientTests {
         #expect(fields["language"] as? String == "ru-RU")
         #expect(fields["keywords"] as? [String] == ["Окафор"])
         #expect(fields["targetLanguage"] as? String == "en-US")
-        #expect(fields["style"] as? String == "grammar")
+        #expect(fields["style"] as? String == "rewrite")
         let dictionary = try #require(fields["dictionary"] as? [[String: String]])
         #expect(dictionary == [["term": "Окафор", "misspelling": "окофор"]])
         #expect(fields["snippets"] as? [Any] != nil)
@@ -157,7 +157,7 @@ struct DictateClientTests {
         #expect(StubURLProtocol.sent(to: host).isEmpty)
     }
 
-    /// Word for word goes up like any dictation, naming its style and no target, and comes back as
+    /// Word-to-Word goes up like any dictation, naming its style and no target, and comes back as
     /// the transcript alone.
     @Test func aWordForWordDictationAsksForTheTranscriptAlone() async throws {
         StubURLProtocol.answer(host, with: .init(body: Data(#"""
@@ -200,7 +200,7 @@ struct DictateClientTests {
         #expect((fields["snippets"] as? [Any])?.isEmpty == true)
     }
 
-    /// A deployment from before `dictate` took Word for word answers one 400. It isn't asked for
+    /// A deployment from before `dictate` took Word-to-Word answers one 400. It isn't asked for
     /// another, while the dictations the model writes still go through.
     @Test func aRefusalTurnsOffWordForWordOnly() async throws {
         answer(status: 400, error: "bad_request")

@@ -1,3 +1,5 @@
+import type { Style } from "./types.ts";
+
 const PLACEHOLDER = /⟦s:[0-9a-f]{8}⟧/g;
 
 /** Locale-aware word count; works for languages without spaces (Chinese, Japanese). */
@@ -83,15 +85,30 @@ export function cyrillicShare(text: string): number | null {
 }
 
 /**
+ * The most words a cleanup may come back with before it counts as an answer rather than the
+ * speaker's text. Email and Funny add words nobody said: a greeting line and a closing ("Hi,",
+ * "Best regards,") and polite framing around a request, or a playful phrase. A four-word "tell
+ * him I'm running late" is a fourteen-word email, past the 12 every other style allows, so those
+ * two get 20 words, or 2.5 times what was said. An answer to a dictated request ("write me a
+ * poem", "what's the capital of France") still runs past that within a few sentences.
+ */
+export function maxCleanupWords(inputWords: number, style?: Style): number {
+  return style === "email" || style === "funny"
+    ? Math.max(20, Math.ceil(inputWords * 2.5))
+    : Math.max(12, Math.ceil(inputWords * 1.8));
+}
+
+/**
  * Catches outputs that aren't a cleanup of the transcript: the model answered a dictated
  * question, refused, produced something much longer than what was said, or translated or
- * transliterated the text into another script.
+ * transliterated the text into another script. `style` sets how much longer it may be
+ * (`maxCleanupWords`).
  */
-export function guardOutput(transcript: string, output: string, locale = "en"): GuardResult {
+export function guardOutput(transcript: string, output: string, locale = "en", style?: Style): GuardResult {
   const inputWords = countWords(transcript, locale);
   const outputWords = countWords(output, locale);
   if (outputWords === 0 && inputWords >= 3) return { ok: false, reason: "empty" };
-  if (outputWords > Math.max(12, Math.ceil(inputWords * 1.8))) return { ok: false, reason: "too_long" };
+  if (outputWords > maxCleanupWords(inputWords, style)) return { ok: false, reason: "too_long" };
 
   // An opener the speaker said is theirs, also after the fillers a cleanup removes: "so here's
   // the plan" may come back as "Here's the plan", «ну, я не могу» as «Я не могу».

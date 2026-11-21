@@ -104,7 +104,10 @@ Modes:
 - Professional: rewritten the way a careful professional writes to a colleague or a client: complete, clear sentences, no slang, filler or chatty openers, polite requests. Every fact, name, number, date, question and request stays; no greeting, sign-off or anything else is added.
 - Casual: the way people text a friend: the speaker's own words and slang, lowercase except "I", names and acronyms, light punctuation, no full stop at the end, no emoji. Fillers and false starts may go.
 - Concise: the same message in fewer words: repetition, hedging and filler are cut; every fact, name, number, date, question and request stays, and nothing is added. A message that is already short stays as it is.
-- With a target language, the output is a translation in that mode's spirit: literal for Word for word, natural and grammatical for Improve my grammar, and in the other modes' register for those.
+- Rewrite: fluent, natural text that says exactly what the speaker meant: grammar fixed, sentence structure improved, unintended repetition and fillers removed, the speaker's tone and level of formality kept. Every fact, name, number, date, question and request stays; nothing is added and nothing is summarized away.
+- Email: a clear, polished, polite email from the speaker, organized in short paragraphs. A message to someone gets a greeting line (by name only when the speaker named the recipient) and a closing line, never a sender's name and no subject line; a note or a single phrase gets neither. Every fact, name, number, date, question and request stays; no names, dates, promises or other details are invented.
+- Funny: playful, friendly and lively, with light, kind humor where it fits and at most two emoji. Every fact, name, number, date, question and request stays and no facts are invented; sad or serious news gets warmth, not jokes.
+- With a target language, the output is a translation in that mode's spirit: literal for Word for word, natural and grammatical for Improve my grammar and Rewrite, and in the other modes' register for those.
 
 Scores, integers from 1 to 5:
 - grammar: is the output correct, natural text in its language? 5 means flawless.
@@ -125,6 +128,9 @@ export const GRADE_SCHEMA = {
 /** The modes as the app names them. */
 const MODE_NAMES: Record<Style, string> = {
   verbatim: "Word for word",
+  rewrite: "Rewrite",
+  email: "Email",
+  funny: "Funny",
   grammar: "Improve my grammar",
   professional: "Professional",
   chat: "Casual",

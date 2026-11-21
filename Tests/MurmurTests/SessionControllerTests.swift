@@ -219,8 +219,12 @@ private final class StateAtPreviewTransport: IPCTransport, @unchecked Sendable {
 private final class HistorySpy: TranscriptSink {
     var check: () -> Bool = { true }
     private(set) var checks: [Bool] = []
+    private(set) var transcripts: [Transcript] = []
 
-    func record(_ transcript: Transcript) { checks.append(check()) }
+    func record(_ transcript: Transcript) {
+        checks.append(check())
+        transcripts.append(transcript)
+    }
 }
 
 @MainActor
@@ -597,7 +601,7 @@ struct SessionControllerTests {
     /// keyboard can join (a pending start with the keyboard's options), as after a bounce.
     @Test func aShortcutStartsADictationTheKeyboardJoins() async throws {
         let harness = makeHarness { settings in
-            settings.defaultStyle = .grammar
+            settings.defaultStyle = .rewrite
             settings.autoDetectDefaultApplied = true
             settings.translationSourceLanguage = "en-US"
             settings.translationEnabled = true
@@ -606,7 +610,7 @@ struct SessionControllerTests {
         #expect(harness.session.beginDictationForKeyboard())
         let pending = try #require(harness.transport.payloads.readPendingStart())
         #expect(pending.autoStart == true && pending.documentIdentifier == nil)
-        #expect(pending.styleOverride == .grammar && pending.languageOverride == "en-US")
+        #expect(pending.styleOverride == .rewrite && pending.languageOverride == "en-US")
         #expect(pending.translationTargetLanguage == "de-DE")
         #expect(harness.session.phase == .recording(pending.requestId))
         harness.session.endDictation(commit: true)
@@ -674,6 +678,27 @@ struct SessionControllerTests {
         #expect(await waitUntil { !delivered.isEmpty })
         #expect(delivered.first?.requestId == requestId)
         #expect(harness.transport.payloads.readResult(requestId) == nil)
+    }
+
+    /// The mode is fixed when a dictation starts: one picked while it is recorded or written (the
+    /// Style screen, the keyboard's pill) writes the next dictation, never half of this one.
+    @Test func aModePickedDuringADictationAppliesFromTheNextOne() async throws {
+        var settings: SharedSettings?
+        let harness = makeHarness { saved in
+            saved.defaultStyle = .email
+            settings = saved
+        }
+        _ = try #require(harness.session.beginInAppDictation())
+        settings?.defaultStyle = .funny
+        harness.session.endDictation(commit: true)
+        #expect(await waitUntil { harness.history.transcripts.count == 1 })
+        #expect(harness.history.transcripts.first?.style == .email)
+
+        #expect(await waitUntil { harness.session.phase == .ready })
+        _ = try #require(harness.session.beginInAppDictation())
+        harness.session.endDictation(commit: true)
+        #expect(await waitUntil { harness.history.transcripts.count == 2 })
+        #expect(harness.history.transcripts.last?.style == .funny)
     }
 
     /// The uploaded audio is kept for the transcript's playback, unless Keep recordings is off.
