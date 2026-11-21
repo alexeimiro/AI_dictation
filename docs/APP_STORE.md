@@ -113,19 +113,18 @@ sips -z 2796 1290 build/app-store-screenshots/6-paywall.png --out build/app-stor
 > The first account on an iPhone gets a 14-day trial of Pro without payment details. Redmic asks Apple's DeviceCheck, through its server, whether the iPhone has had one; a later account on the same iPhone starts on the free plan (1,000 words a week, shared by the accounts on that iPhone). Either way, "Upgrade to Pro" (menu or Settings) shows Redmic Pro Monthly and Redmic Pro Annual, group "Redmic Pro", with Restore purchase.
 >
 > AI
-> Recordings are transcribed by OpenAI's API, and the transcript is tidied or translated by Anthropic's Claude API, both through Redmic's server. Before anything is recorded, the page "Before Redmic listens" says that the data goes to two third-party AI services and what each receives, links the privacy policy that names them, and offers Allow and Not now (guideline 5.1.2(i)). Without Allow, Redmic doesn't turn the microphone on, so nothing is recorded or sent. The same permission is a switch in Settings › Data and privacy ("Write with AI services"). Neither service trains its models on the data.
+> Recordings are transcribed by OpenAI's API, and the transcript is tidied or translated by Anthropic's Claude API, both through Redmic's server. Before anything is recorded, the page "Before Redmic listens" says that the data goes to two third-party AI services and what each receives, links the privacy policy that names them, and offers Allow and Not now (guideline 5.1.2(i)). In setup it comes after the system's microphone question, on the first exercise. Without Allow, Redmic doesn't turn the microphone on, so nothing is recorded or sent. The same permission is a switch in Settings › Data and privacy ("Write with AI services"). Neither service trains its models on the data. The user's words are typed into their own text field and aren't shared with other users.
 >
 > ACCOUNT DELETION
-> Menu › the account's row at the bottom › Delete account. It deletes the account and its data on the server and revokes Sign in with Apple. For 30 days the server keeps a hashed fingerprint of the sign-in with that week's word count and trial state, so signing up again can't reset the free plan.
+> Menu › the account's row at the bottom › Delete account. It deletes the account and its data on the server and revokes Sign in with Apple. For 30 days a hashed fingerprint of the sign-in keeps that week's word count and trial state, so signing up again can't reset the free plan.
 >
 > TYPE AS I SPEAK (BETA)
-> Off by default: Settings › Keyboard › "Type as I speak" (Pro or the trial). After step 4, tap the mic again while the microphone is still ready: the words go into the note as you speak, and the final text replaces them at the check mark.
+> Off by default (Settings › Keyboard; Pro or the trial). After step 4, tap the mic again: the words go into the note as you speak, and the final text replaces them at the check mark.
 >
 > NEW IN 1.0.5
-> - New name and logo (Murmur → Redmic).
 > - Four writing modes (Word-to-Word, Rewrite, Email, Funny): menu › Style, or the style button on the keyboard's bar.
-> - The keyboard's bar has a Translate button with the language pair; one tap turns translation on or off (needs Full Access).
-> - A random identifier kept in the Keychain goes with each dictation so the free plan's words count per iPhone (declared as Device ID under App Privacy; not used for tracking).
+> - Translate: one tap on the keyboard's bar turns it on or off (needs Full Access).
+> - A random Keychain identifier goes with each dictation so free words count per iPhone (App Privacy: Device ID; no tracking).
 
 **Sign-in information**: leave "Sign-in required" unticked: Sign in with Apple works with any Apple ID (the user decided on 13 Nov 2026 to keep sign-in required, and the notes say so). If Apple asks for a demo account anyway, create one with an email you can read for the 6-digit code.
 
