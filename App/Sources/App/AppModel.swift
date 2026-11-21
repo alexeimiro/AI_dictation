@@ -178,7 +178,8 @@ final class AppModel {
                                         transcription: TranscriptionClient(functions: functions), dictate: dictate,
                                         warmup: backend.map { BackendWarmup(session: $0, dictate: dictate) },
                                         timingsLog: timingsLog, consent: { await aiConsent.ensure() },
-                                        signedIn: { Self.maySignedInDictate(backend: backend, launchOptions: launchOptions) })
+                                        signedIn: { Self.maySignedInDictate(backend: backend, launchOptions: launchOptions) },
+                                        lockTimeout: launchOptions.lockTimeout ?? IdleStop.lockTimeout)
         self.session = session
         noteDictation = NoteDictation(session: session, library: library)
         self.languages = LanguageSettingsModel(assets: assets, session: session)
@@ -1175,6 +1176,10 @@ enum LaunchRoute: String {
 /// The way back (UI tests and screenshots, DEBUG builds only): `-return-hint [<app name>]` puts the
 /// line that says how to swipe back under Home's session bar, naming the app if one is given. It
 /// shows while the session is on, so use it with `-session-fixture listening`.
+///
+/// The lock (measurements, DEBUG builds only): `-lock-timeout <seconds>` is how long a locked iPhone
+/// leaves an unused session's microphone on, instead of a minute (`IdleStop.lockTimeout`), so what
+/// the session costs can be measured over a longer stretch. It holds for that launch only.
 struct LaunchOptions: Equatable {
     var route: LaunchRoute?
     var useFixtures = false
@@ -1194,6 +1199,7 @@ struct LaunchOptions: Equatable {
     var asksAIConsent = false
     var showsAIConsent = false
     var returnHint: ReturnHint?
+    var lockTimeout: TimeInterval?
 
     init(arguments: [String]) {
         route = LaunchRoute(arguments: arguments)
@@ -1222,6 +1228,8 @@ struct LaunchOptions: Equatable {
             let name = Self.value(after: "-return-hint", in: arguments).flatMap { $0.hasPrefix("-") ? nil : $0 }
             returnHint = ReturnHint(appName: name)
         }
+        lockTimeout = Self.value(after: "-lock-timeout", in: arguments).flatMap(TimeInterval.init)
+            .flatMap { $0 > 0 ? $0 : nil }
         #endif
     }
 

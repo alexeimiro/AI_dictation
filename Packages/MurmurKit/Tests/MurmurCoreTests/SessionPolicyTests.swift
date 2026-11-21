@@ -47,6 +47,56 @@ struct SessionPolicyTests {
         #expect(keyboard.inactiveSince == now.addingTimeInterval(IdleStop.keyboardGrace))
     }
 
+    // MARK: Idle stop on a locked iPhone
+
+    @Test func aLockedPhoneTurnsTheMicOffAMinuteLater() {
+        let locked = now.addingTimeInterval(20)
+        #expect(IdleStop.date(timeout: 300, idleSince: now, backgroundSince: now, keyboard: nil, lockedSince: locked)
+            == locked.addingTimeInterval(IdleStop.lockTimeout))
+    }
+
+    @Test func neverStopsOnlyOnALockedPhone() {
+        let locked = now.addingTimeInterval(20)
+        #expect(IdleStop.date(timeout: nil, idleSince: now, backgroundSince: now, keyboard: nil) == nil)
+        #expect(IdleStop.date(timeout: nil, idleSince: now, backgroundSince: now, keyboard: nil, lockedSince: locked)
+            == locked.addingTimeInterval(IdleStop.lockTimeout))
+    }
+
+    @Test func theEarlierOfTheTwoCountdownsWins() {
+        // "Turn off after" ends 30 s after the app left the screen, before the locked minute is over.
+        let locked = now.addingTimeInterval(20)
+        #expect(IdleStop.date(timeout: 30, idleSince: now, backgroundSince: now, keyboard: nil, lockedSince: locked)
+            == now.addingTimeInterval(30))
+    }
+
+    @Test func aDictationThatEndsOnALockedPhoneStartsTheMinuteAgain() {
+        // Locked while it recorded; it ended three minutes later.
+        let ended = now.addingTimeInterval(180)
+        #expect(IdleStop.date(timeout: 300, idleSince: ended, backgroundSince: now, keyboard: nil, lockedSince: now)
+            == ended.addingTimeInterval(IdleStop.lockTimeout))
+    }
+
+    @Test func aKeyboardOnScreenKeepsALockedSessionOn() {
+        // The lock was reported, but the keyboard's last heartbeat is newer: it is on screen.
+        let lastSeen = now.addingTimeInterval(90)
+        let keyboard = KeyboardStatus(fullAccessAt: lastSeen, lastSeenAt: lastSeen)
+        #expect(IdleStop.date(timeout: 300, idleSince: now, backgroundSince: now, keyboard: keyboard, lockedSince: now)
+            == lastSeen.addingTimeInterval(IdleStop.keyboardGrace + IdleStop.lockTimeout))
+    }
+
+    @Test func aKeyboardSuspendedByTheLockDelaysTheStopByItsGraceAtMost() {
+        // On screen when the phone locked: it never said it was hidden, and its heartbeats stopped.
+        let lastSeen = now.addingTimeInterval(-3)
+        let keyboard = KeyboardStatus(fullAccessAt: lastSeen, lastSeenAt: lastSeen)
+        #expect(IdleStop.date(timeout: nil, idleSince: now.addingTimeInterval(-600),
+                              backgroundSince: now.addingTimeInterval(-1), keyboard: keyboard, lockedSince: now)
+            == lastSeen.addingTimeInterval(IdleStop.keyboardGrace + IdleStop.lockTimeout))
+    }
+
+    @Test func aLockIsNothingWhileTheAppIsOnScreen() {
+        #expect(IdleStop.date(timeout: 300, idleSince: now, backgroundSince: nil, keyboard: nil, lockedSince: now) == nil)
+    }
+
     // MARK: Interruptions
 
     @Test func interruptionsResumeUnlessTheyOutlastTheSetting() {

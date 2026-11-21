@@ -17,7 +17,8 @@ you back to your app. From an app Murmur can't reopen, like Safari, swipe right 
 edge of the screen to go back, as Murmur's Home says; the keyboard is listening when you get there.
 After that the microphone stays ready in the background, shown by the orange
 dot and Murmur's Live Activity, and each tap dictates without leaving your app. Choose how long it
-stays ready in Murmur › Settings › Turn off after.
+stays ready in Murmur › Settings › Turn off after. When you lock your iPhone, the microphone turns
+off after about a minute, to save battery.
 
 ## Why does the keyboard need Full Access?
 

@@ -246,6 +246,12 @@ private final class SignedInSpy {
     var value = true
 }
 
+/// Whether the iPhone is locked, as the session asks it.
+@MainActor
+private final class LockSpy {
+    var locked = false
+}
+
 @MainActor
 struct SessionControllerTests {
     private struct Harness {
@@ -266,10 +272,12 @@ struct SessionControllerTests {
     private let micFormat = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
 
     /// A ready session on the in-memory transport, with its own settings (no sounds) and log.
-    /// `signedIn` comes last, so a trailing closure still means `configure`.
+    /// `signedIn` and `locked` come after `configure`, so a trailing closure still means `configure`.
     private func makeHarness(transcriber: Transcriber = SpokenTranscriber(), recordings: RecordingStore? = nil,
                              configure: (SharedSettings) -> Void = { _ in },
-                             signedIn: @escaping @MainActor () -> Bool = { true }) -> Harness {
+                             signedIn: @escaping @MainActor () -> Bool = { true },
+                             locked: @escaping @MainActor () -> Bool = { false },
+                             lockTimeout: TimeInterval = IdleStop.lockTimeout) -> Harness {
         let transport = InMemoryIPCTransport()
         let log = TimingsLog(directory: FileManager.default.temporaryDirectory
             .appendingPathComponent("session-timings-\(UUID().uuidString)", isDirectory: true))
@@ -279,7 +287,8 @@ struct SessionControllerTests {
         configure(settings)
         let session = SessionController(
             transport: transport, pipeline: DictationPipeline(cleanup: NoCleanup()), assets: SpeechAssetManager(),
-            history: history, recordings: recordings, timingsLog: log, settings: settings, signedIn: signedIn)
+            history: history, recordings: recordings, timingsLog: log, settings: settings, signedIn: signedIn,
+            protectedDataAvailable: { !locked() }, lockTimeout: lockTimeout)
         session.startForTesting(with: transcriber, language: english)
         return Harness(session: session, transport: transport, log: log, history: history)
     }
@@ -1133,5 +1142,109 @@ struct SessionControllerTests {
         #expect(session.phase == .off)
         #expect(transport.payloads.readLivePreview() == nil)
         #expect(!FileManager.default.fileExists(atPath: container.directory("live").path))
+    }
+
+    // MARK: A locked iPhone
+
+    /// `date` is `seconds` from now, give or take what the test itself took. The stop itself is
+    /// the idle timer's, as for "Turn off after"; these tests read when it is due.
+    private func isDue(_ date: Date?, in seconds: TimeInterval) -> Bool {
+        guard let date else { return false }
+        return abs(date.timeIntervalSinceNow - seconds) < 5
+    }
+
+    /// A locked iPhone can't show the keyboard, so the unused session ends a minute after the
+    /// lock, long before "Turn off after" (5 minutes) would end it.
+    @Test func aLockedPhoneEndsTheUnusedSessionAfterAMinute() {
+        let lock = LockSpy()
+        let harness = makeHarness(locked: { lock.locked })
+        harness.session.appDidEnterBackground()
+        #expect(isDue(harness.session.idleStopDateForTesting, in: 300))
+
+        lock.locked = true
+        harness.session.heartbeatForTesting()
+
+        #expect(isDue(harness.session.idleStopDateForTesting, in: IdleStop.lockTimeout))
+        #expect(harness.session.phase == .ready)
+    }
+
+    /// Never keeps the microphone on for as long as the iPhone is in use, and no longer.
+    @Test func neverStillEndsOnALockedPhone() {
+        let lock = LockSpy()
+        let harness = makeHarness(configure: { $0.disableAfter = .never }, locked: { lock.locked })
+        harness.session.appDidEnterBackground()
+        #expect(harness.session.idleStopDateForTesting == nil)
+
+        lock.locked = true
+        harness.session.heartbeatForTesting()
+
+        #expect(isDue(harness.session.idleStopDateForTesting, in: IdleStop.lockTimeout))
+    }
+
+    /// Unlocked within the minute, the session stays, and "Turn off after" decides again.
+    @Test func unlockingPutsTurnOffAfterBackInCharge() {
+        let lock = LockSpy()
+        let harness = makeHarness(locked: { lock.locked })
+        harness.session.appDidEnterBackground()
+        lock.locked = true
+        harness.session.heartbeatForTesting()
+        #expect(isDue(harness.session.idleStopDateForTesting, in: IdleStop.lockTimeout))
+
+        lock.locked = false
+        harness.session.heartbeatForTesting()
+
+        #expect(isDue(harness.session.idleStopDateForTesting, in: 300))
+        #expect(harness.session.phase == .ready)
+    }
+
+    /// The screen locked while a dictation recorded: it records on, as before, and the minute
+    /// starts when it has been written.
+    @Test func aDictationUnderWayWhenThePhoneLocksIsNotCut() async throws {
+        let lock = LockSpy()
+        let harness = makeHarness(locked: { lock.locked })
+        harness.session.appDidEnterBackground()
+        let requestId = UUID()
+        try harness.send(.start, requestId)
+        #expect(await waitUntil { harness.session.phase == .recording(requestId) })
+
+        lock.locked = true
+        harness.session.heartbeatForTesting()
+
+        #expect(harness.session.phase == .recording(requestId))
+        #expect(harness.session.idleStopDateForTesting == nil)
+        try harness.send(.stop, requestId)
+        #expect(await waitUntil { harness.session.phase == .ready })
+        #expect(harness.transport.payloads.readResult(requestId)?.isInsertable == true)
+        #expect(isDue(harness.session.idleStopDateForTesting, in: IdleStop.lockTimeout))
+    }
+
+    /// In front of the user nothing counts down, and coming to the front ends what was believed
+    /// about the lock.
+    @Test func inFrontNothingCountsDownWhateverTheLockSays() {
+        let lock = LockSpy()
+        let harness = makeHarness(locked: { lock.locked })
+        lock.locked = true
+        harness.session.heartbeatForTesting()
+        #expect(harness.session.idleStopDateForTesting == nil)
+
+        harness.session.appDidEnterBackground()
+        #expect(isDue(harness.session.idleStopDateForTesting, in: IdleStop.lockTimeout))
+
+        lock.locked = false
+        harness.session.appDidBecomeActive()
+        harness.session.appDidEnterBackground()
+        #expect(isDue(harness.session.idleStopDateForTesting, in: 300))
+    }
+
+    /// A Debug build's `-lock-timeout`, for measuring what the session costs in a locked iPhone.
+    @Test func theLockTimeoutCanBeLonger() {
+        let lock = LockSpy()
+        let harness = makeHarness(configure: { $0.disableAfter = .never }, locked: { lock.locked }, lockTimeout: 600)
+        harness.session.appDidEnterBackground()
+
+        lock.locked = true
+        harness.session.heartbeatForTesting()
+
+        #expect(isDue(harness.session.idleStopDateForTesting, in: 600))
     }
 }

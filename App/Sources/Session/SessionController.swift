@@ -18,7 +18,8 @@ private struct StartTiming {
 /// The dictation session: a hot mic in the app that the keyboard drives through IPC.
 ///
 /// Lifecycle: `start()` (foreground only) → `ready` ⇄ `recording` → `processing` → `ready` …
-/// → `stop()` after the "Turn off after" idle timeout, from the Live Activity, or manually.
+/// → `stop()` after the "Turn off after" idle timeout, a minute into a locked iPhone, from the
+/// Live Activity, or manually.
 @MainActor
 @Observable
 final class SessionController {
@@ -113,6 +114,16 @@ final class SessionController {
     @ObservationIgnored private var idleSince = Date()
     @ObservationIgnored private var backgroundSince: Date?
     @ObservationIgnored private var interruptedAt: Date?
+    /// When the iPhone was found locked, nil while it isn't. A locked iPhone can't show the
+    /// keyboard, so an unused session turns the microphone off `lockTimeout` after the lock,
+    /// whatever "Turn off after" says (`IdleStop`).
+    @ObservationIgnored private var lockedSince: Date?
+    /// The iPhone's protected data can be read, which is iOS's word for "not locked": it goes
+    /// about 10 seconds after the lock, and an iPhone without a passcode never loses it. Asked on
+    /// every heartbeat.
+    @ObservationIgnored private let protectedDataAvailable: @MainActor () -> Bool
+    /// `IdleStop.lockTimeout`, unless a test or a Debug build's `-lock-timeout` says otherwise.
+    @ObservationIgnored private let lockTimeout: TimeInterval
     @ObservationIgnored private var keyboardObservation: IPCObservation?
     /// The user's OK to send recordings to the AI services that write them, asked if it hasn't
     /// been given (`AIConsent.ensure`). No session, so no dictation, starts without it.
@@ -137,9 +148,13 @@ final class SessionController {
          recordings: RecordingStore? = nil, transcription: (any CloudTranscribing)? = nil, dictate: (any Dictating)? = nil,
          warmup: BackendWarmup? = nil, timingsLog: TimingsLog? = nil, settings: SharedSettings = .shared,
          consent: @escaping @MainActor () async -> Bool = { true },
-         signedIn: @escaping @MainActor () -> Bool = { true }) {
+         signedIn: @escaping @MainActor () -> Bool = { true },
+         protectedDataAvailable: @escaping @MainActor () -> Bool = { UIApplication.shared.isProtectedDataAvailable },
+         lockTimeout: TimeInterval = IdleStop.lockTimeout) {
         self.consent = consent
         self.signedIn = signedIn
+        self.protectedDataAvailable = protectedDataAvailable
+        self.lockTimeout = lockTimeout
         self.transport = transport
         self.publisher = HotStatePublisher(transport: transport)
         self.liveWords = LiveWordsPublisher(transport: transport)
@@ -181,6 +196,8 @@ final class SessionController {
         }
         let startedAt = ContinuousClock.now
         generation += 1
+        // A session starts in front of the user, on an iPhone that isn't locked.
+        lockedSince = nil
         phase = .starting
         publisher.set(.starting)
         transport.post(.stateChanged)
@@ -259,6 +276,12 @@ final class SessionController {
     /// Tests: where a reconnect leaves the session, ready again, while a dictation that ended
     /// before it may still be uploading.
     func reconnectedForTesting() { becomeReady(afterReconnect: true) }
+
+    /// Tests: one turn of the heartbeat, which is where the session asks whether the iPhone is locked.
+    func heartbeatForTesting() { heartbeat() }
+
+    /// Tests: when the unused session would turn the microphone off, as it stands now.
+    var idleStopDateForTesting: Date? { idleStopDate() }
 
     /// Set by `pinForScreenshots`: the app becoming active must not restart a pinned session.
     @ObservationIgnored private var isPinnedForScreenshots = false
@@ -705,6 +728,7 @@ final class SessionController {
         jump = nil
         autoStarted = nil
         cancelledRequests = []
+        lockedSince = nil
         heartbeatTask?.cancel()
         idleTask?.cancel()
         capTask?.cancel()
@@ -765,6 +789,8 @@ final class SessionController {
         guard !isPinnedForScreenshots else { return }
         #endif
         backgroundSince = nil
+        // In front of the user the iPhone isn't locked, whatever was last heard about it.
+        lockedSince = nil
         idleTask?.cancel()
         if phase == .needsReconnect {
             requestReconnect()
@@ -1186,6 +1212,8 @@ final class SessionController {
     }
 
     private func heartbeat() {
+        // In every phase: a lock during a dictation has to be known by the time it ends.
+        setLocked(!protectedDataAvailable())
         switch phase {
         case .recording(let requestId):
             guard let dictation = active, dictation.source == .keyboard else { return }
@@ -1220,7 +1248,8 @@ final class SessionController {
     }
 
     /// "Turn off after" counts only while the app is in the background and the keyboard is off
-    /// screen (`IdleStop`), so typing on the keyboard keeps the session on.
+    /// screen (`IdleStop`), so typing on the keyboard keeps the session on. A locked iPhone ends
+    /// an unused session after `lockTimeout`, whichever comes first.
     private func scheduleIdleStop() {
         idleTask?.cancel()
         guard let deadline = idleStopDate() else { return }
@@ -1235,17 +1264,33 @@ final class SessionController {
     }
 
     private func idleStopDate() -> Date? {
-        guard phase == .ready || phase == .needsReconnect, let timeout = settings.disableAfter.idleTimeout else {
-            return nil
-        }
+        guard phase == .ready || phase == .needsReconnect else { return nil }
+        // Never has no countdown of its own; a locked iPhone still ends the session.
         // "Immediately" stops right after a delivered result; a session that is never used, or
         // whose dictation was cancelled, still gets a short grace period instead of staying on.
-        return IdleStop.date(timeout: timeout > 0 ? timeout : Self.immediateIdleGrace, idleSince: idleSince,
-                             backgroundSince: backgroundSince, keyboard: transport.payloads.readKeyboardStatus())
+        let timeout = settings.disableAfter.idleTimeout.map { $0 > 0 ? $0 : Self.immediateIdleGrace }
+        return IdleStop.date(timeout: timeout, idleSince: idleSince, backgroundSince: backgroundSince,
+                             keyboard: transport.payloads.readKeyboardStatus(), lockedSince: lockedSince,
+                             lockTimeout: lockTimeout)
     }
 
     /// The keyboard appeared or went away: the countdown restarts from there.
     private func keyboardStatusChanged() {
+        if phase == .ready || phase == .needsReconnect { scheduleIdleStop() }
+    }
+
+    // MARK: Lock
+
+    /// The iPhone was found locked or unlocked: the minute a locked iPhone leaves an unused session
+    /// starts here, or is over. Only the heartbeat says so, from what iOS answers at that moment.
+    /// Its notification that the protected data "will become unavailable" isn't used: it comes
+    /// about 10 seconds before the data goes, and the two disagreed until then (seen on an iPhone
+    /// 16 Pro: locked, unlocked a tenth of a second later, locked again after 10 seconds).
+    private func setLocked(_ locked: Bool) {
+        guard locked != (lockedSince != nil) else { return }
+        lockedSince = locked ? Date() : nil
+        guard isLive || phase == .needsReconnect else { return }
+        logger.info("iPhone \(locked ? "locked" : "unlocked", privacy: .public)")
         if phase == .ready || phase == .needsReconnect { scheduleIdleStop() }
     }
 
@@ -1396,6 +1441,8 @@ final class SessionController {
         phase = .needsReconnect
         publisher.set(.needsReconnect)
         transport.post(.stateChanged)
+        // A session waiting to reconnect still ends by "Turn off after" or in a locked iPhone.
+        scheduleIdleStop()
     }
 
     // MARK: Helpers

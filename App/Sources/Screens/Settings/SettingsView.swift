@@ -33,7 +33,8 @@ struct SettingsView: View {
                     }
                 }
                 .settingRow()
-                SettingPicker("Turn off after", detail: "When the microphone turns off while unused",
+                SettingPicker("Turn off after",
+                              detail: "When the microphone turns off while unused. A locked iPhone turns it off after a minute.",
                               selection: $settings.disableAfter, value: settings.disableAfter.title) {
                     ForEach(DisableAfter.allCases) { Text($0.title).tag($0) }
                 }

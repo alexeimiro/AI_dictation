@@ -74,7 +74,8 @@ final class AudioCapture: @unchecked Sendable {
         engine.prepare()
         try engine.start()
         isRunning = true
-        logger.info("Engine started: \(format.sampleRate, privacy: .public) Hz, \(format.channelCount) ch")
+        let ioBuffer = Int((AVAudioSession.sharedInstance().ioBufferDuration * 1000).rounded())
+        logger.info("Engine started: \(format.sampleRate, privacy: .public) Hz, \(format.channelCount) ch, I/O buffer \(ioBuffer, privacy: .public) ms")
     }
 
     func stopEngine() {

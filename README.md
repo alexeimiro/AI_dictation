@@ -16,7 +16,9 @@ the switch. The first dictation
 opens the app briefly: it starts a background audio session, shows a Live Activity, starts
 recording, and sends you back to the app you were typing in (or, for apps it can't reopen, shows
 Home with a line that says how to swipe back). Later dictations reuse that session until it times out ("Turn off after"),
-which only counts while the keyboard is off screen.
+which only counts while the keyboard is off screen. A locked iPhone ends an unused session after
+about a minute, whatever that setting says: it can't show the keyboard, and the open microphone
+keeps the phone awake.
 
 ```
 Keyboard ext ──command file + Darwin notify──► App session (hot mic) ──► transcribe fn (OpenAI)
