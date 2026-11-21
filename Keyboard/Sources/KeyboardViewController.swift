@@ -583,7 +583,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     }
 
     /// Loads the app's installed on-device languages and the languages picked in its Settings.
-    /// Cloud recognition can additionally use any of `DictationLanguage.cloudLanguages`.
+    /// Cloud recognition can additionally use any of `DictationLanguage.speechLanguages`.
     private func loadLanguages() {
         let primary = settings.primaryLanguage.map(DictationLanguage.init(tag:)) ?? .englishUS
         let verified = settings.verifiedEngines
@@ -601,7 +601,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     /// follow the iPhone's language until they are picked (`KeyboardLanguageDefaults`).
     private func loadTranslationSettings() {
         interfaceLanguage = KeyboardLanguageDefaults.interfaceLanguage(
-            preferred: Locale.preferredLanguages, available: DictationLanguage.cloudLanguages)
+            preferred: Locale.preferredLanguages, available: DictationLanguage.speechLanguages)
         let source = KeyboardLanguageDefaults.source(
             saved: settings.translationSourceLanguage, autoDetectApplied: settings.autoDetectDefaultApplied)
         if !settings.autoDetectDefaultApplied {
@@ -614,20 +614,23 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         model.recentLanguages = settings.recentTranslationLanguages
             .map(DictationLanguage.init(tag:))
             .filter { !$0.isAutomatic }
-        model.targetLanguage = defaultTarget(
-            saved: settings.translationTargetLanguage.map(DictationLanguage.init(tag:)), source: source)
+        // The pair the bar's Translate shows and uses, on or off (`SharedSettings.translationPair`).
+        model.targetLanguage = settings.translationPair().target
         model.translationEnabled = settings.translationEnabled
         syncTranslationToClient()
     }
 
-    /// The saved target unless it is `source` itself, else the iPhone's language.
-    private func defaultTarget(saved: DictationLanguage? = nil, source: DictationLanguage) -> DictationLanguage {
+    /// The "To" for a new source that is the old "To" itself: the iPhone's language, or another.
+    private func defaultTarget(source: DictationLanguage) -> DictationLanguage {
         KeyboardLanguageDefaults.target(
-            saved: saved, source: source, preferred: Locale.preferredLanguages,
-            available: DictationLanguage.cloudLanguages, recent: model.recentLanguages)
+            saved: nil, source: source, preferred: Locale.preferredLanguages,
+            available: DictationLanguage.translationLanguages, recent: model.recentLanguages)
     }
 
     private func selectSourceLanguage(_ language: DictationLanguage?) {
+        // Only a language that can be spoken is listened for: one that can only be typed in
+        // would be sent to the recognizer as a language it doesn't know.
+        if let language, !language.isAutomatic, !language.supportsSpeech { return }
         let selected = language ?? model.primaryLanguage
         model.languageOverride = selected.languageCode == model.primaryLanguage.languageCode ? nil : selected
         settings.translationSourceLanguage = selected.tag
@@ -640,24 +643,30 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
     }
 
     private func selectTargetLanguage(_ language: DictationLanguage) {
-        guard !language.isAutomatic, language.languageCode != model.effectiveLanguage.languageCode else { return }
+        guard language.supportsTranslation, language.languageCode != model.effectiveLanguage.languageCode else { return }
         model.targetLanguage = language
         settings.translationTargetLanguage = language.tag
         remember(language)
         syncTranslationToClient()
     }
 
+    /// The bar's Translate button and the menu's switch: on with the pair last used (saved, so a
+    /// restart and the app's shortcuts use it too), off keeping it. Never while a dictation starts
+    /// or runs, which keeps the options it began with: both controls are locked then, and this is
+    /// the last guard against a tap that arrives late.
     private func setTranslationEnabled(_ enabled: Bool) {
+        guard !model.locksSessionOptions else { return }
+        let pair = settings.setTranslationEnabled(enabled)
         model.translationEnabled = enabled
-        settings.translationEnabled = enabled
-        if enabled, model.targetLanguage.languageCode == model.effectiveLanguage.languageCode {
-            selectTargetLanguage(defaultTarget(source: model.effectiveLanguage))
+        if enabled, pair.target != model.targetLanguage {
+            model.targetLanguage = pair.target
+            remember(pair.target)
         }
         syncTranslationToClient()
     }
 
     private func swapTranslationLanguages() {
-        guard model.translationEnabled, !model.effectiveLanguage.isAutomatic else { return }
+        guard model.canSwapLanguages else { return }
         let oldSource = model.effectiveLanguage
         let oldTarget = model.targetLanguage
         selectSourceLanguage(oldTarget.languageCode == model.primaryLanguage.languageCode ? nil : oldTarget)

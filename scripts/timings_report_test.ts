@@ -65,7 +65,7 @@ Deno.test("a dictation's route comes from its style, or from its first request b
   assertEquals(routeOf(plain(1, { style: "verbatim", requests: [request("dictate", 1200)] })), "wordForWord");
   assertEquals(routeOf(plain(1, { style: "grammar", requests: [request("transcribe", 1200), request("cleanup", 2000)] })), "rewritten");
   // Every style but Word for word is written by the model, and must stay out of its numbers.
-  for (const style of ["professional", "chat", "concise"]) {
+  for (const style of ["professional", "chat", "concise", "rewrite", "email", "funny"]) {
     assertEquals(routeOf(plain(1, { style, requests: [request("dictate", 3000, { modelMs: 1800 })] })), "rewritten");
   }
 });

@@ -50,6 +50,7 @@ struct TranscriptDetailView: View {
                     .foregroundStyle(Theme.ink)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .dictatedTextDirection(transcript.displayText)
                     .padding(.top, 14)
                 if let reason = transcript.errorReason, !transcript.displayText.isEmpty {
                     FieldError(message: reason)
@@ -168,6 +169,7 @@ struct TranscriptDetailView: View {
                     .foregroundStyle(Theme.second)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .dictatedTextDirection(text)
                     .padding(.bottom, 14)
             }
         }

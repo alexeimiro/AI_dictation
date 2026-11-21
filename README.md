@@ -22,7 +22,9 @@ the switch. The first dictation
 opens the app briefly: it starts a background audio session, shows a Live Activity, starts
 recording, and sends you back to the app you were typing in (or, for apps it can't reopen, shows
 Home with a line that says how to swipe back). Later dictations reuse that session until it times out ("Turn off after"),
-which only counts while the keyboard is off screen.
+which only counts while the keyboard is off screen. A locked iPhone ends an unused session after
+about a minute, whatever that setting says: it can't show the keyboard, and the open microphone
+keeps the phone awake.
 
 ```
 Keyboard ext ──command file + Darwin notify──► App session (hot mic) ──► transcribe fn (OpenAI)
@@ -115,23 +117,35 @@ translation target follow the iPhone's language (ЙЦУКЕН on a Russian iPhon
 
 ## Modes
 
-Five, in the keyboard's style pill and the menu's Style:
-- **Word for word** (the default): your words as spoken, punctuated. The AI runs only when the
-  transcript has no punctuation, a spoken command ("comma", "new line") or a spelled-out address,
-  and then under rules of its own that keep every word (`VERBATIM_RULES`).
-- **Improve my grammar**: the same words and tone, made grammatically correct; fillers and false
-  starts go.
-- **Professional**: rewritten clear and polite, for work and email; every fact kept, nothing added.
-- **Casual** (stored as `chat`): the speaker's words in lowercase, with light punctuation and no
-  final full stop, like a text to a friend.
-- **Concise**: the same message in fewer words.
+Four, on the Style screen (a 2×2 picker with what the picked mode writes from one sentence) and
+in the keyboard's style pill, which opens the same four as tiles:
+- **Word-to-Word** (`verbatim`, the default): your words in the order you said them, punctuated
+  and capitalized; nothing paraphrased, added or removed, the tone kept. The AI runs only when
+  the transcript has no punctuation, a spoken command ("comma", "new line") or a spelled-out
+  address, and then under rules of its own that keep every word (`VERBATIM_RULES`).
+- **Rewrite** (`rewrite`): grammar fixed, sentences smoothed, needless repetition cut, so it reads
+  fluently; the meaning, facts, intent and tone kept, nothing added.
+- **Email** (`email`): a clear, polite email, organized in paragraphs; a greeting and a closing
+  when it is a whole message, the recipient's name only if it was said, never a sender's name,
+  and no invented names, dates or promises.
+- **Funny** (`funny`): lively and friendly, with light humor and at most an emoji or two where
+  they help; the meaning and every fact kept, nothing mean or over the top.
 
-The four the model writes go in the request that transcribes (`dictate`), so they cost no extra
-round trip. Three words or fewer stay as heard; Casual still lowercases them, on the iPhone
-(`StyleFormatter`).
+The three the model writes go in the request that transcribes (`dictate`), so they cost no extra
+round trip. Their mode is also restated after the transcript (`MODE_REMINDERS`): the shared rules
+and examples keep the speaker's words, and without it Email sometimes came back with no greeting
+and Funny unchanged (live check, 2026-11-21). Three words or fewer stay as heard, in every mode. A dictation keeps the mode it
+started in: one picked while it is recorded or written applies from the next. When the model
+can't be reached, the speaker's words go in, tidied on the iPhone, and Retry is offered. With
+translation on, the translation is written in the dictation's mode.
 
-Builds from before November 2026 still send the old styles (formal, casual, veryCasual, excited);
-the functions read them as Improve my grammar. The **primary** language is the explicit choice in Settings › Languages, else the
+The pick is saved on the iPhone (`SharedSettings.defaultStyle`, shared with the keyboard) and in
+the account (`profiles.default_style`, `StyleSync`), so it survives a relaunch and a reinstall.
+Styles saved by older builds read as the closest mode (`StylePreset(stored:)`): Improve my grammar
+and Concise as Rewrite, Professional as Email, Casual (`chat`) and the styles removed before
+November 2026 as Word-to-Word. The functions still accept every older style (`grammar`,
+`professional`, `chat`, `concise`, and formal, casual, veryCasual, excited, read as `grammar`)
+with its own prompt, so builds before the four modes write as they always did. The **primary** language is the explicit choice in Settings › Languages, else the
 first of the iPhone's preferred languages that an engine supports, else US English. A
 **secondary** language adds a switch (RU / EN) to the keyboard toolbar.
 
@@ -151,7 +165,10 @@ Cyrillic, brands in Latin).
 ## Keyboard
 
 The default is the voice keyboard:
-- a bar with the menu, an outlined chip for translation, a solid pill for the style, and Delete;
+- a bar with the menu, Translate, a solid pill for the style, and Delete. Translate shows its
+  language pair ("RU → EN", "Auto → RU"), solid while on and outlined while off, and one tap
+  turns it on or off. The pair is changed in the menu, kept while Translate is off and across
+  restarts, and a dictation keeps the setting it began with (`SharedSettings.translationPair`);
 - a big ink talk button with a ring around it, which turns red with ✓ and echo rings that follow
   the voice while it listens (nothing else on the keyboard is red). The words of the dictation
   show under it while it listens, when the language's on-device model is on the iPhone. For the
@@ -161,7 +178,7 @@ The default is the voice keyboard:
 
 It is 278 pt tall (272 in landscape). It can't dictate without Allow Full Access, so until that is
 on the keyboard shows Numbers first, where typing works. Settings › Keyboard › Layout also offers
-Numbers first and QWERTY, with the same chip and pill and a listening panel, which shows the
+Numbers first and QWERTY, with the same Translate and pill and a listening panel, which shows the
 words too. The menu button opens the keyboard's own page: translation, Add to dictionary, haptics,
 the ready vibration, start and stop sounds, and Light / Dark / Auto, with ABC and a link to
 Murmur's Settings.
@@ -253,14 +270,23 @@ scripts/smoke_functions.sh           # HTTP checks: auth, 401/400/402, an Englis
 RUN_GOLDEN=1 OPENAI_API_KEY=... deno test --allow-env --allow-net supabase/functions/cleanup/golden_test.ts
 
 # Model comparison (cost money; OPENAI_API_KEY and ANTHROPIC_API_KEY in supabase/functions/.env).
-# Text step: OpenAI and Claude models on Word for word, Improve my grammar and translation cases,
+# Text step: OpenAI and Claude models on Word-to-Word, Rewrite and translation cases,
 # graded blind by gpt-6-astra and claude-opus-5-5. --dry-run shows the plan.
 deno run --allow-env --allow-net --allow-read --allow-write --env-file=supabase/functions/.env \
   scripts/bench/text_bench.ts --out <dir>
 # Speech: gpt-transcribe with Auto-detect vs a chosen language, on clips the Mac speaks in ten languages.
 deno run --allow-env --allow-net --allow-read --allow-write --allow-run --env-file=supabase/functions/.env \
   scripts/bench/transcribe_bench.ts --out <dir>
+# Languages: does gpt-transcribe accept every Speak language (DictationLanguage.speechLanguages)?
+# One second of silence per language, under $0.01; exits 1 and names any it refuses.
+deno run --allow-env --allow-net --allow-read --env-file=supabase/functions/.env scripts/bench/language_probe.ts
 ```
+
+Languages live in one place, `DictationLanguage` (MurmurCore): `speechLanguages` (65, recognized in
+the cloud: the Speak menus and Settings › Languages) and `translationLanguages` (91: those plus 26
+the text model writes but no speech service recognizes reliably, offered only under "Type in").
+The server takes any well-formed tag; a 400 from OpenAI to a request that named its languages is
+tried once more without them, so a code it refuses can't fail a dictation.
 
 The `cleanup` function sends OpenAI's Responses API one system prompt in three parts — the shared
 rules, a language pack (English, Russian, or one named after any other language; with no tag, one

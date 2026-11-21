@@ -229,10 +229,7 @@ final class DictationEngine {
             guard current === recording, isListening else { return }
             let speak = KeyboardLanguageDefaults.source(
                 saved: settings.translationSourceLanguage, autoDetectApplied: settings.autoDetectDefaultApplied)
-            let target = settings.translationEnabled ? KeyboardLanguageDefaults.target(
-                saved: settings.translationTargetLanguage.map(DictationLanguage.init(tag:)), source: speak,
-                preferred: Locale.preferredLanguages, available: DictationLanguage.cloudLanguages,
-                recent: settings.recentTranslationLanguages.map(DictationLanguage.init(tag:))) : nil
+            let target = settings.translationTarget()
             let language = cloudLanguage(speak.tag)
             if transcriber.currentLanguage != language { transcriber.setLanguage(language) }
             transcriber.beginUtterance()

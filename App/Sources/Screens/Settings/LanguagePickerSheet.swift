@@ -4,7 +4,9 @@ import SwiftUI
 
 /// Settings › Languages: a searchable list of the languages Murmur recognizes, the ones picked on
 /// top, Auto-detect above the rest. Murmur detects which of the picked languages each dictation
-/// is in; with none picked, any language. Taps apply at once.
+/// is in; with none picked, any language. Taps apply at once. At most
+/// `DictationLanguage.maxSpokenLanguages` can be picked: the recognizer is told at most that many.
+/// Languages Murmur can only type in (translation targets) aren't here: they can't be spoken.
 struct LanguagePickerSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -13,6 +15,7 @@ struct LanguagePickerSheet: View {
     var body: some View {
         let settings = model.settings
         let picked = settings.dictationLanguages.map(DictationLanguage.init(tag:))
+        let isFull = picked.count >= DictationLanguage.maxSpokenLanguages
         VStack(spacing: 0) {
             SheetHeader("Languages", confirmTitle: "Done") { dismiss() }
             List {
@@ -25,10 +28,8 @@ struct LanguagePickerSheet: View {
                         }
                         header("All languages")
                         autoDetectRow(isOn: picked.isEmpty)
-                        ForEach(Self.unpicked(picked)) { row($0, isOn: false) }
-                        Text(picked.isEmpty
-                             ? "\(Brand.name) detects the language you speak. Pick yours so it only chooses among them."
-                             : "\(Brand.name) detects which of these you speak. Pick one language to always dictate in it.")
+                        ForEach(Self.unpicked(picked)) { row($0, isOn: false, isEnabled: !isFull) }
+                        Text(Self.footer(pickedCount: picked.count))
                             .font(.murmur(.footnote))
                             .foregroundStyle(Theme.third)
                             .padding(.vertical, 12)
@@ -37,7 +38,8 @@ struct LanguagePickerSheet: View {
                     } else {
                         let matches = Self.matching(search)
                         ForEach(matches) { language in
-                            row(language, isOn: picked.contains { $0.languageCode == language.languageCode })
+                            let isOn = picked.contains { $0.languageCode == language.languageCode }
+                            row(language, isOn: isOn, isEnabled: isOn || !isFull)
                                 .padding(.top, language.id == matches.first?.id ? 12 : 0)
                         }
                         if matches.isEmpty {
@@ -62,7 +64,7 @@ struct LanguagePickerSheet: View {
             .padding(.bottom, 6)
     }
 
-    private func row(_ language: DictationLanguage, isOn: Bool) -> some View {
+    private func row(_ language: DictationLanguage, isOn: Bool, isEnabled: Bool = true) -> some View {
         Button {
             model.settings.toggleDictationLanguage(language.tag)
         } label: {
@@ -72,6 +74,8 @@ struct LanguagePickerSheet: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.4)
         .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 
@@ -106,14 +110,24 @@ struct LanguagePickerSheet: View {
     /// Every language not picked, by name.
     static func unpicked(_ picked: [DictationLanguage]) -> [DictationLanguage] {
         let codes = Set(picked.map(\.languageCode))
-        return DictationLanguage.cloudLanguagesByName.filter { !codes.contains($0.languageCode) }
+        return DictationLanguage.speechLanguagesByName.filter { !codes.contains($0.languageCode) }
     }
 
-    /// Languages whose name, in the UI language or their own, contains `query`.
+    /// The languages `query` finds by name (in English, the UI language or their own), another
+    /// name ("Farsi") or code ("pt"), best first: `DictationLanguage.search`.
     static func matching(_ query: String) -> [DictationLanguage] {
-        let query = query.trimmingCharacters(in: .whitespaces)
-        guard !query.isEmpty else { return DictationLanguage.cloudLanguagesByName }
-        return DictationLanguage.cloudLanguagesByName.filter { $0.pickerName.localizedStandardContains(query) }
+        DictationLanguage.search(query, in: DictationLanguage.speechLanguagesByName)
+    }
+
+    /// Under the list: what picking does, and the limit once it is reached.
+    static func footer(pickedCount: Int) -> String {
+        if pickedCount == 0 {
+            return "\(Brand.name) detects the language you speak. Pick yours so it only chooses among them."
+        }
+        if pickedCount >= DictationLanguage.maxSpokenLanguages {
+            return "\(Brand.name) detects which of these you speak. You can pick up to \(DictationLanguage.maxSpokenLanguages) languages."
+        }
+        return "\(Brand.name) detects which of these you speak. Pick one language to always dictate in it."
     }
 
     /// What the Settings row shows: "Auto-detect", "Russian", "English, Russian", "English, Russian +1".

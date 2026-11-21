@@ -58,38 +58,38 @@ struct StyleSyncTests {
 
     /// A reinstall: signing in during onboarding brings back the account's style.
     @Test func aNewInstallTakesTheAccountsStyle() async {
-        remote.account = .grammar
+        remote.account = .rewrite
         let local = LocalStyle(.verbatim)
         await makeSync(local).sync(onboardingComplete: false)
-        #expect(local.value == .grammar)
+        #expect(local.value == .rewrite)
         #expect(remote.saved.isEmpty)
     }
 
     /// An iPhone set up before styles were synced keeps the style chosen on it.
     @Test func anIPhoneAlreadySetUpSendsItsStyleFirst() async {
         remote.account = .verbatim
-        let local = LocalStyle(.grammar)
+        let local = LocalStyle(.rewrite)
         await makeSync(local).sync(onboardingComplete: true)
-        #expect(remote.saved == [.grammar])
-        #expect(local.value == .grammar)
+        #expect(remote.saved == [.rewrite])
+        #expect(local.value == .rewrite)
     }
 
     @Test func aChangeMadeHereIsSent() async {
         let local = LocalStyle(.verbatim)
         let sync = makeSync(local)
         await sync.sync(onboardingComplete: true)
-        local.value = .grammar // the Style tab or the keyboard's pill
+        local.value = .rewrite // the Style tab or the keyboard's pill
         await sync.sync(onboardingComplete: true)
-        #expect(remote.saved == [.verbatim, .grammar])
+        #expect(remote.saved == [.verbatim, .rewrite])
     }
 
     @Test func aChangeMadeOnAnotherDeviceArrives() async {
         let local = LocalStyle(.verbatim)
         let sync = makeSync(local)
         await sync.sync(onboardingComplete: true)
-        remote.account = .grammar
+        remote.account = .rewrite
         await sync.sync(onboardingComplete: true)
-        #expect(local.value == .grammar)
+        #expect(local.value == .rewrite)
         #expect(remote.saved == [.verbatim])
     }
 
@@ -98,13 +98,13 @@ struct StyleSyncTests {
         let local = LocalStyle(.verbatim)
         let sync = makeSync(local)
         await sync.sync(onboardingComplete: true)
-        local.value = .grammar
+        local.value = .rewrite
         remote.offline = true
         await sync.sync(onboardingComplete: true)
         remote.offline = false
         await sync.sync(onboardingComplete: true)
-        #expect(remote.saved == [.verbatim, .grammar])
-        #expect(local.value == .grammar)
+        #expect(remote.saved == [.verbatim, .rewrite])
+        #expect(local.value == .rewrite)
     }
 
     /// Picked in the Style tab while the account's style was being read: sent right after.
@@ -116,16 +116,16 @@ struct StyleSyncTests {
         await sync.sync(onboardingComplete: true)
         let running = Task { await sync.sync(onboardingComplete: true) }
         while gated.gate == nil { await Task.yield() }
-        local.value = .grammar
+        local.value = .rewrite
         await sync.sync(onboardingComplete: true)
         gated.gate?.resume()
         await running.value
-        #expect(gated.saved == [.verbatim, .grammar])
-        #expect(local.value == .grammar)
+        #expect(gated.saved == [.verbatim, .rewrite])
+        #expect(local.value == .rewrite)
     }
 
     @Test func nothingIsSentOrTakenWhileSignedOut() async {
-        remote.account = .grammar
+        remote.account = .rewrite
         let local = LocalStyle(.verbatim)
         await makeSync(local, signedIn: false).sync(onboardingComplete: false)
         #expect(local.value == .verbatim)
@@ -134,7 +134,7 @@ struct StyleSyncTests {
 
     /// After a sign-out, onboarding starts again and the next account's style is taken.
     @Test func resetTakesTheNextAccountsStyle() async {
-        let local = LocalStyle(.grammar)
+        let local = LocalStyle(.rewrite)
         let sync = makeSync(local)
         await sync.sync(onboardingComplete: true)
         sync.reset()

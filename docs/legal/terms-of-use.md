@@ -18,6 +18,8 @@ at any time in the app.
   weekly limit.
 - Deleting your account doesn't reset the weekly limit, the free trial or invites: an account you
   make within 30 days of deleting one carries on where that one left off.
+- The weekly limit is per account and per device: accounts used on the same iPhone, iPad or Mac
+  share that device's free words for the week.
 - Redmic Pro is an auto-renewing subscription, monthly or yearly, bought through the App Store.
   Payment is charged to your Apple Account when you confirm the purchase. It renews
   automatically, at the same price and for the same period, unless you cancel it at least 24

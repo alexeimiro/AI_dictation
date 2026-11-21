@@ -126,7 +126,9 @@ export function buildResponsesRequest(
     instructions: buildInstructionParts(request, language).join("\n\n"),
     input: [{
       role: "user",
-      content: target ? buildTranslationMessage(request.transcript, target) : buildTranscriptMessage(request.transcript),
+      content: target
+        ? buildTranslationMessage(request.transcript, target, request.style)
+        : buildTranscriptMessage(request.transcript, request.style),
     }],
     reasoning: { effort: options.effort ?? DEFAULT_EFFORT },
     // Includes reasoning tokens; a 20,000-character transcript needs most of it.
@@ -271,7 +273,9 @@ export function buildMessagesRequest(
     })),
     messages: [{
       role: "user",
-      content: target ? buildTranslationMessage(request.transcript, target) : buildTranscriptMessage(request.transcript),
+      content: target
+        ? buildTranslationMessage(request.transcript, target, request.style)
+        : buildTranscriptMessage(request.transcript, request.style),
     }],
   };
 }
@@ -357,7 +361,7 @@ function judged(
   }
   const guard = request.targetLanguage
     ? guardTranslation(request.transcript, text, { source: language.tag, target: request.targetLanguage })
-    : guardOutput(request.transcript, text, language.tag ?? "en");
+    : guardOutput(request.transcript, text, language.tag ?? "en", request.style);
   if (!guard.ok) {
     return { ...base, text: request.transcript, status: "raw", reason: guard.reason };
   }

@@ -497,7 +497,7 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
         try await finish(model: request, dictationId: request?.dictationId)
     }
 
-    /// As above, naming the dictation whatever it asks for: Word for word has no model request to
+    /// As above, naming the dictation whatever it asks for: Word-to-Word has no model request to
     /// carry its id, and its words are counted under it by the function that transcribes it,
     /// `dictate` when that can, else `transcribe`.
     func finishUtterance(model request: ModelRequest?, dictationId: UUID) async throws -> UtteranceOutput {
@@ -555,7 +555,7 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
                                          detectedLanguage: detected(reply.languages), heardInCloud: true)
                 timing = reply.timing
             } else {
-                // Word for word asks `dictate` for the transcript alone. A dictation the model was
+                // Word-to-Word asks `dictate` for the transcript alone. A dictation the model was
                 // to write, which `dictate` couldn't take, goes to `transcribe` as it always did.
                 let transcript: CloudTranscript
                 if request == nil, let dictationId,
@@ -634,7 +634,7 @@ final class OpenAITranscriber: Transcriber, UtteranceTimingProviding, RecordingP
         }
     }
 
-    /// A Word for word dictation's transcript from `dictate`, or nil to send the same audio to
+    /// A Word-to-Word dictation's transcript from `dictate`, or nil to send the same audio to
     /// `transcribe`: `dictate` is unavailable, can't transcribe alone, or couldn't run its checks.
     private func transcribedAlone(_ audio: EncodedAudio, language: String?, hints: [String], keywords: [String],
                                   dictationId: UUID) async throws -> CloudTranscript? {
@@ -785,6 +785,8 @@ struct EncodedAudio: Sendable {
     /// Low data mode: half that, still clear speech at 16 kHz.
     static let lowDataBitRate = 16_000
 
+    private static let logger = Logger(subsystem: "Murmur", category: "CloudASR")
+
     init(data: Data, format: Format) {
         self.data = data
         self.format = format
@@ -800,7 +802,19 @@ struct EncodedAudio: Sendable {
         }
     }
 
+    /// The M4A file to upload: as `AVAudioFile` writes it, without the empty space it leaves for
+    /// the header (`M4AFreeSpace`), which is most of a short dictation's bytes.
     static func aac(_ samples: [Float], sampleRate: Double, bitRate: Int = standardBitRate) throws -> Data {
+        let written = try writtenAAC(samples, sampleRate: sampleRate, bitRate: bitRate)
+        guard let compact = M4AFreeSpace.removed(from: written) else {
+            logger.notice("The recording's M4A isn't laid out as expected; sending it with its empty space")
+            return written
+        }
+        return compact
+    }
+
+    /// The M4A file exactly as `AVAudioFile` writes it.
+    static func writtenAAC(_ samples: [Float], sampleRate: Double, bitRate: Int = standardBitRate) throws -> Data {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("dictation-\(UUID().uuidString).m4a")
         defer { try? FileManager.default.removeItem(at: url) }
         let settings: [String: Any] = [

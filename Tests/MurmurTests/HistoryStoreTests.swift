@@ -134,7 +134,7 @@ struct HistoryStoreTests {
         // Its own settings: the limit below marks the words used up.
         let settings = SharedSettings(defaults: UserDefaults(suiteName: "test.murmur.regenerate.\(UUID().uuidString)"))
         let pipeline = DictationPipeline(cleanup: cleanup, settings: settings)
-        let transcript = Transcript(id: UUID(), language: "en-US", style: .grammar, rawText: "hello there friend",
+        let transcript = Transcript(id: UUID(), language: "en-US", style: .rewrite, rawText: "hello there friend",
                                     status: .raw)
 
         var updated = try await pipeline.recleanup(transcript)

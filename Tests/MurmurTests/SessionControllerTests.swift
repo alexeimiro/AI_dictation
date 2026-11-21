@@ -219,8 +219,12 @@ private final class StateAtPreviewTransport: IPCTransport, @unchecked Sendable {
 private final class HistorySpy: TranscriptSink {
     var check: () -> Bool = { true }
     private(set) var checks: [Bool] = []
+    private(set) var transcripts: [Transcript] = []
 
-    func record(_ transcript: Transcript) { checks.append(check()) }
+    func record(_ transcript: Transcript) {
+        checks.append(check())
+        transcripts.append(transcript)
+    }
 }
 
 @MainActor
@@ -246,6 +250,12 @@ private final class SignedInSpy {
     var value = true
 }
 
+/// Whether the iPhone is locked, as the session asks it.
+@MainActor
+private final class LockSpy {
+    var locked = false
+}
+
 @MainActor
 struct SessionControllerTests {
     private struct Harness {
@@ -266,10 +276,12 @@ struct SessionControllerTests {
     private let micFormat = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
 
     /// A ready session on the in-memory transport, with its own settings (no sounds) and log.
-    /// `signedIn` comes last, so a trailing closure still means `configure`.
+    /// `signedIn` and `locked` come after `configure`, so a trailing closure still means `configure`.
     private func makeHarness(transcriber: Transcriber = SpokenTranscriber(), recordings: RecordingStore? = nil,
                              configure: (SharedSettings) -> Void = { _ in },
-                             signedIn: @escaping @MainActor () -> Bool = { true }) -> Harness {
+                             signedIn: @escaping @MainActor () -> Bool = { true },
+                             locked: @escaping @MainActor () -> Bool = { false },
+                             lockTimeout: TimeInterval = IdleStop.lockTimeout) -> Harness {
         let transport = InMemoryIPCTransport()
         let log = TimingsLog(directory: FileManager.default.temporaryDirectory
             .appendingPathComponent("session-timings-\(UUID().uuidString)", isDirectory: true))
@@ -279,7 +291,8 @@ struct SessionControllerTests {
         configure(settings)
         let session = SessionController(
             transport: transport, pipeline: DictationPipeline(cleanup: NoCleanup()), assets: SpeechAssetManager(),
-            history: history, recordings: recordings, timingsLog: log, settings: settings, signedIn: signedIn)
+            history: history, recordings: recordings, timingsLog: log, settings: settings, signedIn: signedIn,
+            protectedDataAvailable: { !locked() }, lockTimeout: lockTimeout)
         session.startForTesting(with: transcriber, language: english)
         return Harness(session: session, transport: transport, log: log, history: history)
     }
@@ -588,7 +601,7 @@ struct SessionControllerTests {
     /// keyboard can join (a pending start with the keyboard's options), as after a bounce.
     @Test func aShortcutStartsADictationTheKeyboardJoins() async throws {
         let harness = makeHarness { settings in
-            settings.defaultStyle = .grammar
+            settings.defaultStyle = .rewrite
             settings.autoDetectDefaultApplied = true
             settings.translationSourceLanguage = "en-US"
             settings.translationEnabled = true
@@ -597,7 +610,7 @@ struct SessionControllerTests {
         #expect(harness.session.beginDictationForKeyboard())
         let pending = try #require(harness.transport.payloads.readPendingStart())
         #expect(pending.autoStart == true && pending.documentIdentifier == nil)
-        #expect(pending.styleOverride == .grammar && pending.languageOverride == "en-US")
+        #expect(pending.styleOverride == .rewrite && pending.languageOverride == "en-US")
         #expect(pending.translationTargetLanguage == "de-DE")
         #expect(harness.session.phase == .recording(pending.requestId))
         harness.session.endDictation(commit: true)
@@ -606,6 +619,33 @@ struct SessionControllerTests {
         #expect(await waitUntil { !harness.log.all().isEmpty })
         let entry = try #require(harness.log.all().first)
         #expect(entry.startPath == nil && entry.tapToStartMs == nil && entry.jump == nil)
+    }
+
+    /// Translate turned off in the keyboard's bar: a shortcut's dictation isn't translated,
+    /// though the pair is kept for the next tap, and one turned back on uses that pair.
+    @Test func aShortcutIsNotTranslatedWhileTranslateIsOff() async throws {
+        var shared: SharedSettings?
+        let harness = makeHarness { settings in
+            shared = settings
+            settings.autoDetectDefaultApplied = true
+            settings.translationSourceLanguage = "en-US"
+            settings.translationTargetLanguage = "de-DE"
+            settings.translationEnabled = false
+        }
+        let settings = try #require(shared)
+        #expect(harness.session.beginDictationForKeyboard())
+        let off = try #require(harness.transport.payloads.readPendingStart())
+        #expect(off.translationTargetLanguage == nil && off.languageOverride == "en-US")
+        harness.session.endDictation(commit: true)
+        #expect(await waitUntil { harness.transport.payloads.readResult(off.requestId) != nil })
+        #expect(await waitUntil { harness.session.phase == .ready })
+
+        settings.setTranslationEnabled(true)
+        #expect(harness.session.beginDictationForKeyboard())
+        let on = try #require(harness.transport.payloads.readPendingStart())
+        #expect(on.requestId != off.requestId && on.translationTargetLanguage == "de-DE")
+        harness.session.endDictation(commit: true)
+        #expect(await waitUntil { harness.transport.payloads.readResult(on.requestId) != nil })
     }
 
     /// The week's free words are used up: the Action Button records nothing, and the keyboard
@@ -665,6 +705,27 @@ struct SessionControllerTests {
         #expect(await waitUntil { !delivered.isEmpty })
         #expect(delivered.first?.requestId == requestId)
         #expect(harness.transport.payloads.readResult(requestId) == nil)
+    }
+
+    /// The mode is fixed when a dictation starts: one picked while it is recorded or written (the
+    /// Style screen, the keyboard's pill) writes the next dictation, never half of this one.
+    @Test func aModePickedDuringADictationAppliesFromTheNextOne() async throws {
+        var settings: SharedSettings?
+        let harness = makeHarness { saved in
+            saved.defaultStyle = .email
+            settings = saved
+        }
+        _ = try #require(harness.session.beginInAppDictation())
+        settings?.defaultStyle = .funny
+        harness.session.endDictation(commit: true)
+        #expect(await waitUntil { harness.history.transcripts.count == 1 })
+        #expect(harness.history.transcripts.first?.style == .email)
+
+        #expect(await waitUntil { harness.session.phase == .ready })
+        _ = try #require(harness.session.beginInAppDictation())
+        harness.session.endDictation(commit: true)
+        #expect(await waitUntil { harness.history.transcripts.count == 2 })
+        #expect(harness.history.transcripts.last?.style == .funny)
     }
 
     /// The uploaded audio is kept for the transcript's playback, unless Keep recordings is off.
@@ -1133,5 +1194,109 @@ struct SessionControllerTests {
         #expect(session.phase == .off)
         #expect(transport.payloads.readLivePreview() == nil)
         #expect(!FileManager.default.fileExists(atPath: container.directory("live").path))
+    }
+
+    // MARK: A locked iPhone
+
+    /// `date` is `seconds` from now, give or take what the test itself took. The stop itself is
+    /// the idle timer's, as for "Turn off after"; these tests read when it is due.
+    private func isDue(_ date: Date?, in seconds: TimeInterval) -> Bool {
+        guard let date else { return false }
+        return abs(date.timeIntervalSinceNow - seconds) < 5
+    }
+
+    /// A locked iPhone can't show the keyboard, so the unused session ends a minute after the
+    /// lock, long before "Turn off after" (5 minutes) would end it.
+    @Test func aLockedPhoneEndsTheUnusedSessionAfterAMinute() {
+        let lock = LockSpy()
+        let harness = makeHarness(locked: { lock.locked })
+        harness.session.appDidEnterBackground()
+        #expect(isDue(harness.session.idleStopDateForTesting, in: 300))
+
+        lock.locked = true
+        harness.session.heartbeatForTesting()
+
+        #expect(isDue(harness.session.idleStopDateForTesting, in: IdleStop.lockTimeout))
+        #expect(harness.session.phase == .ready)
+    }
+
+    /// Never keeps the microphone on for as long as the iPhone is in use, and no longer.
+    @Test func neverStillEndsOnALockedPhone() {
+        let lock = LockSpy()
+        let harness = makeHarness(configure: { $0.disableAfter = .never }, locked: { lock.locked })
+        harness.session.appDidEnterBackground()
+        #expect(harness.session.idleStopDateForTesting == nil)
+
+        lock.locked = true
+        harness.session.heartbeatForTesting()
+
+        #expect(isDue(harness.session.idleStopDateForTesting, in: IdleStop.lockTimeout))
+    }
+
+    /// Unlocked within the minute, the session stays, and "Turn off after" decides again.
+    @Test func unlockingPutsTurnOffAfterBackInCharge() {
+        let lock = LockSpy()
+        let harness = makeHarness(locked: { lock.locked })
+        harness.session.appDidEnterBackground()
+        lock.locked = true
+        harness.session.heartbeatForTesting()
+        #expect(isDue(harness.session.idleStopDateForTesting, in: IdleStop.lockTimeout))
+
+        lock.locked = false
+        harness.session.heartbeatForTesting()
+
+        #expect(isDue(harness.session.idleStopDateForTesting, in: 300))
+        #expect(harness.session.phase == .ready)
+    }
+
+    /// The screen locked while a dictation recorded: it records on, as before, and the minute
+    /// starts when it has been written.
+    @Test func aDictationUnderWayWhenThePhoneLocksIsNotCut() async throws {
+        let lock = LockSpy()
+        let harness = makeHarness(locked: { lock.locked })
+        harness.session.appDidEnterBackground()
+        let requestId = UUID()
+        try harness.send(.start, requestId)
+        #expect(await waitUntil { harness.session.phase == .recording(requestId) })
+
+        lock.locked = true
+        harness.session.heartbeatForTesting()
+
+        #expect(harness.session.phase == .recording(requestId))
+        #expect(harness.session.idleStopDateForTesting == nil)
+        try harness.send(.stop, requestId)
+        #expect(await waitUntil { harness.session.phase == .ready })
+        #expect(harness.transport.payloads.readResult(requestId)?.isInsertable == true)
+        #expect(isDue(harness.session.idleStopDateForTesting, in: IdleStop.lockTimeout))
+    }
+
+    /// In front of the user nothing counts down, and coming to the front ends what was believed
+    /// about the lock.
+    @Test func inFrontNothingCountsDownWhateverTheLockSays() {
+        let lock = LockSpy()
+        let harness = makeHarness(locked: { lock.locked })
+        lock.locked = true
+        harness.session.heartbeatForTesting()
+        #expect(harness.session.idleStopDateForTesting == nil)
+
+        harness.session.appDidEnterBackground()
+        #expect(isDue(harness.session.idleStopDateForTesting, in: IdleStop.lockTimeout))
+
+        lock.locked = false
+        harness.session.appDidBecomeActive()
+        harness.session.appDidEnterBackground()
+        #expect(isDue(harness.session.idleStopDateForTesting, in: 300))
+    }
+
+    /// A Debug build's `-lock-timeout`, for measuring what the session costs in a locked iPhone.
+    @Test func theLockTimeoutCanBeLonger() {
+        let lock = LockSpy()
+        let harness = makeHarness(configure: { $0.disableAfter = .never }, locked: { lock.locked }, lockTimeout: 600)
+        harness.session.appDidEnterBackground()
+
+        lock.locked = true
+        harness.session.heartbeatForTesting()
+
+        #expect(isDue(harness.session.idleStopDateForTesting, in: 600))
     }
 }

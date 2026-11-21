@@ -18,7 +18,7 @@ protocol SessionRenewing: AnyObject {
 ///   has a worker check the token and open its own connections. Not when `dictate` answered
 ///   within `debounce`, as that worker is likely still up.
 ///
-/// In the November 2026 timings two Word for word dictations in three found their worker cold,
+/// In the November 2026 timings two Word-to-Word dictations in three found their worker cold,
 /// which cost about half a second each; they had no warm-up then.
 @MainActor
 final class BackendWarmup {
@@ -40,7 +40,7 @@ final class BackendWarmup {
     }
 
     /// `cloud`: the cloud transcribes the dictation, so its request at stop is `dictate`'s whenever
-    /// that can take it. `writesWithModel`: it is translated or written in a style; a Word for word
+    /// that can take it. `writesWithModel`: it is translated or written in a style; a Word-to-Word
     /// one needs `dictate` to transcribe alone. Ignored while a warm-up is still out: one at a time
     /// is enough.
     func dictationDidStart(_ requestId: UUID, cloud: Bool, writesWithModel: Bool) {

@@ -229,10 +229,16 @@ final class AccountService: StyleRemote {
     private let trial: TrialClaim?
     private let logger = Logger(subsystem: "Murmur", category: "Account")
 
-    init(backend: Backend?, functions: EdgeFunctionClient?, trial: TrialClaim? = nil) {
+    /// This iPhone's id (`DeviceIdentity`): the week's words are the iPhone's as well as the
+    /// account's, so the plan is asked about for the iPhone it is shown on.
+    private let device: @MainActor () -> String?
+
+    init(backend: Backend?, functions: EdgeFunctionClient?, trial: TrialClaim? = nil,
+         device: @escaping @MainActor () -> String? = { DeviceIdentity.shared.id }) {
         self.backend = backend
         self.functions = functions
         self.trial = trial
+        self.device = device
     }
 
     /// The plan and this week's words; nil without a backend or a stored session. It never starts
@@ -240,8 +246,22 @@ final class AccountService: StyleRemote {
     func quota() async throws -> Quota? {
         guard let backend, backend.client.auth.currentSession != nil else { return nil }
         try await backend.ensureSession()
+        if let device = device() {
+            do {
+                let rows: [Quota] = try await backend.client.rpc("my_quota", params: ["p_device": device]).execute().value
+                return rows.first
+            } catch let error as PostgrestError where Self.isUnknownFunction(error) {
+                // A server from before the per-iPhone count (a local stack not yet migrated): ask
+                // as builds before the id did.
+            }
+        }
         let rows: [Quota] = try await backend.client.rpc("my_quota").execute().value
         return rows.first
+    }
+
+    /// PostgREST's and Postgres's answers for a function that doesn't exist with these arguments.
+    nonisolated static func isUnknownFunction(_ error: PostgrestError) -> Bool {
+        error.code == "PGRST202" || error.code == "42883"
     }
 
     /// The caller's invite code and counts; nil without a backend or a signed-in account.

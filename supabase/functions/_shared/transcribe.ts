@@ -70,14 +70,21 @@ export function parseTranscribeRequest(body: unknown): Parsed<TranscribeRequest>
 }
 
 /** Apple tags whose language OpenAI knows under another ISO-639-1 code. */
-const ISO_ALIASES: Record<string, string> = { nb: "no", nn: "no", fil: "tl", iw: "he", in: "id" };
+const ISO_ALIASES: Record<string, string> = { nb: "no", nn: "no", fil: "tl", iw: "he", in: "id", cmn: "zh" };
 
-/** "ru-RU" → "ru"; OpenAI takes ISO-639-1 language codes ("nb-NO" → "no", "fil-PH" → "tl"). */
+/**
+ * The ISO-639-3 codes gpt-transcribe's guide names beside the ISO-639-1 ones, for a language
+ * that has no two-letter code: Cantonese. Soniox (the live words) doesn't take it, so a Cantonese
+ * dictation is uploaded.
+ */
+const ISO_639_3 = new Set(["yue"]);
+
+/** "ru-RU" → "ru"; OpenAI takes ISO-639-1 language codes ("nb-NO" → "no", "fil-PH" → "tl"), and "yue". */
 export function isoLanguage(tag: string | undefined | null): string | null {
   if (!tag) return null;
   const primary = tag.split("-")[0].toLowerCase();
   const code = ISO_ALIASES[primary] ?? primary;
-  return /^[a-z]{2}$/.test(code) ? code : null;
+  return /^[a-z]{2}$/.test(code) || ISO_639_3.has(code) ? code : null;
 }
 
 /**
@@ -147,18 +154,33 @@ export interface TranscriptionResult {
 /**
  * Calls OpenAI with an overall deadline. Throws on HTTP errors, timeouts and aborts. A `signal`
  * replaces the `AbortSignal.timeout(deadlineMs)` default, so it should carry a deadline of its own.
+ *
+ * OpenAI rejects a language code it doesn't support with a 400, which would fail the whole
+ * dictation. A 400 to a request that named its language or the user's languages is therefore
+ * tried once more without them, inside the same deadline: the model then detects the language
+ * itself. A 400 with no languages named, or a second one, is thrown as before.
  */
 export async function transcribeWithOpenAI(
   request: TranscribeRequest,
   options: { apiKey: string; model: string; deadlineMs: number; signal?: AbortSignal; fetcher?: typeof fetch },
 ): Promise<TranscriptionResult> {
   const fetcher = options.fetcher ?? fetch;
-  const response = await fetcher("https://api.openai.com/v1/audio/transcriptions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${options.apiKey}` },
-    body: openAIForm(request, options.model),
-    signal: options.signal ?? AbortSignal.timeout(options.deadlineMs),
-  });
+  const signal = options.signal ?? AbortSignal.timeout(options.deadlineMs);
+  const post = (body: TranscribeRequest) =>
+    fetcher("https://api.openai.com/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${options.apiKey}` },
+      body: openAIForm(body, options.model),
+      signal,
+    });
+  let response = await post(request);
+  if (response.status === 400 && namesLanguages(request)) {
+    const detail = await response.json().catch(() => null) as { error?: { type?: string; code?: string } } | null;
+    console.warn(
+      `OpenAI refused a transcription that named its languages (${detail?.error?.code ?? detail?.error?.type ?? "400"}); retrying without them`,
+    );
+    response = await post({ ...request, language: null, languageHints: [] });
+  }
   if (!response.ok) {
     // The body can echo request details; keep only the status and OpenAI's error type.
     const detail = await response.json().catch(() => null) as { error?: { type?: string; code?: string } } | null;
@@ -170,6 +192,11 @@ export async function transcribeWithOpenAI(
     ? payload.languages.flatMap((item) => typeof item?.code === "string" ? [item.code] : [])
     : [];
   return { text, languages };
+}
+
+/** The request tells OpenAI which language the speech is in, or which ones it may be in. */
+function namesLanguages(request: TranscribeRequest): boolean {
+  return request.language !== null || request.languageHints.length > 0;
 }
 
 export class OpenAIError extends Error {

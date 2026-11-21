@@ -82,8 +82,8 @@ struct KeyboardSurface<S: Shape>: View {
     }
 }
 
-/// An outlined capsule with a short label: the translate chip, Undo, a recent language. `filled`
-/// turns it solid, for the one that is chosen.
+/// An outlined capsule with a short label: the bar's Translate, Undo, a recent language. `filled`
+/// turns it solid, for the one that is chosen (Translate while it is on).
 struct OutlineChip<Label: View>: View {
     var height: CGFloat = 32
     var filled = false

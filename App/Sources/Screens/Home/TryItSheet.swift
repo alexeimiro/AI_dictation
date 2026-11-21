@@ -16,7 +16,7 @@ struct TryItSheet: View {
     }
 
     static let examples = [
-        Example(title: "Jot down my to-dos", detail: "Say them one by one. With Improve my grammar they come out as a numbered list.",
+        Example(title: "Jot down my to-dos", detail: "Say them one by one. With Rewrite they come out as a numbered list.",
                 symbol: "checklist", url: "mobilenotes://"),
         Example(title: "Send a quick message", detail: "\(Brand.name) drops the um’s and spells the names in your dictionary right.",
                 symbol: "bubble.left", url: "sms:"),

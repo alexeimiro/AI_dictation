@@ -10,7 +10,7 @@ struct TranslateRow: View {
 
     var body: some View {
         let on = model.translationEnabled
-        let canSwap = on && !model.effectiveLanguage.isAutomatic
+        let canSwap = model.canSwapLanguages
         HStack(spacing: 8) {
             // Solid while translation is on, outlined while it is off.
             Image(systemName: "translate")
@@ -28,7 +28,7 @@ struct TranslateRow: View {
 
             HStack(spacing: 6) {
                 LanguageMenu(title: "From", accessibilityTitle: "Translate from",
-                             selection: model.effectiveLanguage, choices: model.languageChoices) { language in
+                             selection: model.effectiveLanguage, sections: model.languageSections) { language in
                     model.actions.setLanguage(language == model.primaryLanguage ? nil : language)
                 }
 
@@ -43,9 +43,11 @@ struct TranslateRow: View {
                 .disabled(!canSwap)
                 .opacity(canSwap ? 1 : 0.4)
                 .accessibilityLabel("Swap languages")
+                .accessibilityHint(on && !model.effectiveLanguage.isAutomatic && !model.targetLanguage.supportsSpeech
+                    ? "\(model.targetLanguage.localizedName) can be typed in but not spoken" : "")
 
                 LanguageMenu(title: "To", accessibilityTitle: "Translate to",
-                             selection: model.targetLanguage, choices: model.targetLanguageChoices,
+                             selection: model.targetLanguage, sections: model.targetLanguageSections,
                              action: model.actions.setTargetLanguage)
                     .disabled(!on)
                     .opacity(on ? 1 : 0.4)
@@ -66,24 +68,31 @@ struct TranslateRow: View {
     }
 }
 
-/// A From or To button that opens the language list, with a check on the current language.
+/// A From or To button that opens the language list, with a check on the current language. The
+/// sections (the user's languages, then all the others) are split by a line. A keyboard can't
+/// type into a search field of its own: the languages found and picked in the app's searchable
+/// Settings › Languages come first here instead.
 struct LanguageMenu: View {
     let title: String
     let accessibilityTitle: String
     let selection: DictationLanguage
-    let choices: [DictationLanguage]
+    let sections: [[DictationLanguage]]
     let action: (DictationLanguage) -> Void
 
     var body: some View {
         Menu {
-            ForEach(choices) { language in
-                Button {
-                    action(language)
-                } label: {
-                    if language.languageCode == selection.languageCode {
-                        Label(language.localizedName, systemImage: "checkmark")
-                    } else {
-                        Text(language.localizedName)
+            ForEach(Array(sections.enumerated()), id: \.offset) { _, languages in
+                Section {
+                    ForEach(languages) { language in
+                        Button {
+                            action(language)
+                        } label: {
+                            if language.languageCode == selection.languageCode {
+                                Label(language.localizedName, systemImage: "checkmark")
+                            } else {
+                                Text(language.localizedName)
+                            }
+                        }
                     }
                 }
             }
@@ -106,30 +115,45 @@ struct LanguageMenu: View {
     }
 }
 
-/// The toolbar's sign that translation is on, "Auto → RU" ("→ RU" where that doesn't fit): an
-/// outlined chip that opens the menu page.
-struct TranslateChip: View {
+/// The bar's Translate button: one tap turns translation on, the next turns it off, with the pair
+/// it translates with on it, "Auto → RU" ("→ RU", then the glyph alone, where that doesn't fit).
+/// Solid while on, outlined while off, like the menu's translate tile; the pair stays when it is
+/// off. The languages are changed in ☰ (its translate row), which VoiceOver also reaches from here.
+/// Locked, but readable, while a dictation starts or runs: the dictation keeps the options it
+/// began with.
+struct TranslateToggle: View {
     let model: KeyboardModel
     var height: CGFloat = 46
 
     var body: some View {
-        Button { model.actions.showOverlay(.menu) } label: {
+        let on = model.translationEnabled
+        let locked = model.locksSessionOptions
+        let pair = model.translationPair
+        Button { model.actions.setTranslationEnabled(!on) } label: {
             ViewThatFits(in: .horizontal) {
-                chip("\(model.effectiveLanguage.isAutomatic ? "Auto" : model.effectiveLanguage.shortCode) → \(model.targetLanguage.shortCode)")
-                chip("→ \(model.targetLanguage.shortCode)")
+                chip(pair.shortTitle, on: on)
+                chip("→ \(pair.target.shortCode)", on: on)
+                chip(nil, on: on)
             }
         }
         .buttonStyle(.keyboardPress)
-        .accessibilityLabel(model.effectiveLanguage.isAutomatic
-            ? "Translating into \(model.targetLanguage.localizedName)"
-            : "Translating \(model.effectiveLanguage.localizedName) to \(model.targetLanguage.localizedName)")
-        .accessibilityHint("Opens the menu")
+        .disabled(locked)
+        .opacity(locked ? 0.4 : 1)
+        .accessibilityLabel("Translate")
+        .accessibilityValue("\(on ? "On" : "Off"), \(pair.spokenTitle)")
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityAction(named: "Change languages") { model.actions.showOverlay(.menu) }
     }
 
-    private func chip(_ text: String) -> some View {
-        OutlineChip { Text(text) }
-            .frame(height: height)
-            .padding(.horizontal, 2)
-            .contentShape(.rect)
+    private func chip(_ text: String?, on: Bool) -> some View {
+        OutlineChip(filled: on) {
+            HStack(spacing: 5) {
+                Image(systemName: "translate")
+                if let text { Text(text) }
+            }
+        }
+        .frame(height: height)
+        .padding(.horizontal, 2)
+        .contentShape(.rect)
     }
 }

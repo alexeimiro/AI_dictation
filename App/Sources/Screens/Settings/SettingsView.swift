@@ -33,7 +33,8 @@ struct SettingsView: View {
                     }
                 }
                 .settingRow()
-                SettingPicker("Turn off after", detail: "When the microphone turns off while unused",
+                SettingPicker("Turn off after",
+                              detail: "When the microphone turns off while unused. A locked iPhone turns it off after a minute.",
                               selection: $settings.disableAfter, value: settings.disableAfter.title) {
                     ForEach(DisableAfter.allCases) { Text($0.title).tag($0) }
                 }
@@ -131,7 +132,7 @@ struct SettingsView: View {
                 header("Personalization")
                 Toggle(isOn: $settings.smartFormatting) {
                     SettingLabel("Smart formatting",
-                                 detail: "Drop “um” and “uh”, and turn “new line” or “comma” into what they say. Every style but Word for word always does.")
+                                 detail: "Drop “um” and “uh”, and turn “new line” or “comma” into what they say. Every mode but Word-to-Word always does.")
                 }
                 .settingRow()
             }

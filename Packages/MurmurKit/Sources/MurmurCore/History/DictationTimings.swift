@@ -215,7 +215,7 @@ public struct DictationTimings: Codable, Sendable, Hashable {
     /// When the keyboard claimed the result: its claim marker's date, copied in by
     /// `TimingsLog.recordClaims` because the markers are pruned after a day.
     public var claimedAt: Date?
-    /// The dictation's `StylePreset`, as stored ("verbatim" for Word for word). Word for word goes
+    /// The dictation's `StylePreset`, as stored ("verbatim" for Word-to-Word). Word-to-Word goes
     /// through `dictate` too now, so the requests no longer tell it from the styles the model
     /// writes. Nil in entries from builds before that.
     public var style: String?

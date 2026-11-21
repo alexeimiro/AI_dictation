@@ -97,6 +97,7 @@ private struct NoteRow: View {
                 .font(.transcript(.body).weight(.semibold))
                 .foregroundStyle(Theme.ink)
                 .lineLimit(1)
+                .dictatedTextDirection(note.displayTitle)
             HStack(spacing: 6) {
                 Text(note.updatedAt, format: .relative(presentation: .named))
                 if !note.title.trimmingCharacters(in: .whitespaces).isEmpty, note.hasPreview {

@@ -59,9 +59,7 @@ struct KeyboardToolbar: View {
             }
         } else if model.showsVoicePad {
             // The voice pad shows its notices over the talk button.
-            if model.translationEnabled {
-                TranslateChip(model: model, height: metrics.control)
-            }
+            translateToggle(metrics)
         } else if let pending = model.pendingResult {
             HStack(spacing: 0) {
                 Button(action: model.actions.insertPending) {
@@ -91,10 +89,17 @@ struct KeyboardToolbar: View {
             case .starting:
                 caption("Starting…")
             case .idle, .listening, .processing:
-                if model.translationEnabled {
-                    TranslateChip(model: model, height: metrics.control)
-                }
+                translateToggle(metrics)
             }
+        }
+    }
+
+    /// Translate on or off in one tap, on or off showing its pair. Not without Full Access, which
+    /// both dictating and keeping the choice need.
+    @ViewBuilder
+    private func translateToggle(_ metrics: BarMetrics) -> some View {
+        if model.hasFullAccess {
+            TranslateToggle(model: model, height: metrics.control)
         }
     }
 

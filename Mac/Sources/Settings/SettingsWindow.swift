@@ -140,7 +140,7 @@ struct GeneralSettings: View {
                     PopupMenu(title: speak.map { DictationLanguage(tag: $0).localizedName } ?? "Auto-detect") {
                         Button("Auto-detect") { setSpeak(nil) }
                         Divider()
-                        ForEach(DictationLanguage.cloudLanguagesByName, id: \.tag) { language in
+                        ForEach(DictationLanguage.speechLanguagesByName, id: \.tag) { language in
                             Button(language.localizedName) { setSpeak(language.tag) }
                         }
                     }
@@ -149,7 +149,9 @@ struct GeneralSettings: View {
                     PopupMenu(title: translateTo.map { DictationLanguage(tag: $0).localizedName } ?? "Don’t translate") {
                         Button("Don’t translate") { setTranslate(nil) }
                         Divider()
-                        ForEach(DictationLanguage.cloudLanguagesByName, id: \.tag) { language in
+                        // Every language Murmur types in, which is more than it recognizes, except the
+                        // one spoken: translating into it would only clean the text up.
+                        ForEach(translationChoices, id: \.tag) { language in
                             Button(language.localizedName) { setTranslate(language.tag) }
                         }
                     }
@@ -186,6 +188,11 @@ struct GeneralSettings: View {
         case .startDictation: "starts Apple’s dictation"
         case .doNothing: ""
         }
+    }
+
+    private var translationChoices: [DictationLanguage] {
+        let spoken = speak.map { DictationLanguage(tag: $0).languageCode }
+        return DictationLanguage.translationLanguagesByName.filter { $0.languageCode != spoken }
     }
 
     private func setSpeak(_ tag: String?) {
@@ -320,7 +327,7 @@ struct AccountSettings: View {
         .confirmationDialog("Delete your Redmic account?", isPresented: $confirmDelete) {
             Button("Delete account", role: .destructive) { delete() }
         } message: {
-            Text("Your dictionary, snippets, notes and style are deleted from every device. This can’t be undone.")
+            Text("Your dictionary, snippets, notes and style are deleted from every device. This can’t be undone. Signing up again doesn’t reset this week’s words or the free trial.")
         }
     }
 

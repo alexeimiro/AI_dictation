@@ -28,7 +28,7 @@ protocol Transcriber: AnyObject, Sendable {
     /// Ends the dictation and returns the final transcript.
     func finishUtterance() async throws -> String
 
-    /// Ends a dictation for the pipeline. With `request` (a translation, or Improve my grammar), a
+    /// Ends a dictation for the pipeline. With `request` (a translation, or a mode the model writes), a
     /// transcriber that can have the model write the text in the request that transcribes
     /// (`OpenAITranscriber` with `dictate`) returns that reply too; the others return the
     /// transcript alone, and the pipeline asks the cleanup. No default: a transcriber that wraps

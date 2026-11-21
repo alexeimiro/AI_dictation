@@ -88,12 +88,14 @@ final class SettingsModel {
         return true
     }
 
-    /// Picks `tag`, or unpicks the language it's a variant of.
+    /// Picks `tag`, or unpicks the language it's a variant of. A language that can't be spoken,
+    /// or one past `DictationLanguage.maxSpokenLanguages`, isn't picked.
     func toggleDictationLanguage(_ tag: String) {
-        let code = DictationLanguage(tag: tag).languageCode
+        let language = DictationLanguage(tag: tag)
+        let code = language.languageCode
         if dictationLanguages.contains(where: { DictationLanguage(tag: $0).languageCode == code }) {
             dictationLanguages.removeAll { DictationLanguage(tag: $0).languageCode == code }
-        } else {
+        } else if language.supportsSpeech, dictationLanguages.count < DictationLanguage.maxSpokenLanguages {
             dictationLanguages.append(tag)
         }
     }

@@ -550,6 +550,31 @@ Deno.test("Professional, Casual and Concise are written in audio mode too, each 
   }
 });
 
+Deno.test("Rewrite, Email and Funny are written in audio mode, each under its own style line", async () => {
+  const styles: Array<[string, string, string]> = [
+    ["rewrite", "Rewrite:", "Мне нужен этот отчёт до пятницы."],
+    ["email", "Email:", "Привет!\n\nПришли, пожалуйста, этот отчёт до пятницы.\n\nСпасибо!"],
+    ["funny", "Funny:", "Отчёт нужен до пятницы, иначе я превращусь в тыкву 🎃"],
+  ];
+  for (const [style, label, written] of styles) {
+    const { handler, recorded } = setup({
+      env: { CLEANUP_MODEL: "gpt-6.1-terra", TRANSLATE_MODEL: "gpt-6-luna" },
+      transcription: () => Response.json({ text: "слушай короче мне нужен этот отчёт до пятницы ок", languages: [{ code: "ru" }] }),
+      responses: () => Response.json(responsesReply(written)),
+    });
+    const response = await handler(audioRequest({ ...metadata, targetLanguage: undefined, style }));
+    assertEquals(response.status, 200, style);
+    const reply = await response.json();
+    // The email keeps its lines and the funny reply its emoji.
+    assertEquals([reply.status, reply.text, reply.targetLanguage], ["cleaned", written, null], style);
+    assertEquals(paths(recorded), ["/v1/audio/transcriptions", "/v1/responses"], style);
+    const prompt = recorded.fetches[1].json!;
+    assertEquals([prompt.model, prompt.prompt_cache_key], ["gpt-6.1-terra", "murmur-cleanup-ru"], style);
+    assertStringIncludes(prompt.instructions as string, `Style: ${label}`, style);
+    assertEquals(recorded.logs[0].style, style);
+  }
+});
+
 Deno.test("Improve my grammar leaves three words or fewer as heard, with no model call", async () => {
   const { handler, recorded } = setup({ transcription: () => Response.json({ text: "Спасибо, увидимся вечером.", languages: [{ code: "ru" }] }) });
   const reply = await (await handler(audioRequest({ ...metadata, targetLanguage: undefined, style: "grammar" }))).json();

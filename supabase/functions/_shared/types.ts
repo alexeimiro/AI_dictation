@@ -1,8 +1,17 @@
 /**
- * How a dictation is written: Word for word (the default when a request names none), or a style
- * the model writes: Improve my grammar, Professional, Casual ("chat") or Concise.
+ * How a dictation is written. The four modes the app offers since November 21, 2026: Word-to-Word
+ * ("verbatim", the default when a request names none), Rewrite, Email and Funny. The model writes
+ * every one of them but Word-to-Word. Builds from before the four modes (1.0.4 and earlier) send
+ * the five styles of November 12, 2026: Word for word ("verbatim"), Improve my grammar
+ * ("grammar"), Professional, Casual ("chat") and Concise. Those stay valid and keep their own
+ * wording, so an older build writes exactly as it did.
  */
-export type Style = "verbatim" | "grammar" | "professional" | "chat" | "concise";
+export type Style = "verbatim" | "rewrite" | "email" | "funny" | "grammar" | "professional" | "chat" | "concise";
+
+/** The modes the app offers since the four modes, in the order it shows them. */
+export const MODES = ["verbatim", "rewrite", "email", "funny"] as const satisfies readonly Style[];
+/** The styles only builds from before the four modes send. */
+export const PRE_MODE_STYLES = ["grammar", "professional", "chat", "concise"] as const satisfies readonly Style[];
 
 /** The model writes every dictation in this style. Word for word asks it only for what the app's gate finds. */
 export function writesWithModel(style: Style | undefined): boolean {
@@ -41,12 +50,12 @@ export interface CleanupRequest {
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 
-const STYLES: Style[] = ["verbatim", "grammar", "professional", "chat", "concise"];
+const STYLES: Style[] = [...MODES, ...PRE_MODE_STYLES];
 /**
- * The styles removed in November 2026, which older builds still send ("casual" by default). Each
- * now means Improve my grammar, the closest to the cleanup it asked for; rejecting them
- * would turn every cleanup and translation from those builds into a 400. Today's Casual is
- * "chat", so that an old build's "casual" doesn't come back in lowercase.
+ * The styles removed in early November 2026, which builds from before then still send ("casual" by
+ * default). Each means Improve my grammar, the closest to the cleanup it asked for; rejecting
+ * them would turn every cleanup and translation from those builds into a 400. The five styles'
+ * Casual is "chat", so that an old build's "casual" doesn't come back in lowercase.
  */
 const LEGACY_STYLES = ["formal", "casual", "veryCasual", "excited"];
 export const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

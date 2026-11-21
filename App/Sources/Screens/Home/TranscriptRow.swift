@@ -27,6 +27,7 @@ struct TranscriptRow: View {
                     .lineSpacing(2)
                     .foregroundStyle(transcript.displayText.isEmpty ? Theme.second : Theme.ink)
                     .lineLimit(3)
+                    .dictatedTextDirection(transcript.displayText)
                 HStack(spacing: 8) {
                     if stacked { time }
                     Text(Self.meta(seconds: transcript.metrics.audioSeconds, words: transcript.metrics.words))

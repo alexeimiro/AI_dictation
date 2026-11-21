@@ -396,23 +396,6 @@ struct SnippetTests {
                 == "Write to anton@work.example, not anton@home.example.")
     }
 
-    /// Casual restyles the speaker's words, never a snippet's text.
-    @Test func casualLeavesASnippetsTextAlone() {
-        let snippets = [address, signature]
-        let formatter = LocalFormatter(snippets: snippets)
-        func casual(_ said: String) -> String {
-            SnippetPlaceholders.substitute(
-                in: StyleFormatter.apply(.casual, to: formatter.formatMarkingSnippets(said)), snippets: snippets)
-        }
-        #expect(casual("My home address.") == "12 Garden Road. London N1.")
-        #expect(casual("Thanks. Send it to my home address.") == "thanks. send it to 12 Garden Road. London N1.")
-        #expect(casual("See you soon. My signature.") == "see you soon. Best regards,\nAnton")
-        // The model's Casual text ends on a snippet: the full stop that stays is the snippet's own.
-        let written = "send it to \(SnippetPlaceholders.token(for: address))"
-        #expect(SnippetPlaceholders.substitute(in: StyleFormatter.apply(.casual, to: written, written: true), snippets: snippets)
-                == "send it to 12 Garden Road. London N1.")
-    }
-
     /// The model usually returns the placeholder, but not every time (live check, November 2026:
     /// «на мой адрес» came back as words from two styles). The trigger is the cue either way.
     @Test func aTriggerTheModelLeftAsWordsIsStillExpanded() {
@@ -460,7 +443,7 @@ struct SnippetTests {
 }
 
 struct CleanupGateTests {
-    /// Word for word keeps hedges, self-corrections, repeats, numbers and lists as spoken, so none
+    /// Word-to-Word keeps hedges, self-corrections, repeats, numbers and lists as spoken, so none
     /// of those is worth a model call.
     @Test func wordForWordSkipsTheModelForWhatItKeepsAnyway() {
         for text in [
@@ -494,9 +477,9 @@ struct CleanupGateTests {
         }
     }
 
-    /// What the model's styles change doesn't show in the text, so they always ask the model.
+    /// What Rewrite, Email and Funny change doesn't show in the text, so they always ask the model.
     @Test func theModelsStylesAlwaysNeedTheModel() {
-        #expect(CleanupGate.needsModel("Me and him was going to the store.", style: .grammar))
+        #expect(CleanupGate.needsModel("Me and him was going to the store.", style: .rewrite))
         for style in StylePreset.allCases where style.usesModel {
             #expect(CleanupGate.needsModel("Can you send me the report by Friday?", style: style), "\(style)")
             #expect(CleanupGate.needsModel("Can you send me the report by Friday?", style: style, smartFormatting: false),
@@ -511,11 +494,11 @@ struct CleanupGateTests {
         }
     }
 
-    /// Smart formatting off: Word for word goes in as recognized, cues and all; grammar still asks.
+    /// Smart formatting off: Word-to-Word goes in as recognized, cues and all; Rewrite still asks.
     @Test func wordForWordSkipsTheModelWithoutSmartFormatting() {
         #expect(!CleanupGate.needsModel("Send it today comma please.", style: .verbatim, smartFormatting: false))
         #expect(!CleanupGate.needsModel("can you send me the report by friday", style: .verbatim, smartFormatting: false))
-        #expect(CleanupGate.needsModel("Me and him was going.", style: .grammar, smartFormatting: false))
+        #expect(CleanupGate.needsModel("Me and him was going.", style: .rewrite, smartFormatting: false))
     }
 
     @Test func cuesAreWholeWords() {
@@ -524,73 +507,63 @@ struct CleanupGateTests {
     }
 }
 
-struct StyleFormatterTests {
-    @Test func onlyCasualChangesTheText() {
-        for style in StylePreset.allCases where style != .casual {
-            #expect(StyleFormatter.apply(style, to: "Sounds good, see you soon.") == "Sounds good, see you soon.", "\(style)")
-        }
-    }
-
-    @Test func casualLowercasesSentenceStartsButNotIOrNames() {
-        #expect(StyleFormatter.apply(.casual, to: "Sounds good. See you soon.") == "sounds good. see you soon")
-        #expect(StyleFormatter.apply(.casual, to: "I'm on my way. NASA called.") == "I'm on my way. NASA called")
-        #expect(StyleFormatter.apply(.casual, to: "Are we still on for Friday?") == "are we still on for Friday?")
-        #expect(StyleFormatter.apply(.casual, to: "Привет. Я дома.") == "привет. я дома")
-    }
-
-    @Test func casualDropsOnlyASentencesFinalPeriod() {
-        #expect(StyleFormatter.apply(.casual, to: "Email me at john@gmail.com.") == "email me at john@gmail.com")
-        for text in ["are you coming?", "great!", "wait...", "wait…", "see you at 5 p.m.", "купи хлеб, молоко и т.д."] {
-            #expect(StyleFormatter.apply(.casual, to: text) == text, "\(text)")
-        }
-    }
-
-    /// The model already wrote the casing, and knows which capitals are names; only the final
-    /// period is enforced.
-    @Test func theModelsTextKeepsItsCasing() {
-        #expect(StyleFormatter.apply(.casual, to: "Anna said hi.", written: true) == "Anna said hi")
-        #expect(StyleFormatter.apply(.casual, to: "sounds good", written: true) == "sounds good")
-        #expect(StyleFormatter.apply(.professional, to: "Sounds good.", written: true) == "Sounds good.")
-    }
-}
-
 struct StylePresetTests {
-    @Test func wordForWordComesFirstAndIsTheFallback() {
-        #expect(StylePreset.allCases == [.verbatim, .grammar, .professional, .casual, .concise])
-        #expect(StylePreset(stored: "grammar") == .grammar)
-        #expect(StylePreset(stored: "professional") == .professional)
-        #expect(StylePreset(stored: "concise") == .concise)
-        for removed in ["formal", "casual", "veryCasual", "excited", "shouty", ""] {
+    /// The four modes in the order the pickers show them, Word-to-Word first.
+    @Test func theFourModesInOrder() {
+        #expect(StylePreset.allCases == [.verbatim, .rewrite, .email, .funny])
+        #expect(StylePreset.allCases.map(\.rawValue) == ["verbatim", "rewrite", "email", "funny"])
+        #expect(StylePreset.allCases.map(\.title) == ["Word-to-Word", "Rewrite", "Email", "Funny"])
+        for style in StylePreset.allCases {
+            #expect(StylePreset(stored: style.rawValue) == style, "\(style)")
+        }
+    }
+
+    /// A style an older build saved (on this iPhone, in the account, in history) becomes the mode
+    /// closest to it, so nobody's choice is reset without need: Improve my grammar and Concise
+    /// were rewrites, Professional was for email. Casual kept the speaker's words, so it keeps
+    /// them in Word-to-Word rather than gaining jokes and emoji.
+    @Test func olderStylesBecomeTheClosestMode() {
+        #expect(StylePreset(stored: "grammar") == .rewrite)
+        #expect(StylePreset(stored: "concise") == .rewrite)
+        #expect(StylePreset(stored: "professional") == .email)
+        #expect(StylePreset(stored: "chat") == .verbatim)
+        for removed in ["formal", "casual", "veryCasual", "excited", "shouty", "", "Rewrite", "EMAIL"] {
             #expect(StylePreset(stored: removed) == .verbatim, "\(removed)")
         }
     }
 
-    /// Casual is stored as "chat": the removed style "casual" was the default before November
-    /// 2026, and an old profile that still holds it must not turn lowercase.
-    @Test func casualIsStoredUnderANameNoOldBuildWrote() {
-        #expect(StylePreset.casual.rawValue == "chat")
-        #expect(StylePreset(stored: "chat") == .casual)
-        #expect(StylePreset(stored: "casual") == .verbatim)
-    }
-
-    @Test func onlyWordForWordGoesWithoutTheModel() {
+    @Test func onlyWordToWordGoesWithoutTheModel() {
         #expect(StylePreset.allCases.filter { !$0.usesModel } == [.verbatim])
     }
 
-    /// The pill and the keyboard's tiles have room for one short line each.
-    @Test func everyStyleHasItsWords() {
+    /// The pill and the keyboard's tiles have room for one short line each; every mode has a
+    /// symbol and three promises for the Style screen.
+    @Test func everyModeHasItsWords() {
         for style in StylePreset.allCases {
             #expect(!style.title.isEmpty && !style.subtitle.isEmpty, "\(style)")
             #expect(style.shortTitle.count <= 13, "\(style)")
             #expect(style.hint.count <= 18, "\(style)")
+            #expect(!style.symbol.isEmpty, "\(style)")
+            #expect(style.promises.count == 3, "\(style)")
         }
+        #expect(Set(StylePreset.allCases.map(\.symbol)).count == StylePreset.allCases.count)
+    }
+
+    /// The Style screens show a different text in every mode, from the same sentence.
+    @Test func theSampleDiffersInEveryMode() {
+        let written = StylePreset.allCases.map(StyleSample.written)
+        #expect(Set(written).count == StylePreset.allCases.count)
+        #expect(written.allSatisfy { !$0.isEmpty })
+        #expect(StyleSample.written(.email).contains("\n\n"))
     }
 
     /// An IPC file or record written by an older build must not fail to decode over its style.
-    @Test func decodesARemovedStyleAsWordForWord() throws {
-        let decoded = try JSONDecoder().decode([StylePreset].self, from: Data(#"["excited","grammar"]"#.utf8))
-        #expect(decoded == [.verbatim, .grammar])
-        #expect(String(decoding: try JSONEncoder().encode([StylePreset.grammar]), as: UTF8.self) == #"["grammar"]"#)
+    @Test func decodesAnOlderStyleAsTheClosestMode() throws {
+        let decoded = try JSONDecoder().decode(
+            [StylePreset].self, from: Data(#"["excited","grammar","professional","chat","funny"]"#.utf8))
+        #expect(decoded == [.verbatim, .rewrite, .email, .verbatim, .funny])
+        #expect(String(decoding: try JSONEncoder().encode([StylePreset.rewrite, .email]), as: UTF8.self)
+                == #"["rewrite","email"]"#)
 
         let legacy = """
         {"id":"\(UUID().uuidString)","requestId":"\(UUID().uuidString)","kind":"start","createdAt":0,"styleOverride":"casual"}
@@ -599,7 +572,9 @@ struct StylePresetTests {
         #expect(command.styleOverride == .verbatim)
     }
 
-    @Test func settingsReadARemovedStyleAsWordForWord() throws {
+    /// The saved mode survives a relaunch (a new `SharedSettings` on the same defaults); with
+    /// nothing saved it is Word-to-Word, and an older build's saved style reads as its mode.
+    @Test func theSavedModeSurvivesARelaunch() throws {
         let suite = "test.murmur.settings.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -607,8 +582,12 @@ struct StylePresetTests {
         #expect(settings.defaultStyle == .verbatim)
         defaults.set("excited", forKey: "defaultStyle")
         #expect(settings.defaultStyle == .verbatim)
-        settings.defaultStyle = .grammar
-        #expect(SharedSettings(defaults: defaults).defaultStyle == .grammar)
+        defaults.set("professional", forKey: "defaultStyle")
+        #expect(SharedSettings(defaults: defaults).defaultStyle == .email)
+        for style in StylePreset.allCases {
+            settings.defaultStyle = style
+            #expect(SharedSettings(defaults: defaults).defaultStyle == style, "\(style)")
+        }
     }
 }
 
@@ -633,12 +612,117 @@ struct DictationLanguageTests {
         #expect(DictationLanguage.automatic.pickerName == "Auto-detect")
     }
 
-    @Test func cloudLanguagesAreUniqueAndSortedByName() {
-        let codes = DictationLanguage.cloudLanguages.map(\.languageCode)
-        #expect(Set(codes).count == codes.count)
-        #expect(codes.contains("ru") && codes.contains("en") && !codes.contains("und"))
-        let names = DictationLanguage.cloudLanguagesByName.map(\.localizedName)
-        #expect(names == names.sorted { $0.localizedStandardCompare($1) == .orderedAscending })
+    @Test func theListsAreUniqueAndSortedByName() {
+        for list in [DictationLanguage.speechLanguages, DictationLanguage.translationLanguages] {
+            let codes = list.map(\.languageCode)
+            #expect(Set(codes).count == codes.count)
+            #expect(codes.contains("ru") && codes.contains("en") && !codes.contains("und"))
+        }
+        for list in [DictationLanguage.speechLanguagesByName, DictationLanguage.translationLanguagesByName] {
+            let names = list.map(\.localizedName)
+            #expect(names == names.sorted { $0.localizedStandardCompare($1) == .orderedAscending })
+        }
+        #expect(DictationLanguage.speechLanguagesByName.count == DictationLanguage.speechLanguages.count)
+        #expect(DictationLanguage.translationLanguagesByName.count == DictationLanguage.translationLanguages.count)
+    }
+
+    /// Every language that can be spoken can be typed in; the text-only ones can't be spoken.
+    @Test func speechIsASubsetOfTranslation() {
+        #expect(DictationLanguage.speechLanguages.count == 65)
+        #expect(DictationLanguage.translationLanguages.count == 91)
+        #expect(DictationLanguage.speechLanguages.allSatisfy { $0.supportsSpeech && $0.supportsTranslation })
+        #expect(DictationLanguage.textOnlyLanguages.allSatisfy { !$0.supportsSpeech && $0.supportsTranslation })
+        #expect(!DictationLanguage.automatic.supportsSpeech && !DictationLanguage.automatic.supportsTranslation)
+    }
+
+    /// The languages asked for first, each one recognized and translated.
+    @Test func thePriorityLanguagesCanBeSpokenAndTypedIn() {
+        let priority = ["en", "ru", "tr", "id", "es", "fr", "de", "it", "pt", "zh", "ja", "ko", "ar", "hi", "bn",
+                        "ur", "vi", "th", "ms", "tl", "pl", "uk", "nl", "el", "fa", "he", "sv", "ro"]
+        for code in priority {
+            let language = DictationLanguage(tag: code)
+            #expect(language.supportsSpeech, "\(code) can be spoken")
+            #expect(language.supportsTranslation, "\(code) can be typed in")
+        }
+    }
+
+    /// Apple's and older codes for a language count as the one in the lists.
+    @Test func capabilitiesMatchByLanguageAcrossCodes() {
+        #expect(DictationLanguage(tag: "fil-PH").supportsSpeech)
+        #expect(DictationLanguage(tag: "fil-PH").speechEntry?.tag == "tl-PH")
+        #expect(DictationLanguage(tag: "no").supportsSpeech)
+        #expect(DictationLanguage(tag: "pt-PT").speechEntry?.tag == "pt-BR")
+        #expect(DictationLanguage(tag: "yue-HK").supportsSpeech)
+        #expect(DictationLanguage(tag: "am-ET").speechEntry == nil)
+        #expect(DictationLanguage(tag: "am-ET").translationEntry?.tag == "am-ET")
+        #expect(!DictationLanguage(tag: "tlh").supportsTranslation)
+        // Every on-device Apple language can be spoken, so a primary language is never refused.
+        for tag in ["ar-SA", "ca-ES", "cs-CZ", "da-DK", "de-CH", "el-GR", "en-IN", "es-MX", "fi-FI", "fr-CA",
+                    "he-IL", "hi-IN", "hr-HR", "hu-HU", "id-ID", "it-IT", "ja-JP", "ko-KR", "ms-MY", "nb-NO",
+                    "nl-BE", "pl-PL", "pt-PT", "ro-RO", "ru-RU", "sk-SK", "sv-SE", "th-TH", "tr-TR", "uk-UA",
+                    "vi-VN", "yue-CN", "zh-TW"] {
+            #expect(DictationLanguage(tag: tag).supportsSpeech, "\(tag) is an Apple dictation locale")
+        }
+    }
+
+    @Test func filipinoIsCalledFilipino() {
+        let filipino = DictationLanguage(tag: "tl-PH")
+        #expect(filipino.localizedName == "Filipino")
+        #expect(filipino.shortCode == "FIL")
+        #expect(DictationLanguage(tag: "yue-CN").localizedName == "Cantonese")
+    }
+
+    @Test func searchFindsNamesNativeNamesCodesAndOtherNames() {
+        let all = DictationLanguage.translationLanguagesByName
+        func first(_ query: String) -> String? { DictationLanguage.search(query, in: all).first?.languageCode }
+        #expect(first("russ") == "ru")
+        #expect(first("Русский") == "ru")
+        #expect(first("deutsch") == "de")
+        #expect(first("espanol") == "es")
+        #expect(first("日本") == "ja")
+        #expect(first("Farsi") == "fa")
+        #expect(first("mandarin") == "zh")
+        #expect(first("tagalog") == "tl")
+        #expect(first("fil") == "tl")
+        #expect(first("pt") == "pt")
+        #expect(first("melayu") == "ms")
+        // Apple calls it Bangla; English speakers mostly search for Bengali.
+        #expect(first("bengali") == "bn")
+        #expect(first("কাংলা") == nil)
+        #expect(first("বাংলা") == "bn")
+        #expect(first("עברית") == "he")
+        #expect(DictationLanguage.search("  ", in: all) == all)
+        #expect(DictationLanguage.search("klingon", in: all).isEmpty)
+        // A name that starts with the query comes before one that only contains it.
+        let ar = DictationLanguage.search("ar", in: all).map(\.languageCode)
+        #expect(ar.first == "ar")
+        #expect(ar.firstIndex(of: "hy")! < ar.firstIndex(of: "bg")!)
+    }
+
+    @Test func rightToLeftLanguagesAndText() {
+        for tag in ["ar-SA", "he-IL", "fa-IR", "ur-PK", "ps-AF"] {
+            #expect(DictationLanguage(tag: tag).isRightToLeft, "\(tag)")
+        }
+        for tag in ["en-US", "ru-RU", "zh-CN", "hi-IN", "am-ET", "und"] {
+            #expect(!DictationLanguage(tag: tag).isRightToLeft, "\(tag)")
+        }
+        #expect(TextDirection.of("مرحبا، كيف حالك؟") == .rightToLeft)
+        #expect(TextDirection.of("שלום עולם") == .rightToLeft)
+        #expect(TextDirection.of("۱۲۳ سلام") == .rightToLeft)
+        #expect(TextDirection.of("«Привет» 123") == .leftToRight)
+        #expect(TextDirection.of("Murmur مرحبا") == .leftToRight)
+        #expect(TextDirection.of("12:30 — 🎉") == .leftToRight)
+        #expect(TextDirection.of("") == .leftToRight)
+    }
+
+    /// Non-Latin scripts keep every character through a tag round trip and the names.
+    @Test func nonLatinNamesComeFromTheLanguage() {
+        #expect(DictationLanguage(tag: "ja-JP").nativeName == "日本語")
+        #expect(DictationLanguage(tag: "ar-SA").nativeName == "العربية")
+        #expect(DictationLanguage(tag: "hi-IN").nativeName == "हिन्दी")
+        #expect(DictationLanguage(tag: "bn-BD").nativeName == "বাংলা")
+        #expect(DictationLanguage(tag: "am-ET").nativeName == "አማርኛ")
+        #expect(DictationLanguage(normalizing: "zh_CN").tag == "zh-CN")
     }
 }
 
@@ -652,6 +736,21 @@ struct KeyboardLanguageDefaultsTests {
         #expect(KeyboardLanguageDefaults.source(saved: nil, autoDetectApplied: true).isAutomatic)
         #expect(KeyboardLanguageDefaults.source(saved: "ru-RU", autoDetectApplied: true).tag == "ru-RU")
         #expect(KeyboardLanguageDefaults.source(saved: "und", autoDetectApplied: true).isAutomatic)
+        // A language that can only be typed in was never a Speak language: Auto-detect instead.
+        #expect(KeyboardLanguageDefaults.source(saved: "am-ET", autoDetectApplied: true).isAutomatic)
+        #expect(KeyboardLanguageDefaults.source(saved: "tlh", autoDetectApplied: true).isAutomatic)
+        #expect(KeyboardLanguageDefaults.source(saved: "bn-BD", autoDetectApplied: true).tag == "bn-BD")
+    }
+
+    /// A saved target Murmur doesn't type in is replaced like a missing one; a text-only one stays.
+    @Test func aTargetMustBeOneMurmurTypesIn() {
+        let all = DictationLanguage.translationLanguages
+        let amharic = KeyboardLanguageDefaults.target(
+            saved: DictationLanguage(tag: "am-ET"), source: .automatic, preferred: ["en-US"], available: all, recent: [])
+        #expect(amharic.tag == "am-ET")
+        let unknown = KeyboardLanguageDefaults.target(
+            saved: DictationLanguage(tag: "tlh"), source: .automatic, preferred: ["ka-GE"], available: all, recent: [])
+        #expect(unknown.tag == "ka-GE")
     }
 
     @Test func theLettersFollowTheIPhoneUnderAuto() {

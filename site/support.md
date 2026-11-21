@@ -17,7 +17,8 @@ you back to your app. From an app Redmic can't reopen, like Safari, swipe right 
 edge of the screen to go back, as Redmic's Home says; the keyboard is listening when you get there.
 After that the microphone stays ready in the background, shown by the orange
 dot and Redmic's Live Activity, and each tap dictates without leaving your app. Choose how long it
-stays ready in Redmic › Settings › Turn off after.
+stays ready in Redmic › Settings › Turn off after. When you lock your iPhone, the microphone turns
+off after about a minute, to save battery.
 
 ## Why does the keyboard need Full Access?
 
@@ -26,7 +27,7 @@ record or send what you type.
 
 ## Redmic Pro
 
-Redmic is free with 1,000 words a week, after a 14-day trial of Pro (one per iPhone). Redmic Pro has no weekly limit.
+Redmic is free with 1,000 words a week, after a 14-day trial of Pro (one per iPhone). Redmic Pro has no weekly limit. The free words are per account and per iPhone: a second account on the same iPhone shares them.
 
 - **Subscribe:** Menu › Upgrade to Pro.
 - **New iPhone:** sign in, then tap Restore purchase on the same screen.

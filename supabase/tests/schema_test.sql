@@ -1,6 +1,6 @@
 -- pgTAP tests for RLS, quota, the dictation preflight and sign-up helpers. Run with `supabase test db`.
 begin;
-select plan(69);
+select plan(72);
 
 -- Two users (the auth trigger creates their profile, an entitlement on Basic and a referral code;
 -- claim-trial decides the trial, through decide_trial).
@@ -24,9 +24,15 @@ select is((select count(*)::int from public.referrals
            where user_id in ('11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222')),
           2, 'each user gets a referral code');
 
--- Styles: Word for word by default; the four the model writes, and the styles older builds still write.
+-- Styles: Word-to-Word by default; the three other modes, and the styles older builds still write.
 select is((select default_style from public.profiles where id = '11111111-1111-1111-1111-111111111111'),
-          'verbatim', 'new profiles default to Word for word');
+          'verbatim', 'new profiles default to Word-to-Word');
+select lives_ok($$ update public.profiles set default_style = 'rewrite'
+                   where id = '22222222-2222-2222-2222-222222222222' $$, 'Rewrite is a valid style');
+select lives_ok($$ update public.profiles set default_style = 'email'
+                   where id = '22222222-2222-2222-2222-222222222222' $$, 'Email is a valid style');
+select lives_ok($$ update public.profiles set default_style = 'funny'
+                   where id = '22222222-2222-2222-2222-222222222222' $$, 'Funny is a valid style');
 select lives_ok($$ update public.profiles set default_style = 'grammar'
                    where id = '22222222-2222-2222-2222-222222222222' $$, 'Improve my grammar is a valid style');
 select lives_ok($$ update public.profiles set default_style = 'professional'

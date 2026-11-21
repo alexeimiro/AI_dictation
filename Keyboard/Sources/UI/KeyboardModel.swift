@@ -132,19 +132,41 @@ final class KeyboardModel {
 
     var effectiveLanguage: DictationLanguage { languageOverride ?? primaryLanguage }
 
+    /// What the bar's Translate shows and turns on: the Speak language and the "To", kept while off.
+    var translationPair: TranslationPair { TranslationPair(source: effectiveLanguage, target: targetLanguage) }
+
     /// The app runs a session, so the mic dictates without opening it first.
     var isSessionLive: Bool { sessionStatus.isLive }
 
-    var languageChoices: [DictationLanguage] {
-        let preferred = spokenLanguages + [primaryLanguage] + (secondaryLanguage.map { [$0] } ?? [])
-            + recentLanguages + DictationLanguage.cloudLanguagesByName
-        return [DictationLanguage.automatic] + preferred.uniqued(by: \DictationLanguage.languageCode)
+    /// The Speak (From) menu in two sections: Auto-detect and the user's own languages (picked in
+    /// Settings, the primary and secondary, recent ones), then every other language that can be
+    /// spoken, by name. A recent translation target that can only be typed in isn't offered.
+    var languageSections: [[DictationLanguage]] {
+        let suggested = ([DictationLanguage.automatic] + spokenLanguages + [primaryLanguage]
+            + (secondaryLanguage.map { [$0] } ?? []) + recentLanguages)
+            .filter { $0.isAutomatic || $0.supportsSpeech }
+            .uniqued(by: \DictationLanguage.languageCode)
+        let shown = Set(suggested.map(\.languageCode))
+        return [suggested, DictationLanguage.speechLanguagesByName.filter { !shown.contains($0.languageCode) }]
     }
 
-    var targetLanguageChoices: [DictationLanguage] {
-        (recentLanguages + spokenLanguages + [primaryLanguage] + DictationLanguage.cloudLanguagesByName)
-            .filter { !$0.isAutomatic && $0.languageCode != effectiveLanguage.languageCode }
+    /// The Type in (To) menu in two sections: recent targets and the user's languages, then every
+    /// other language Murmur types in, which includes some it can't recognize. Never the Speak
+    /// language itself.
+    var targetLanguageSections: [[DictationLanguage]] {
+        let eligible = { (language: DictationLanguage) in
+            language.supportsTranslation && language.languageCode != self.effectiveLanguage.languageCode
+        }
+        let suggested = (recentLanguages + spokenLanguages + [primaryLanguage])
+            .filter(eligible)
             .uniqued(by: \DictationLanguage.languageCode)
+        let shown = Set(suggested.map(\.languageCode))
+        return [suggested, DictationLanguage.translationLanguagesByName.filter { eligible($0) && !shown.contains($0.languageCode) }]
+    }
+
+    /// Swapping makes the target the Speak language, so it needs a target that can be spoken.
+    var canSwapLanguages: Bool {
+        translationEnabled && !effectiveLanguage.isAutomatic && targetLanguage.supportsSpeech
     }
 
     /// The first line under the talk button while a dictation runs.

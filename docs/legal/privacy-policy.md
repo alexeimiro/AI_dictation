@@ -31,6 +31,12 @@ Redmic collects, why, and the choices you have. Questions: miralex13@gmail.com.
 - **How much you dictate:** the number of words in each dictation, to apply the free plan's weekly
   limit, and what each dictation cost us to serve: how many seconds of audio and how much text the
   AI services handled, and which service did it. Not the words themselves.
+- **Which iPhone a dictation comes from:** the free plan's weekly limit is per iPhone as well as
+  per account, so a second account on the same iPhone doesn't get a second week. To count that,
+  Redmic keeps a random number in your iPhone's keychain and sends it with each dictation. It
+  isn't your phone's serial number or advertising identifier, no other app can read it, we don't
+  use it to track you, and it's gone when the iPhone is erased. On a Mac the number is worked out
+  from the Mac's hardware identifier, scrambled; the identifier itself never leaves the Mac.
 - **Whether your iPhone has had a free trial:** Redmic Pro's free trial, and an invite's free
   month, is one per iPhone. To tell, Redmic asks Apple's DeviceCheck service, through our server,
   whether this iPhone has had one, and marks it when it gets one. Apple keeps that mark for us. It

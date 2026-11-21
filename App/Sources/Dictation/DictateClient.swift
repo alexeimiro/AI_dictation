@@ -48,7 +48,7 @@ enum WarmupResult: Sendable {
 protocol Dictating: AnyObject, Sendable {
     /// Configured, switched on (`translateInOneRequest`), and not answered 404 in this process.
     var isAvailable: Bool { get }
-    /// A Word for word dictation can be transcribed here too: available, and the function hasn't
+    /// A Word-to-Word dictation can be transcribed here too: available, and the function hasn't
     /// refused one in this process (see `transcribe`).
     var transcribesAlone: Bool { get }
     /// When `dictate` last answered, for the warm-up's debounce.
@@ -58,7 +58,7 @@ protocol Dictating: AnyObject, Sendable {
     /// on a 404, and when unavailable.
     func dictate(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
                  keywords: [String], request: ModelRequest) async throws(CloudTranscriptionError) -> DictateReply
-    /// A Word for word dictation's transcript alone: no model writes it, but the function checks
+    /// A Word-to-Word dictation's transcript alone: no model writes it, but the function checks
     /// the token and the limits while the audio uploads, which `transcribe` does one after the
     /// other. Throws `.notDeployed` when the function can't take it, or its checks couldn't run:
     /// the same audio then goes to `transcribe`.
@@ -68,10 +68,10 @@ protocol Dictating: AnyObject, Sendable {
 }
 
 /// Calls the `dictate` Edge Function: the audio of a dictation the model writes (a translation, or
-/// any style but Word for word) goes up once, and the function transcribes and writes it on one worker, instead of `transcribe`
+/// any style but Word-to-Word) goes up once, and the function transcribes and writes it on one worker, instead of `transcribe`
 /// then `cleanup` (two round trips, each checking the token and the limits). A 404 (not deployed, or switched off
 /// with `DICTATE_DISABLED`) turns it off until the app restarts, and dictations go back to those two.
-/// A Word for word dictation goes up the same way and comes back as its transcript alone.
+/// A Word-to-Word dictation goes up the same way and comes back as its transcript alone.
 @MainActor
 final class DictateClient: Dictating {
     /// Where the functions' database is. `dictate` is asked to run there (`x-region`): from another
@@ -112,7 +112,7 @@ final class DictateClient: Dictating {
     private let functions: EdgeFunctionClient?
     private let settings: SharedSettings
     private var deployed = true
-    /// The function answered a Word for word dictation 400: a deployment from before it took one.
+    /// The function answered a Word-to-Word dictation 400: a deployment from before it took one.
     private var refusesPlain = false
     private(set) var lastReplyAt: ContinuousClock.Instant?
     /// URLRequest's timeout counts from the last byte sent or received, so a slow upload doesn't use
@@ -170,7 +170,7 @@ final class DictateClient: Dictating {
     func transcribe(audio: Data, format: EncodedAudio.Format, language: String?, languageHints: [String],
                     keywords: [String], dictationId: UUID) async throws(CloudTranscriptionError) -> CloudTranscript {
         guard let functions, transcribesAlone else { throw .notDeployed }
-        // Word for word by name and no target: the function stops at the transcript.
+        // Word-to-Word by name and no target: the function stops at the transcript.
         let metadata = Metadata(
             dictationId: dictationId, format: format.rawValue, language: language,
             languages: language == nil && !languageHints.isEmpty ? languageHints : nil,
@@ -194,7 +194,7 @@ final class DictateClient: Dictating {
             deployed = false
             throw .notDeployed
         } catch EdgeFunctionError.httpError(code: 400) {
-            // A deployment from before `dictate` took Word for word refuses one for naming no
+            // A deployment from before `dictate` took Word-to-Word refuses one for naming no
             // target. Not asked again until the app restarts.
             refusesPlain = true
             throw .notDeployed
