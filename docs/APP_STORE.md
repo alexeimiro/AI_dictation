@@ -1,7 +1,7 @@
 # Redmic on the App Store: listing, review notes, privacy answers
 
 Texts for App Store Connect, app "Redmic: Voice Keyboard" (Apple ID 6829429992; "Murmur: Voice
-Keyboard" until 1.0.5), version 1.0.5. Character limits are App Store Connect's. Since 1.0.5 the
+Keyboard" until 1.0.5), version 1.0.6. Character limits are App Store Connect's. Since 1.0.5 the
 listing goes in through the API with a script that leaves the subscriptions' review screenshots
 alone; `node scripts/fill_app_store_listing.mjs` would replace them, so it is for a first listing
 only.
@@ -50,6 +50,22 @@ only.
 >
 > Terms of Use: https://simplymurmur.com/terms/
 > Privacy Policy: https://simplymurmur.com/privacy/
+
+**What's New in 1.0.6** (4,000). It repeats 1.0.5's text for anyone updating from Murmur 1.0.4,
+since the two versions came out a day apart:
+> • Rewrite now splits a long dictation into paragraphs by meaning, one idea to a paragraph. A short message stays in one piece.
+>
+> New in 1.0.5:
+> Murmur is now Redmic: a new name and a red logo, the same app and your same account.
+> • Four writing modes: Word-to-Word, Rewrite, Email and Funny. Pick one on the new Style screen or from the keyboard's style button.
+> • Speak 65 languages and type in 91.
+> • Translate on or off in one tap, from the keyboard's bar, which shows the languages it translates between.
+> • Easier on your battery: when you lock your iPhone, the microphone turns off after about a minute.
+> • Dictations upload about half as much data.
+> • On the free plan, accounts on the same iPhone now share its 1,000 words a week.
+
+The App Review notes for 1.0.6 are 1.0.5's, unchanged (3,934 of 4,000 characters, so there is no
+room for a 1.0.6 section; the paragraphs need no steps of their own).
 
 **What's New in 1.0.5** (4,000):
 > Murmur is now Redmic: a new name and a red logo, the same app and your same account.
