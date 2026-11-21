@@ -28,17 +28,20 @@ public enum KeyboardLanguageDefaults {
     }
 
     /// "Type in" for translations, when the user hasn't picked it, picked the source itself, or
-    /// picked a language Murmur no longer types in:
-    /// the iPhone's language ("Auto → Russian" on a Russian iPhone). When that is the source,
-    /// English; when the source is English too, another of the iPhone's languages, a recent one,
-    /// else Spanish.
+    /// picked a language Murmur no longer types in (or one not in `available`): the iPhone's
+    /// language ("Auto → Russian" on a Russian iPhone). When that is the source, English; when the
+    /// source is English too, another of the iPhone's languages, a recent one, else Spanish. A
+    /// recent language Murmur can't type in is passed over like the source.
     public static func target(
         saved: DictationLanguage?, source: DictationLanguage, preferred: [String],
         available: [DictationLanguage], recent: [DictationLanguage]
     ) -> DictationLanguage {
         let sourceCode = source.isAutomatic ? nil : source.languageCode
         func usable(_ language: DictationLanguage?) -> DictationLanguage? {
-            guard let language, language.supportsTranslation, language.languageCode != sourceCode else { return nil }
+            // Matched through the list's own entry, so an alias ("fil" for "tl") counts as listed.
+            let listed = (language?.translationEntry ?? language)?.languageCode
+            guard let language, language.supportsTranslation, language.languageCode != sourceCode,
+                  available.contains(where: { $0.languageCode == listed }) else { return nil }
             return language
         }
         if let saved = usable(saved) { return saved }

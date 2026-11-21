@@ -614,16 +614,16 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         model.recentLanguages = settings.recentTranslationLanguages
             .map(DictationLanguage.init(tag:))
             .filter { !$0.isAutomatic }
-        model.targetLanguage = defaultTarget(
-            saved: settings.translationTargetLanguage.map(DictationLanguage.init(tag:)), source: source)
+        // The pair the bar's Translate shows and uses, on or off (`SharedSettings.translationPair`).
+        model.targetLanguage = settings.translationPair().target
         model.translationEnabled = settings.translationEnabled
         syncTranslationToClient()
     }
 
-    /// The saved target unless it is `source` itself, else the iPhone's language.
-    private func defaultTarget(saved: DictationLanguage? = nil, source: DictationLanguage) -> DictationLanguage {
+    /// The "To" for a new source that is the old "To" itself: the iPhone's language, or another.
+    private func defaultTarget(source: DictationLanguage) -> DictationLanguage {
         KeyboardLanguageDefaults.target(
-            saved: saved, source: source, preferred: Locale.preferredLanguages,
+            saved: nil, source: source, preferred: Locale.preferredLanguages,
             available: DictationLanguage.translationLanguages, recent: model.recentLanguages)
     }
 
@@ -650,11 +650,17 @@ final class KeyboardViewController: UIInputViewController, KeyboardSessionHost {
         syncTranslationToClient()
     }
 
+    /// The bar's Translate button and the menu's switch: on with the pair last used (saved, so a
+    /// restart and the app's shortcuts use it too), off keeping it. Never while a dictation starts
+    /// or runs, which keeps the options it began with: both controls are locked then, and this is
+    /// the last guard against a tap that arrives late.
     private func setTranslationEnabled(_ enabled: Bool) {
+        guard !model.locksSessionOptions else { return }
+        let pair = settings.setTranslationEnabled(enabled)
         model.translationEnabled = enabled
-        settings.translationEnabled = enabled
-        if enabled, model.targetLanguage.languageCode == model.effectiveLanguage.languageCode {
-            selectTargetLanguage(defaultTarget(source: model.effectiveLanguage))
+        if enabled, pair.target != model.targetLanguage {
+            model.targetLanguage = pair.target
+            remember(pair.target)
         }
         syncTranslationToClient()
     }

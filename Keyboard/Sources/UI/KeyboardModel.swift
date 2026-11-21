@@ -132,6 +132,9 @@ final class KeyboardModel {
 
     var effectiveLanguage: DictationLanguage { languageOverride ?? primaryLanguage }
 
+    /// What the bar's Translate shows and turns on: the Speak language and the "To", kept while off.
+    var translationPair: TranslationPair { TranslationPair(source: effectiveLanguage, target: targetLanguage) }
+
     /// The app runs a session, so the mic dictates without opening it first.
     var isSessionLive: Bool { sessionStatus.isLive }
 

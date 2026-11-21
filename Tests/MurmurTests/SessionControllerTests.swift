@@ -621,6 +621,33 @@ struct SessionControllerTests {
         #expect(entry.startPath == nil && entry.tapToStartMs == nil && entry.jump == nil)
     }
 
+    /// Translate turned off in the keyboard's bar: a shortcut's dictation isn't translated,
+    /// though the pair is kept for the next tap, and one turned back on uses that pair.
+    @Test func aShortcutIsNotTranslatedWhileTranslateIsOff() async throws {
+        var shared: SharedSettings?
+        let harness = makeHarness { settings in
+            shared = settings
+            settings.autoDetectDefaultApplied = true
+            settings.translationSourceLanguage = "en-US"
+            settings.translationTargetLanguage = "de-DE"
+            settings.translationEnabled = false
+        }
+        let settings = try #require(shared)
+        #expect(harness.session.beginDictationForKeyboard())
+        let off = try #require(harness.transport.payloads.readPendingStart())
+        #expect(off.translationTargetLanguage == nil && off.languageOverride == "en-US")
+        harness.session.endDictation(commit: true)
+        #expect(await waitUntil { harness.transport.payloads.readResult(off.requestId) != nil })
+        #expect(await waitUntil { harness.session.phase == .ready })
+
+        settings.setTranslationEnabled(true)
+        #expect(harness.session.beginDictationForKeyboard())
+        let on = try #require(harness.transport.payloads.readPendingStart())
+        #expect(on.requestId != off.requestId && on.translationTargetLanguage == "de-DE")
+        harness.session.endDictation(commit: true)
+        #expect(await waitUntil { harness.transport.payloads.readResult(on.requestId) != nil })
+    }
+
     /// The week's free words are used up: the Action Button records nothing, and the keyboard
     /// hears why (its card leads to Pro). Nothing goes into the history.
     @Test func withTheWordsUsedUpAShortcutRecordsNothing() async throws {

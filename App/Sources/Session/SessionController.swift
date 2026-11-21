@@ -828,10 +828,8 @@ final class SessionController {
         guard isLive else { return false }
         let speak = KeyboardLanguageDefaults.source(
             saved: settings.translationSourceLanguage, autoDetectApplied: settings.autoDetectDefaultApplied)
-        let target = settings.translationEnabled ? KeyboardLanguageDefaults.target(
-            saved: settings.translationTargetLanguage.map(DictationLanguage.init(tag:)), source: speak,
-            preferred: Locale.preferredLanguages, available: DictationLanguage.translationLanguages,
-            recent: settings.recentTranslationLanguages.map(DictationLanguage.init(tag:))) : nil
+        // Nil while the keyboard's Translate is off, whatever pair it keeps for the next tap.
+        let target = settings.translationTarget()
         let request = PendingStart(
             requestId: UUID(), documentIdentifier: nil, createdAt: Date(), autoStart: true,
             styleOverride: settings.defaultStyle, languageOverride: speak.tag, translationTargetLanguage: target?.tag)

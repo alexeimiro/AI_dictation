@@ -115,30 +115,45 @@ struct LanguageMenu: View {
     }
 }
 
-/// The toolbar's sign that translation is on, "Auto → RU" ("→ RU" where that doesn't fit): an
-/// outlined chip that opens the menu page.
-struct TranslateChip: View {
+/// The bar's Translate button: one tap turns translation on, the next turns it off, with the pair
+/// it translates with on it, "Auto → RU" ("→ RU", then the glyph alone, where that doesn't fit).
+/// Solid while on, outlined while off, like the menu's translate tile; the pair stays when it is
+/// off. The languages are changed in ☰ (its translate row), which VoiceOver also reaches from here.
+/// Locked, but readable, while a dictation starts or runs: the dictation keeps the options it
+/// began with.
+struct TranslateToggle: View {
     let model: KeyboardModel
     var height: CGFloat = 46
 
     var body: some View {
-        Button { model.actions.showOverlay(.menu) } label: {
+        let on = model.translationEnabled
+        let locked = model.locksSessionOptions
+        let pair = model.translationPair
+        Button { model.actions.setTranslationEnabled(!on) } label: {
             ViewThatFits(in: .horizontal) {
-                chip("\(model.effectiveLanguage.isAutomatic ? "Auto" : model.effectiveLanguage.shortCode) → \(model.targetLanguage.shortCode)")
-                chip("→ \(model.targetLanguage.shortCode)")
+                chip(pair.shortTitle, on: on)
+                chip("→ \(pair.target.shortCode)", on: on)
+                chip(nil, on: on)
             }
         }
         .buttonStyle(.keyboardPress)
-        .accessibilityLabel(model.effectiveLanguage.isAutomatic
-            ? "Translating into \(model.targetLanguage.localizedName)"
-            : "Translating \(model.effectiveLanguage.localizedName) to \(model.targetLanguage.localizedName)")
-        .accessibilityHint("Opens the menu")
+        .disabled(locked)
+        .opacity(locked ? 0.4 : 1)
+        .accessibilityLabel("Translate")
+        .accessibilityValue("\(on ? "On" : "Off"), \(pair.spokenTitle)")
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityAction(named: "Change languages") { model.actions.showOverlay(.menu) }
     }
 
-    private func chip(_ text: String) -> some View {
-        OutlineChip { Text(text) }
-            .frame(height: height)
-            .padding(.horizontal, 2)
-            .contentShape(.rect)
+    private func chip(_ text: String?, on: Bool) -> some View {
+        OutlineChip(filled: on) {
+            HStack(spacing: 5) {
+                Image(systemName: "translate")
+                if let text { Text(text) }
+            }
+        }
+        .frame(height: height)
+        .padding(.horizontal, 2)
+        .contentShape(.rect)
     }
 }

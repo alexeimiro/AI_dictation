@@ -159,7 +159,10 @@ Cyrillic, brands in Latin).
 ## Keyboard
 
 The default is the voice keyboard:
-- a bar with the menu, an outlined chip for translation, a solid pill for the style, and Delete;
+- a bar with the menu, Translate, a solid pill for the style, and Delete. Translate shows its
+  language pair ("RU → EN", "Auto → RU"), solid while on and outlined while off, and one tap
+  turns it on or off. The pair is changed in the menu, kept while Translate is off and across
+  restarts, and a dictation keeps the setting it began with (`SharedSettings.translationPair`);
 - a big ink talk button with a ring around it, which turns red with ✓ and echo rings that follow
   the voice while it listens (nothing else on the keyboard is red). The words of the dictation
   show under it while it listens, when the language's on-device model is on the iPhone. For the
@@ -169,7 +172,7 @@ The default is the voice keyboard:
 
 It is 278 pt tall (272 in landscape). It can't dictate without Allow Full Access, so until that is
 on the keyboard shows Numbers first, where typing works. Settings › Keyboard › Layout also offers
-Numbers first and QWERTY, with the same chip and pill and a listening panel, which shows the
+Numbers first and QWERTY, with the same Translate and pill and a listening panel, which shows the
 words too. The menu button opens the keyboard's own page: translation, Add to dictionary, haptics,
 the ready vibration, start and stop sounds, and Light / Dark / Auto, with ABC and a link to
 Murmur's Settings.
