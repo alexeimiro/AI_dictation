@@ -19,6 +19,8 @@ export interface BenchCase {
   maxWordRatio?: number;
   /** The output has at most this many emoji (0 for the modes that never add one, 2 for Funny). */
   maxEmoji?: number;
+  /** The output has [fewest, most] paragraphs, the blocks between blank lines (Rewrite's layout). */
+  paragraphs?: [number, number];
 }
 
 /** A greeting line, then a blank line: how an Email reply to someone opens. */
@@ -38,6 +40,18 @@ const ru = (word: string) => new RegExp(`(?<![\\p{L}])${word}(?![\\p{L}])`, "iu"
 
 /** The sentence the app's Style screen shows in every style (`StyleView.spoken`). */
 const SCREEN = "um so me and him was thinking maybe we could like meet on friday at 4 if that works for you guys";
+
+/** A voice note on three points (the launch, the website, the budget): Rewrite lays it out in paragraphs. */
+const LONG_NOTE =
+  "so um quick update on the launch the app is ready and the last build passed all the tests so we can submit it to the store on monday " +
+  "and the other thing is the website we still need new screenshots for the home page and anna said she can do them by wednesday " +
+  "oh and about the budget we spent more on ads than we planned so i think we should pause the facebook campaign for a week " +
+  "and then look at the numbers again before we decide anything";
+const LONG_NOTE_RU =
+  "короче по запуску приложение готово последняя сборка прошла все тесты так что в понедельник отправляем его в стор " +
+  "дальше по сайту нам всё ещё нужны новые скриншоты для главной страницы аня сказала что сделает их к среде " +
+  "и ещё по бюджету мы потратили на рекламу больше чем планировали поэтому я думаю надо поставить рекламу в фейсбуке на паузу на неделю " +
+  "а потом ещё раз посмотреть на цифры прежде чем что-то решать";
 
 export const CASES: BenchCase[] = [
   // The Style screen's own sentence: each card's promise.
@@ -459,6 +473,7 @@ export const CASES: BenchCase[] = [
     must: [/\bhe and I were\b/i, /\bFriday at 4\b/],
     mustNot: [/\bum\b/i, /\bme and him\b/i, /\b[ap]\.?m\b/i, /^(?:hi|hello|dear)\b/i, /\bregards\b/i],
     maxEmoji: 0,
+    paragraphs: [1, 1],
   },
   {
     id: "screen.email",
@@ -489,6 +504,7 @@ export const CASES: BenchCase[] = [
     mustNot: [/\bthe the\b/i, /\bwe we\b/i, /\bum\b/i, /Monday[\s\S]*Monday/],
     maxWordRatio: 0.8,
     maxEmoji: 0,
+    paragraphs: [1, 1],
   },
   {
     id: "rewrite.en.casual-stays-casual",
@@ -498,6 +514,7 @@ export const CASES: BenchCase[] = [
     must: [/\bcoffee\b/i, /\b(?:hey|grab)\b/i],
     mustNot: [/\b(?:could you please|would you kindly|dear|regards)\b/i],
     maxEmoji: 0,
+    paragraphs: [1, 1],
   },
   {
     id: "rewrite.ru.structure",
@@ -507,6 +524,38 @@ export const CASES: BenchCase[] = [
       "ну короче мы вчера с петей созвонились и петя сказал что релиз переносим на среду потому что тесты ну не прошли",
     must: [/Пет/, /сред/i, /тест/i, /релиз/i],
     mustNot: [ru("короче"), ru("ну")],
+    maxEmoji: 0,
+    paragraphs: [1, 1],
+  },
+  // Rewrite's layout (November 21, 2026): a long text in paragraphs by meaning, a short one in one.
+  {
+    id: "rewrite.en.long-paragraphs",
+    style: "rewrite",
+    language: "en-US",
+    transcript: LONG_NOTE,
+    must: [/\bMonday\b/, /\bAnna\b/, /\bWednesday\b/, /\bFacebook\b/, /\bweek\b/i],
+    mustNot: [/\bum\b/i, /^(?:hi|hello|dear)\b/i, /\bregards\b/i],
+    maxEmoji: 0,
+    paragraphs: [2, 4],
+  },
+  {
+    id: "rewrite.ru.long-paragraphs",
+    style: "rewrite",
+    language: "ru-RU",
+    transcript: LONG_NOTE_RU,
+    must: [/понедельник/i, /Ан[яиюе]/, /сред/i, /недел/i, /(?:Facebook|[Фф]ейсбук)/],
+    mustNot: [ru("короче")],
+    maxEmoji: 0,
+    paragraphs: [2, 4],
+  },
+  {
+    // Short, but the speaker asked for the break: it stays.
+    id: "rewrite.en.spoken-paragraph",
+    style: "rewrite",
+    language: "en-US",
+    transcript: "hi anna new paragraph the meeting moved to friday so see you then",
+    must: [/\bAnna\b[^\n]*\n/, /\bFriday\b/],
+    mustNot: [/\bnew paragraph\b/i],
     maxEmoji: 0,
   },
   // Email: a greeting and a closing for a message, a name only when the speaker gave it.
@@ -602,6 +651,18 @@ export const CASES: BenchCase[] = [
     must: [/\bPet(?:y|i)?a\b/, /\bWednesday\b/, /\brelease\b/i],
     mustNot: [CYRILLIC],
     maxEmoji: 0,
+    paragraphs: [1, 1],
+  },
+  {
+    id: "translate.rewrite.ru-en.long",
+    style: "rewrite",
+    language: "ru-RU",
+    targetLanguage: "en-US",
+    transcript: LONG_NOTE_RU,
+    must: [/\bMonday\b/, /\bWednesday\b/, /\bAn(?:y|n|j)a\b/, /\bFacebook\b/, /\bweek\b/i],
+    mustNot: [CYRILLIC],
+    maxEmoji: 0,
+    paragraphs: [2, 4],
   },
   {
     id: "translate.email.ru-en",
@@ -632,6 +693,7 @@ export const CASES: BenchCase[] = [
     must: [/клиент/i, /дизайн/i, /следующ/i],
     mustNot: [LATIN_WORD],
     maxEmoji: 0,
+    paragraphs: [1, 1],
   },
   {
     id: "translate.email.en-ru",
@@ -692,5 +754,17 @@ export function check(benchCase: BenchCase, outcome: { status: string; reason?: 
     const [written, spoken] = [wordCount(outcome.text), wordCount(benchCase.transcript)];
     if (written > benchCase.maxWordRatio * spoken) problems.push(`not shorter (${written} of ${spoken} words)`);
   }
+  if (benchCase.paragraphs) {
+    const [fewest, most] = benchCase.paragraphs;
+    const count = paragraphCount(outcome.text);
+    if (count < fewest || count > most) {
+      problems.push(`${count} paragraphs (want ${fewest === most ? fewest : `${fewest}–${most}`})`);
+    }
+  }
   return problems;
+}
+
+/** The blocks of text between blank lines. */
+export function paragraphCount(text: string): number {
+  return text.split(/\n\s*\n/).filter((block) => block.trim() !== "").length;
 }

@@ -117,7 +117,7 @@ struct ModeTile: View {
 }
 
 /// What the picked mode does: the sample sentence as said, what this mode writes from it, and
-/// its three promises. The example changes with the pick.
+/// its promises. The example changes with the pick.
 struct ModePreview: View {
     let style: StylePreset
 

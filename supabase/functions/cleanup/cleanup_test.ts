@@ -33,6 +33,7 @@ import {
   LANGUAGE_RULES,
   MODE_REMINDERS,
   resolveLanguage,
+  REWRITE_PARAGRAPHS,
   TRANSLATION_RULES,
   TRANSLATION_STYLES,
   VERBATIM_RULES,
@@ -1177,6 +1178,8 @@ Deno.test("Rewrite, Email and Funny say what they change and what they must keep
     assertStringIncludes(rewrite, "Remove repetition the speaker did not mean", pack.key);
     assertStringIncludes(rewrite, "Do not make it more formal or more polite", pack.key);
     assertStringIncludes(rewrite, "do not summarize", pack.key);
+    // Rewrite's layout: a long text in paragraphs by meaning, a short one as one block.
+    assertStringIncludes(rewrite, `(7) ${REWRITE_PARAGRAPHS}`, pack.key);
     // Email: greeting and closing only for a message, a name only when the speaker gave it.
     assertStringIncludes(email, "Greet by name only a person the speaker named as the recipient", pack.key);
     assert(/never sign with a name/i.test(email), pack.key);
@@ -1204,6 +1207,18 @@ Deno.test("Rewrite, Email and Funny say what they change and what they must keep
     assertStringIncludes(TRANSLATION_STYLES[style], "this style changes the wording", style);
     assertStringIncludes(LANGUAGE_RULES.en.styles[style], "When translating", style);
     assertStringIncludes(LANGUAGE_RULES.ru.styles[style], "When translating", style);
+  }
+  // The paragraph rule: long means past about four sentences, and a dictated break always stays.
+  assertStringIncludes(REWRITE_PARAGRAPHS, "into paragraphs by meaning");
+  assertStringIncludes(REWRITE_PARAGRAPHS, "past about four sentences");
+  assertStringIncludes(REWRITE_PARAGRAPHS, "a blank line between paragraphs");
+  assertStringIncludes(REWRITE_PARAGRAPHS, "A shorter text stays one paragraph unless the speaker dictated a line or paragraph break");
+  assert(TRANSLATION_STYLES.rewrite.endsWith(` ${REWRITE_PARAGRAPHS}`));
+  // Only Rewrite: the other modes keep the layout they had.
+  for (const pack of [LANGUAGE_RULES.en, LANGUAGE_RULES.ru, genericLanguageRules("tr-TR"), genericLanguageRules(null)]) {
+    for (const style of ["verbatim", "email", "funny"] as const) {
+      assertFalse(pack.styles[style].includes(REWRITE_PARAGRAPHS), `${pack.key} ${style}`);
+    }
   }
 });
 
@@ -1297,6 +1312,24 @@ Deno.test("an Email reply comes back with its layout, a Funny one with its emoji
   assertEquals([answer.status, answer.reason], ["raw", "assistant_reply"]);
 });
 
+Deno.test("a long Rewrite reply keeps its paragraphs, from Claude as from OpenAI", async () => {
+  const transcript =
+    "so um quick update on the launch the app is ready and the last build passed all the tests so we can submit it to the store on monday " +
+    "and the other thing is the website we still need new screenshots for the home page and anna said she can do them by wednesday";
+  const written =
+    "Quick update on the launch: the app is ready, and the last build passed all the tests, so we can submit it to the store on Monday.\n\n" +
+    "The other thing is the website. We still need new screenshots for the home page, and Anna said she can do them by Wednesday.";
+  const rewrite: CleanupRequest = { ...request, style: "rewrite", transcript, snippets: [] };
+  const captured: Captured = {};
+  const outcome = await runCleanup(rewrite, claude(fakeFetch(message(`\n${written}\n`), captured)));
+  assertEquals([outcome.status, outcome.text], ["cleaned", written], "trimmed at the ends, the blank line kept");
+  const system = (captured.body!.system as { text: string }[]).map((block) => block.text);
+  assertStringIncludes(system[2], `Style: ${LANGUAGE_RULES.en.styles.rewrite}`);
+  assertEquals(captured.body!.messages, [{ role: "user", content: buildTranscriptMessage(transcript, "rewrite") }]);
+  const fromOpenAI = await runCleanup(rewrite, options(fakeFetch(reply(written))));
+  assertEquals([fromOpenAI.status, fromOpenAI.text], ["cleaned", written]);
+});
+
 // The mode restated after the transcript (live check, 2026-11-21): only the three modes that reword
 // get it, so older builds' styles send exactly the message they always did.
 Deno.test("Rewrite, Email and Funny restate their mode after the transcript; other styles don't", () => {
@@ -1320,6 +1353,12 @@ Deno.test("Rewrite, Email and Funny restate their mode after the transcript; oth
   }
   assert(MODE_REMINDERS.email!.includes("greeting line"));
   assert(MODE_REMINDERS.funny!.includes("emoji"));
+  // Rewrite's paragraphs are restated too, after the transcript and after a translation's target.
+  assertStringIncludes(MODE_REMINDERS.rewrite!, "past about four sentences, split it into paragraphs by meaning");
+  assertStringIncludes(MODE_REMINDERS.rewrite!, "with a blank line between them");
+  assertStringIncludes(MODE_REMINDERS.rewrite!, "a shorter text stays one paragraph unless the speaker dictated a break");
+  assertFalse(MODE_REMINDERS.email!.includes("paragraphs by meaning"));
+  assertFalse(MODE_REMINDERS.funny!.includes("paragraphs by meaning"));
 });
 
 Deno.test("both providers send the mode's restatement", () => {

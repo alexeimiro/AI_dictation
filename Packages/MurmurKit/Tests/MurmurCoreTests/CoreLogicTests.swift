@@ -537,16 +537,18 @@ struct StylePresetTests {
     }
 
     /// The pill and the keyboard's tiles have room for one short line each; every mode has a
-    /// symbol and three promises for the Style screen.
+    /// symbol and three promises for the Style screen, and Rewrite a fourth: its paragraphs.
     @Test func everyModeHasItsWords() {
         for style in StylePreset.allCases {
             #expect(!style.title.isEmpty && !style.subtitle.isEmpty, "\(style)")
             #expect(style.shortTitle.count <= 13, "\(style)")
             #expect(style.hint.count <= 18, "\(style)")
             #expect(!style.symbol.isEmpty, "\(style)")
-            #expect(style.promises.count == 3, "\(style)")
+            #expect(style.promises.count == (style == .rewrite ? 4 : 3), "\(style)")
         }
         #expect(Set(StylePreset.allCases.map(\.symbol)).count == StylePreset.allCases.count)
+        #expect(StylePreset.rewrite.promises.contains("Splits long text into paragraphs by meaning"))
+        #expect(StylePreset.rewrite.hint == "Smooth and correct")
     }
 
     /// The Style screens show a different text in every mode, from the same sentence.

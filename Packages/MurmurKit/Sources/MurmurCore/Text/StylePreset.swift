@@ -78,7 +78,7 @@ public enum StylePreset: String, Sendable, CaseIterable, Identifiable {
         }
     }
 
-    /// What the mode does, in three short points for the Style screen.
+    /// What the mode does, in short points for the Style screen: three, and four for Rewrite.
     public var promises: [String] {
         switch self {
         case .verbatim:
@@ -88,6 +88,7 @@ public enum StylePreset: String, Sendable, CaseIterable, Identifiable {
         case .rewrite:
             ["Fixes grammar and sentence structure",
              "Cuts repetition so it reads naturally",
+             "Splits long text into paragraphs by meaning",
              "Keeps your meaning and facts, adds nothing"]
         case .email:
             ["Polite, professional and well organized",
