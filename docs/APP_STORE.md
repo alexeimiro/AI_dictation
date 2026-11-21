@@ -100,7 +100,7 @@ sips -z 2796 1290 build/app-store-screenshots/6-paywall.png --out build/app-stor
 > The first account on an iPhone gets a 14-day trial of Pro without payment details. Murmur asks Apple's DeviceCheck, through its server, whether the iPhone has had one, so a later account on the same iPhone starts on the free plan (1,000 words a week); if this device already had a Murmur trial, that is why. Either way the subscriptions can be bought. "Upgrade to Pro" in the menu or Settings shows the two auto-renewing subscriptions, Murmur Pro Monthly and Murmur Pro Annual, in the group "Murmur Pro". Restore purchase is on the same screen.
 >
 > AI
-> Recordings are transcribed by OpenAI's API, and the transcript is tidied or translated by Anthropic's Claude API, both through Murmur's server. Before anything is recorded, the page "Before Murmur listens" names both services, says what each receives, and offers Allow and Not now (guideline 5.1.2(i)). In setup it comes after the system's microphone question, on the first exercise. Without Allow, Murmur doesn't turn the microphone on, so nothing is recorded or sent. The same permission is a switch in Settings › Data and privacy ("Write with AI services"). Neither service trains its models on the data. The user's words are typed into their own text field and aren't shared with other users.
+> Recordings are transcribed by OpenAI's API, and the transcript is tidied or translated by Anthropic's Claude API, both through Redmic's server. Before anything is recorded, the page "Before Redmic listens" says that the data goes to two third-party AI services and what each receives, links the privacy policy that names them, and offers Allow and Not now (guideline 5.1.2(i)). In setup it comes after the system's microphone question, on the first exercise. Without Allow, Redmic doesn't turn the microphone on, so nothing is recorded or sent. The same permission is a switch in Settings › Data and privacy ("Write with AI services"). Neither service trains its models on the data. The user's words are typed into their own text field and aren't shared with other users.
 >
 > ACCOUNT DELETION
 > Open the menu, tap the account's row at the bottom, then Delete account. It deletes the account and its data on the server and revokes Sign in with Apple. For 30 days the server keeps a hashed fingerprint of the sign-in with that week's word count and the trial and invite state, so that deleting and signing up again can't reset the free plan (the privacy policy says so); an account made again in that time carries on where the deleted one left off.
@@ -126,7 +126,7 @@ These match `App/Resources/PrivacyInfo.xcprivacy`. Murmur doesn't track, show ad
 
 For every type: "No" to tracking. For each "Used for", tick only the purposes listed. Transcripts' history, recordings kept for playback and keystrokes aren't collected: they stay on the device.
 
-Third-party AI (guideline 5.1.2(i)): the app asks for permission before a recording goes to OpenAI and its text to Anthropic ("Before Murmur listens"), and the privacy policy names both.
+Third-party AI (guideline 5.1.2(i)): the app asks for permission before a recording goes to OpenAI and its text to Anthropic ("Before Redmic listens"). The page says "third-party AI services" without the names; the privacy policy, linked on the page, names both.
 
 ## Age rating
 

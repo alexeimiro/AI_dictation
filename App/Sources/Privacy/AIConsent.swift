@@ -59,7 +59,8 @@ final class AIConsent {
 }
 
 /// The question's words. They are the consent's wording: a change in what they say needs a new
-/// `AIConsent.currentVersion`.
+/// `AIConsent.currentVersion`. The page doesn't name the services (the privacy policy does);
+/// taking the names off left the services and what each gets unchanged, so it kept version 1.
 enum AIConsentCopy {
     struct Point: Identifiable {
         let symbol: String
@@ -69,23 +70,23 @@ enum AIConsentCopy {
     }
 
     static let title = "Before Redmic listens"
-    static let line = "Redmic writes what you say with two AI services. Here’s what each one gets."
+    static let line = "Redmic writes what you say with two third-party AI services. Here’s what each one gets."
     static let points = [
-        Point(symbol: "waveform", title: "OpenAI gets your recording",
+        Point(symbol: "waveform", title: "An AI service gets your recording",
               detail: "It turns what you said into text."),
-        Point(symbol: "text.alignleft", title: "Anthropic gets the text",
-              detail: "When it needs tidying or translating, Claude rewrites it."),
+        Point(symbol: "text.alignleft", title: "A second AI service gets the text",
+              detail: "When it needs tidying or translating, it rewrites it."),
         Point(symbol: "hand.raised", title: "Only to write your text",
               detail: "Neither service trains its models on your recordings or text, and Redmic’s servers don’t keep them."),
     ]
     static let allow = "Allow"
     static let notNow = "Not now"
-    static let footnote = "You can change this in Settings › Data and privacy."
+    static let footnote = "You can change this in Settings › Data and privacy. The Privacy Policy names both services."
     static let privacy = "Privacy Policy"
 
     /// Settings' switch for the same permission.
     static let settingTitle = "Write with AI services"
-    static let settingDetail = "Send your recordings to OpenAI and their text to Anthropic, which write what you say. Redmic can’t dictate without them."
+    static let settingDetail = "Send your recordings and their text to the third-party AI services that write what you say. Redmic can’t dictate without them."
 }
 
 /// The question, in a window of its own above whatever is on screen: a sheet, the paywall,

@@ -20,15 +20,15 @@ enum MacConsent {
         let alert = NSAlert()
         alert.messageText = "Before Redmic listens"
         alert.informativeText = """
-            Redmic writes what you say with two AI services. Here’s what each one gets.
+            Redmic writes what you say with two third-party AI services. Here’s what each one gets.
 
-            OpenAI gets your recording. It turns what you said into text.
+            An AI service gets your recording. It turns what you said into text.
 
-            Anthropic gets the text. When it needs tidying or translating, Claude rewrites it.
+            A second AI service gets the text. When it needs tidying or translating, it rewrites it.
 
             Only to write your text. Neither service trains its models on your recordings or text, and Redmic’s servers don’t keep them.
 
-            You can change this in Settings › Data and privacy.
+            You can change this in Settings › Data and privacy. The Privacy Policy names both services.
             """
         alert.addButton(withTitle: "Allow")
         alert.addButton(withTitle: "Not now")

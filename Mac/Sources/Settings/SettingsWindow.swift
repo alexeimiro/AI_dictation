@@ -512,7 +512,7 @@ struct PrivacySettings: View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsSection("AI") {
                 SettingsRow(title: "Write with AI services",
-                            detail: "Send your recordings to OpenAI and their text to Anthropic, which write what you say. Redmic can’t dictate without them.",
+                            detail: "Send your recordings and their text to the third-party AI services that write what you say. Redmic can’t dictate without them.",
                             first: true) {
                     Toggle("", isOn: Binding(get: { consent }, set: { on in
                         consent = on
